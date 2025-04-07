@@ -1,0 +1,355 @@
+.settings-page {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--primary-bg);
+}
+
+.settings-content {
+  flex: 1;
+  margin-left: 240px;
+  padding: 2rem;
+  color: var(--text-primary);
+  position: relative;
+}
+
+.settings-header {
+  margin-bottom: 1.5rem;
+}
+
+.settings-header h1 {
+  font-size: 1.8rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.settings-header p {
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.save-message {
+  position: absolute;
+  top: 1rem;
+  right: 2rem;
+  background-color: rgba(25, 135, 84, 0.2);
+  color: #2ecc71;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.settings-sidebar {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.tab-button {
+  padding: 0.75rem 1rem;
+  background-color: var(--secondary-bg);
+  border: none;
+  border-radius: 8px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 150px;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.tab-button::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 2px;
+  background-color: var(--accent-color);
+  transition: all 0.3s ease;
+  transform: translateX(-50%);
+}
+
+.tab-button:hover::after {
+  width: 30%;
+}
+
+.tab-button.active::after {
+  width: 70%;
+}
+
+.tab-button.active {
+  background-color: rgba(54, 153, 255, 0.1);
+  color: var(--accent-color);
+  font-weight: 500;
+}
+
+.settings-main {
+  flex: 1;
+  background-color: var(--secondary-bg);
+  border-radius: 10px;
+  padding: 2rem;
+  position: relative;
+  overflow: visible;
+  width: 100%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  min-height: 500px;
+}
+
+.settings-group {
+  position: relative;
+  width: 100%;
+  padding: 0;
+  min-height: 400px;
+}
+
+.settings-group h2 {
+  font-size: 1.2rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  width: 100%;
+  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.setting-item:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+  transform: translateY(-2px);
+}
+
+.setting-info {
+  flex: 3;
+  padding-right: 2rem;
+}
+
+.setting-info h3 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.setting-info p {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.setting-control {
+  min-width: 150px;
+  flex: 1;
+  max-width: 280px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Toggle switch styles */
+.toggle-switch {
+  width: 50px;
+  height: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.toggle-track {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  transition: all 0.3s ease;
+}
+
+.toggle-track.active {
+  background-color: rgba(54, 153, 255, 0.5);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  background-color: var(--text-secondary);
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-track.active .toggle-thumb {
+  left: calc(100% - 20px);
+  background-color: var(--accent-color);
+}
+
+/* Dropdown styles */
+.setting-dropdown {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.setting-dropdown:focus {
+  box-shadow: 0 0 0 2px rgba(54, 153, 255, 0.3);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Input styles */
+.setting-input {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.setting-input:focus {
+  box-shadow: 0 0 0 2px rgba(54, 153, 255, 0.3);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.button {
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.5s, height 0.5s;
+}
+
+.button:active::before {
+  width: 300px;
+  height: 300px;
+  opacity: 0;
+}
+
+.button.reset {
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.button.reset:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.button.save {
+  background-color: var(--accent-color);
+  color: white;
+  position: relative;
+}
+
+.button.save.unsaved {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(54, 153, 255, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(54, 153, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(54, 153, 255, 0);
+  }
+}
+
+/* Settings items container */
+.settings-items {
+  margin-bottom: 1rem;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .settings-content {
+    margin-left: 0;
+    padding: 1rem;
+  }
+  
+  .settings-main {
+    padding: 1.5rem;
+  }
+  
+  .setting-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .setting-info {
+    padding-right: 0;
+    width: 100%;
+  }
+  
+  .setting-control {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+  
+  .save-message {
+    top: 0.5rem;
+    right: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+  }
+} 

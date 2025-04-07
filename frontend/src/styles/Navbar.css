@@ -1,0 +1,141 @@
+.navbar {
+  width: 240px;
+  height: 100vh;
+  background-color: #1a1f37;
+  padding: 1.5rem;
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.navbar-logo {
+  margin-bottom: 2.5rem;
+  padding: 0.5rem;
+}
+
+.logo {
+  width: 120px;
+  height: auto;
+}
+
+.nav-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  color: #8a8d9f;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  text-decoration: none;
+}
+
+.nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-item.active {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-icon {
+  margin-right: 1rem;
+  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.nav-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* Logout section */
+.logout-container {
+  margin-top: auto;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.logout-button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background-color: rgba(220, 53, 69, 0.1);
+  border: none;
+  border-radius: 8px;
+  color: #ff6b6b;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.logout-button:hover {
+  background-color: rgba(220, 53, 69, 0.2);
+}
+
+.logout-icon {
+  margin-right: 1rem;
+  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.logout-text {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* Animation classes */
+.nav-item-enter {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.nav-item-enter-active {
+  opacity: 1;
+  transform: translateX(0);
+  transition: all 300ms ease;
+}
+
+.nav-item-exit {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.nav-item-exit-active {
+  opacity: 0;
+  transform: translateX(-20px);
+  transition: all 300ms ease;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .navbar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .navbar.open {
+    transform: translateX(0);
+  }
+} 

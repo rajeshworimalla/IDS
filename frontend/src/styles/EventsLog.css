@@ -1,0 +1,264 @@
+.events-log-page {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--primary-bg);
+}
+
+.events-log-content {
+  flex: 1;
+  margin-left: 240px;
+  padding: 1rem;
+  color: var(--text-primary);
+}
+
+.events-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.filter-container {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.filter-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filter-btn {
+  background-color: var(--secondary-bg);
+  color: var(--text-secondary);
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.filter-btn.active {
+  background-color: rgba(54, 153, 255, 0.2);
+  color: var(--accent-color);
+}
+
+.date-filters {
+  display: flex;
+  gap: 1rem;
+}
+
+.date-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.date-field label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.date-field input {
+  background-color: var(--secondary-bg);
+  border: none;
+  color: var(--text-primary);
+  padding: 0.5rem;
+  border-radius: 4px;
+  width: 100px;
+  font-size: 0.85rem;
+}
+
+.search-filter input {
+  background-color: var(--secondary-bg);
+  border: none;
+  color: var(--text-primary);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  width: 200px;
+  font-size: 0.85rem;
+}
+
+.filter-action-btn {
+  background-color: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.table-container {
+  background-color: var(--secondary-bg);
+  border-radius: 8px;
+  overflow: auto;
+  margin-bottom: 1rem;
+  max-height: calc(100vh - 200px);
+}
+
+.events-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.events-table thead {
+  position: sticky;
+  top: 0;
+  background-color: var(--secondary-bg);
+  z-index: 1;
+}
+
+.events-table th,
+.events-table td {
+  padding: 0.75rem;
+  text-align: left;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.events-table th {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.events-table td {
+  color: var(--text-primary);
+}
+
+.events-table tr:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.events-table tr.selected {
+  background-color: rgba(54, 153, 255, 0.1);
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-indicator.error {
+  background-color: #ff4d4f;
+}
+
+.status-indicator.warning {
+  background-color: #faad14;
+}
+
+.status-indicator.success {
+  background-color: #52c41a;
+}
+
+.description-cell {
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pagination-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.records-info {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.pagination-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pagination-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: transparent;
+  color: var(--text-secondary);
+}
+
+.pagination-btn.primary {
+  background-color: var(--accent-color);
+  color: white;
+  border: none;
+}
+
+/* Custom checkbox styling */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: transparent;
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:checked {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "✓";
+  font-size: 12px;
+  color: white;
+  position: absolute;
+  top: 0;
+  left: 3px;
+}
+
+/* Responsive design */
+@media (max-width: 1024px) {
+  .filter-container {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .events-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .filter-action-btn {
+    align-self: flex-end;
+  }
+}
+
+@media (max-width: 768px) {
+  .events-log-content {
+    margin-left: 0;
+    padding: 0.75rem;
+  }
+  
+  .search-filter input {
+    width: 100%;
+  }
+  
+  .date-filters {
+    flex-direction: column;
+  }
+  
+  .pagination-controls {
+    flex-direction: column;
+    gap: 1rem;
+  }
+} 
