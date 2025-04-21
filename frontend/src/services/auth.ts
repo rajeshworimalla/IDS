@@ -1,42 +1,76 @@
 import api from './api';
 import { API_ENDPOINTS } from '../config/api';
 
-interface LoginCredentials {
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'user';
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
+}
+
+export interface LoginCredentials {
   email: string;
   password: string;
 }
 
-interface RegisterData extends LoginCredentials {
+export interface RegisterData extends LoginCredentials {
   name: string;
 }
 
-export const authService = {
-  async login(credentials: LoginCredentials) {
-    const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, credentials);
+class AuthService {
+  async login(credentials: LoginCredentials): Promise<AuthResponse> {
+    const response = await api.post<AuthResponse>(API_ENDPOINTS.AUTH.LOGIN, credentials);
     if (response.data.token) {
       localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
     }
     return response.data;
-  },
+  }
 
-  async register(data: RegisterData) {
-    const response = await api.post(API_ENDPOINTS.AUTH.REGISTER, data);
+  async register(data: RegisterData): Promise<AuthResponse> {
+    const response = await api.post<AuthResponse>(API_ENDPOINTS.AUTH.REGISTER, data);
+    if (response.data.token) {
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+    }
     return response.data;
-  },
+  }
 
-  async logout() {
+  async logout(): Promise<void> {
     try {
       await api.post(API_ENDPOINTS.AUTH.LOGOUT);
     } finally {
-      localStorage.removeItem('token');
+      this.clearAuth();
     }
-  },
+  }
 
-  isAuthenticated() {
+  async getCurrentUser(): Promise<User> {
+    const response = await api.get<User>(API_ENDPOINTS.AUTH.ME);
+    return response.data;
+  }
+
+  isAuthenticated(): boolean {
     return !!localStorage.getItem('token');
-  },
+  }
 
-  getToken() {
+  getToken(): string | null {
     return localStorage.getItem('token');
-  },
-}; 
+  }
+
+  getUser(): User | null {
+    const userStr = localStorage.getItem('user');
+    return userStr ? JSON.parse(userStr) : null;
+  }
+
+  clearAuth(): void {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  }
+}
+
+export const authService = new AuthService(); 
