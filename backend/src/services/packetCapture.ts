@@ -1,6 +1,7 @@
 import { Cap } from 'cap';
 import { Packet as PacketModel, IPacket } from '../models/Packet';
 import { io } from '../socket';
+import axios from 'axios';
 
 // Track packet frequencies for status determination
 const packetFrequencies: { [key: string]: { count: number; timestamp: number } } = {};
@@ -10,11 +11,13 @@ export class PacketCaptureService {
   private isCapturing: boolean = false;
   private linkType: string;
   private buffer: Buffer;
+  private predictionServiceUrl: string;
 
   constructor() {
     this.cap = new Cap();
     this.linkType = 'ETHERNET';
     this.buffer = Buffer.alloc(65535);
+    this.predictionServiceUrl = 'http://127.0.0.1:5002/predict';
     
     // List all available interfaces
     const interfaces = Cap.deviceList();
@@ -75,23 +78,42 @@ export class PacketCaptureService {
       // Skip packets that are too small to contain IP headers
       if (raw.length < 34) return;
 
-      const packetData: IPacket = {
+      const packetData = {
         date: new Date(),
         start_ip: this.getSourceIP(raw),
         end_ip: this.getDestinationIP(raw),
         protocol: this.getProtocol(raw),
         frequency: this.updateFrequency(this.getSourceIP(raw)),
-        status: 'normal',
+        status: this.determineStatus({
+          protocol: this.getProtocol(raw),
+          frequency: this.updateFrequency(this.getSourceIP(raw))
+        }),
         description: this.generateDescription(raw),
         start_bytes: raw.length,
-        end_bytes: 0
+        end_bytes: 0,
+        is_malicious: false,
+        attack_type: 'normal',
+        confidence: 0
       };
 
-      // Determine status based on protocol and frequency
-      packetData.status = this.determineStatus(packetData);
-
-      // Save to MongoDB
+      // Save to MongoDB using the model
       const savedPacket = await PacketModel.create(packetData);
+
+      try {
+        // Send to prediction service
+        const response = await axios.post(this.predictionServiceUrl, [savedPacket]);
+        const predictions = response.data.predictions[0];
+
+        // Update packet with predictions
+        savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
+        savedPacket.attack_type = predictions.attack_type;
+        savedPacket.confidence = predictions.confidence.binary;
+
+        // Update in MongoDB
+        await savedPacket.save();
+      } catch (err) {
+        console.error('Error getting predictions:', err);
+      }
       
       // Broadcast to connected clients
       io.emit('new-packet', savedPacket);
@@ -137,14 +159,14 @@ export class PacketCaptureService {
     return packetFrequencies[key].count;
   }
 
-  private determineStatus(packet: IPacket): 'critical' | 'medium' | 'normal' {
+  private determineStatus(packet: { protocol: string; frequency: number }): 'critical' | 'medium' | 'normal' {
     // Critical conditions
-    if (packet.protocol === 'TCP' && packet.frequency > 10) return 'critical';
-    if (packet.protocol === 'UDP' && packet.frequency > 20) return 'critical';
+    if (packet.protocol === 'TCP' && packet.frequency > 20) return 'critical';
+    if (packet.protocol === 'UDP' && packet.frequency > 40) return 'critical';
     
     // Medium conditions
-    if (packet.protocol === 'TCP' && packet.frequency > 5) return 'medium';
-    if (packet.protocol === 'UDP' && packet.frequency > 10) return 'medium';
+    if (packet.protocol === 'TCP' && packet.frequency > 10) return 'medium';
+    if (packet.protocol === 'UDP' && packet.frequency > 20) return 'medium';
     
     // Normal by default
     return 'normal';

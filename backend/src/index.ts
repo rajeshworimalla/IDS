@@ -1,14 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
 import httpServer from './socket';
 import { PacketCaptureService } from './services/packetCapture';
-
-// Load environment variables
-dotenv.config();
+import { config } from './config/env';
 
 const app = express();
 
@@ -29,12 +26,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/packets', packetRoutes);
 
 // Database connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ids';
-
-mongoose.connect(MONGODB_URI)
+mongoose.connect(config.MONGODB_URI)
   .then(() => {
     console.log('Connected to MongoDB');
-    console.log('Database URI:', MONGODB_URI);
+    console.log('Database URI:', config.MONGODB_URI);
     
     // Verify the database exists
     const db = mongoose.connection.db;
@@ -47,7 +42,7 @@ mongoose.connect(MONGODB_URI)
       });
 
     // Start packet capture
-    const packetCapture = new PacketCaptureService(); // Will use the first available interface
+    const packetCapture = new PacketCaptureService();
     packetCapture.startCapture();
     console.log('Real packet capture started');
   })
@@ -66,7 +61,6 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+httpServer.listen(config.PORT, () => {
+  console.log(`Server running on port ${config.PORT}`);
 }); 

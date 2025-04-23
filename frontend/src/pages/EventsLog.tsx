@@ -22,47 +22,107 @@ const EventsLog: FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [packets, setPackets] = useState<Packet[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    from: '10.03.2024',
+    to: '20.03.2024'
+  });
   
   // Filter options
   const filterOptions = [
-    { id: 'all', label: 'Alle', active: true },
-    { id: 'open', label: 'Geöffnet', active: false },
-    { id: 'closed', label: 'Geschlossen', active: false },
+    { id: 'all', label: 'All', active: true },
+    { id: 'open', label: 'Open', active: false },
+    { id: 'closed', label: 'Closed', active: false },
   ];
 
+  // Fetch packets on component mount
   useEffect(() => {
-    // Initialize socket connection
+    const fetchPackets = async () => {
+      try {
+        console.log('Fetching packets from backend...');
+        const response = await fetch('http://localhost:5000/api/packets/all');
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`Received ${data.length} packets from backend`);
+          setPackets(data);
+        } else {
+          console.error('Failed to fetch packets:', await response.text());
+        }
+      } catch (error) {
+        console.error('Error fetching packets:', error);
+      }
+    };
+
+    fetchPackets();
+  }, []);
+
+  // Initialize socket connection
+  useEffect(() => {
     const newSocket = io('http://localhost:5000');
     setSocket(newSocket);
 
-    // Load initial packets
-    fetchPackets();
+    // Listen for new packets
+    newSocket.on('new-packet', (packet: Packet) => {
+      if (isScanning) {
+        setPackets(prev => [packet, ...prev]);
+      }
+    });
 
     return () => {
       newSocket.disconnect();
     };
-  }, []);
+  }, [isScanning]);
 
-  useEffect(() => {
-    if (!socket) return;
-
-    // Listen for new packets
-    socket.on('new-packet', (packet: Packet) => {
-      setPackets(prev => [packet, ...prev].slice(0, 100));
-    });
-
-    return () => {
-      socket.off('new-packet');
-    };
-  }, [socket]);
-
-  const fetchPackets = async () => {
+  const handleReset = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/packets');
+      console.log('Sending reset request...');
+      const response = await fetch('http://localhost:5000/api/packets/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Reset successful:', result);
+        setPackets([]);
+        setShowResetConfirm(false);
+      } else {
+        const error = await response.text();
+        console.error('Failed to reset packets:', error);
+      }
+    } catch (error) {
+      console.error('Error resetting packets:', error);
+    }
+  };
+
+  const handleDateFilter = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`);
       const data = await response.json();
       setPackets(data);
     } catch (error) {
-      console.error('Error fetching packets:', error);
+      console.error('Error filtering packets:', error);
+    }
+  };
+
+  const handleSearch = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/packets/search?q=${searchTerm}`);
+      const data = await response.json();
+      setPackets(data);
+    } catch (error) {
+      console.error('Error searching packets:', error);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (e.currentTarget.id === 'search-input') {
+        handleSearch();
+      }
     }
   };
 
@@ -91,6 +151,25 @@ const EventsLog: FC = () => {
     }
   };
 
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'critical': return 'Critical Threat';
+      case 'medium': return 'Medium Threat';
+      case 'normal': return 'Normal Traffic';
+      default: return 'Unknown';
+    }
+  };
+
+  const handleStartScanning = () => {
+    setIsScanning(true);
+    socket?.emit('start-scanning');
+  };
+
+  const handleStopScanning = () => {
+    setIsScanning(false);
+    socket?.emit('stop-scanning');
+  };
+
   return (
     <div className="events-log-page">
       <Navbar />
@@ -117,21 +196,33 @@ const EventsLog: FC = () => {
             
             <div className="date-filters">
               <div className="date-field">
-                <label>Von</label>
-                <input type="text" defaultValue="10.03.2024" />
+                <label>From</label>
+                <input 
+                  type="text" 
+                  value={dateRange.from}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+                  onKeyPress={(e) => e.key === 'Enter' && handleDateFilter()}
+                />
               </div>
               <div className="date-field">
-                <label>Bis</label>
-                <input type="text" defaultValue="20.03.2024" />
+                <label>To</label>
+                <input 
+                  type="text" 
+                  value={dateRange.to}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+                  onKeyPress={(e) => e.key === 'Enter' && handleDateFilter()}
+                />
               </div>
             </div>
             
             <div className="search-filter">
               <input
                 type="text" 
-                placeholder="0.0.0.0/0 Suche"
+                id="search-input"
+                placeholder="0.0.0.0/0 Search"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={handleKeyPress}
               />
             </div>
           </div>
@@ -140,6 +231,7 @@ const EventsLog: FC = () => {
             className="filter-action-btn"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
+            onClick={handleDateFilter}
           >
             Filter
           </motion.button>
@@ -162,13 +254,13 @@ const EventsLog: FC = () => {
                   />
                 </th>
                 <th>Status</th>
-                <th>Datum</th>
-                <th>Ende</th>
+                <th>Date</th>
+                <th>End</th>
                 <th>Start IP</th>
                 <th>End IP</th>
-                <th>Protokoll</th>
-                <th>Beschreibung</th>
-                <th>Frequenz</th>
+                <th>Protocol</th>
+                <th>Description</th>
+                <th>Frequency</th>
                 <th>Start Bytes</th>
                 <th>End Bytes</th>
               </tr>
@@ -190,7 +282,10 @@ const EventsLog: FC = () => {
                     />
                   </td>
                   <td>
-                    <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
+                    <div className="status-container" title={getStatusText(packet.status)}>
+                      <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
+                      <span className="status-text">{packet.status}</span>
+                    </div>
                   </td>
                   <td>{new Date(packet.date).toLocaleDateString()}</td>
                   <td>{new Date(packet.date).toLocaleDateString()}</td>
@@ -208,12 +303,69 @@ const EventsLog: FC = () => {
         </div>
         
         <div className="pagination-controls">
-          <div className="records-info">Anzeige 1-10 von {packets.length}</div>
+          <div className="records-info">Showing 1-10 of {packets.length}</div>
           <div className="pagination-buttons">
-            <button className="pagination-btn">Zurücksetzen</button>
-            <button className="pagination-btn primary">Übernehmen</button>
+            <motion.button
+              className="pagination-btn"
+              onClick={() => setShowResetConfirm(true)}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Reset
+            </motion.button>
+            {!isScanning ? (
+              <motion.button
+                className="pagination-btn primary"
+                onClick={handleStartScanning}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Start Scanning
+              </motion.button>
+            ) : (
+              <motion.button
+                className="pagination-btn danger"
+                onClick={handleStopScanning}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Stop Scanning
+              </motion.button>
+            )}
           </div>
         </div>
+
+        {/* Reset Confirmation Dialog */}
+        {showResetConfirm && (
+          <motion.div 
+            className="confirmation-dialog"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="dialog-content">
+              <h3>Confirm Reset</h3>
+              <p>Are you sure you want to clear all packets? This action cannot be undone.</p>
+              <div className="dialog-buttons">
+                <motion.button
+                  className="dialog-btn cancel"
+                  onClick={() => setShowResetConfirm(false)}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Cancel
+                </motion.button>
+                <motion.button
+                  className="dialog-btn confirm"
+                  onClick={handleReset}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Confirm Reset
+                </motion.button>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </motion.main>
     </div>
   );
