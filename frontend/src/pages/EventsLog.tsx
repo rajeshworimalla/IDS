@@ -1,53 +1,72 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import '../styles/EventsLog.css';
 
-interface FilterOption {
-  id: string;
-  label: string;
-  active: boolean;
-}
-
-interface EventData {
-  id: number;
+interface Packet {
+  _id: string;
   date: string;
-  endDate: string;
-  startIP: string;
-  endIP: string;
+  start_ip: string;
+  end_ip: string;
   protocol: string;
+  frequency: number;
+  status: 'critical' | 'medium' | 'normal';
   description: string;
-  frequency: string;
-  startBytes: string;
-  endBytes: string;
+  start_bytes: number;
+  end_bytes: number;
 }
 
 const EventsLog: FC = () => {
-  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [packets, setPackets] = useState<Packet[]>([]);
+  const [socket, setSocket] = useState<Socket | null>(null);
   
   // Filter options
-  const filterOptions: FilterOption[] = [
+  const filterOptions = [
     { id: 'all', label: 'Alle', active: true },
     { id: 'open', label: 'Geöffnet', active: false },
     { id: 'closed', label: 'Geschlossen', active: false },
   ];
-  
-  // Mock events data
-  const eventsData: EventData[] = [
-    { id: 1, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTP', description: 'Lorem ipsum dolor sit amet, consectetur adipiscing', frequency: '1.452/2', startBytes: '118', endBytes: '94' },
-    { id: 2, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTPS', description: 'Sed do eiusmod tempor incididunt ut labore et dolore', frequency: '566', startBytes: '89', endBytes: '120' },
-    { id: 3, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'FTP', description: 'Magna aliqua. Ut enim ad minim veniam, quis nostrud', frequency: '39', startBytes: '74', endBytes: '102' },
-    { id: 4, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'SSH', description: 'Exercitation ullamco laboris nisi ut aliquip ex ea', frequency: '144', startBytes: '95', endBytes: '120' },
-    { id: 5, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'ICMP', description: 'Commodo consequat', frequency: '403', startBytes: '110', endBytes: '78' },
-    { id: 6, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTPS', description: 'Lorem ipsum dolor sit amet, consectetur adipiscing', frequency: '122', startBytes: '112', endBytes: '94' },
-    { id: 7, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTP', description: 'Sed do eiusmod tempor incididunt ut labore et dolore', frequency: '256', startBytes: '85', endBytes: '120' },
-    { id: 8, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTPS', description: 'Magna aliqua. Ut enim ad minim veniam, quis nostrud', frequency: '39', startBytes: '74', endBytes: '102' },
-    { id: 9, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'SSH', description: 'Exercitation ullamco laboris nisi ut aliquip ex ea', frequency: '144', startBytes: '95', endBytes: '120' },
-    { id: 10, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'ICMP', description: 'Commodo consequat', frequency: '403', startBytes: '110', endBytes: '78' },
-  ];
 
-  const toggleRowSelection = (id: number) => {
+  useEffect(() => {
+    // Initialize socket connection
+    const newSocket = io('http://localhost:5000');
+    setSocket(newSocket);
+
+    // Load initial packets
+    fetchPackets();
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    // Listen for new packets
+    socket.on('new-packet', (packet: Packet) => {
+      setPackets(prev => [packet, ...prev].slice(0, 100));
+    });
+
+    return () => {
+      socket.off('new-packet');
+    };
+  }, [socket]);
+
+  const fetchPackets = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/packets');
+      const data = await response.json();
+      setPackets(data);
+    } catch (error) {
+      console.error('Error fetching packets:', error);
+    }
+  };
+
+  const toggleRowSelection = (id: string) => {
     setSelectedRows(prev => 
       prev.includes(id)
         ? prev.filter(rowId => rowId !== id)
@@ -56,10 +75,19 @@ const EventsLog: FC = () => {
   };
 
   const handleSelectAll = () => {
-    if (selectedRows.length === eventsData.length) {
+    if (selectedRows.length === packets.length) {
       setSelectedRows([]);
     } else {
-      setSelectedRows(eventsData.map(item => item.id));
+      setSelectedRows(packets.map(packet => packet._id));
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'critical': return 'error';
+      case 'medium': return 'warning';
+      case 'normal': return 'success';
+      default: return '';
     }
   };
 
@@ -99,7 +127,7 @@ const EventsLog: FC = () => {
             </div>
             
             <div className="search-filter">
-              <input 
+              <input
                 type="text" 
                 placeholder="0.0.0.0/0 Suche"
                 value={searchTerm}
@@ -129,7 +157,7 @@ const EventsLog: FC = () => {
                 <th>
                   <input 
                     type="checkbox" 
-                    checked={selectedRows.length === eventsData.length}
+                    checked={selectedRows.length === packets.length}
                     onChange={handleSelectAll}
                   />
                 </th>
@@ -146,33 +174,33 @@ const EventsLog: FC = () => {
               </tr>
             </thead>
             <tbody>
-              {eventsData.map((event, index) => (
-                <motion.tr 
-                  key={event.id}
+              {packets.map((packet, index) => (
+                <motion.tr
+                  key={packet._id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.05 * index }}
-                  className={selectedRows.includes(event.id) ? 'selected' : ''}
+                  className={selectedRows.includes(packet._id) ? 'selected' : ''}
                 >
                   <td>
                     <input 
                       type="checkbox" 
-                      checked={selectedRows.includes(event.id)}
-                      onChange={() => toggleRowSelection(event.id)}
+                      checked={selectedRows.includes(packet._id)}
+                      onChange={() => toggleRowSelection(packet._id)}
                     />
                   </td>
                   <td>
-                    <span className={`status-indicator ${index % 3 === 0 ? 'error' : index % 3 === 1 ? 'warning' : 'success'}`}></span>
+                    <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
                   </td>
-                  <td>{event.date}</td>
-                  <td>{event.endDate}</td>
-                  <td>{event.startIP}</td>
-                  <td>{event.endIP}</td>
-                  <td>{event.protocol}</td>
-                  <td className="description-cell">{event.description}</td>
-                  <td>{event.frequency}</td>
-                  <td>{event.startBytes}</td>
-                  <td>{event.endBytes}</td>
+                  <td>{new Date(packet.date).toLocaleDateString()}</td>
+                  <td>{new Date(packet.date).toLocaleDateString()}</td>
+                  <td>{packet.start_ip}</td>
+                  <td>{packet.end_ip}</td>
+                  <td>{packet.protocol}</td>
+                  <td className="description-cell">{packet.description}</td>
+                  <td>{packet.frequency}</td>
+                  <td>{packet.start_bytes}</td>
+                  <td>{packet.end_bytes}</td>
                 </motion.tr>
               ))}
             </tbody>
@@ -180,7 +208,7 @@ const EventsLog: FC = () => {
         </div>
         
         <div className="pagination-controls">
-          <div className="records-info">Anzeige 1-10 von 435</div>
+          <div className="records-info">Anzeige 1-10 von {packets.length}</div>
           <div className="pagination-buttons">
             <button className="pagination-btn">Zurücksetzen</button>
             <button className="pagination-btn primary">Übernehmen</button>

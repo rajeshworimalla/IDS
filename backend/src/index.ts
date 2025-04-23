@@ -3,6 +3,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import authRoutes from './routes/auth';
+import packetRoutes from './routes/packets';
+import httpServer from './socket';
+import { PacketCaptureService } from './services/packetCapture';
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +24,10 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/packets', packetRoutes);
+
 // Database connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ids';
 
@@ -38,6 +45,11 @@ mongoose.connect(MONGODB_URI)
       .catch((error) => {
         console.error('Error listing collections:', error);
       });
+
+    // Start packet capture
+    const packetCapture = new PacketCaptureService(); // Will use the first available interface
+    packetCapture.startCapture();
+    console.log('Real packet capture started');
   })
   .catch((error) => {
     console.error('MongoDB connection error:', error);
@@ -48,9 +60,6 @@ mongoose.connect(MONGODB_URI)
     process.exit(1);
   });
 
-// Routes
-app.use('/api/auth', authRoutes);
-
 // Basic route
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to IDS API' });
@@ -58,6 +67,6 @@ app.get('/', (req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+httpServer.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 }); 
