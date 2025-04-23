@@ -24,12 +24,30 @@ export interface RegisterData extends LoginCredentials {
 
 class AuthService {
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const response = await api.post<AuthResponse>(API_ENDPOINTS.AUTH.LOGIN, credentials);
-    if (response.data.token) {
+    try {
+      console.log('Making login request with credentials:', { ...credentials, password: '***' });
+      const response = await api.post<AuthResponse>(API_ENDPOINTS.AUTH.LOGIN, credentials);
+      
+      if (!response.data.token || !response.data.user) {
+        throw new Error('Invalid response from server');
+      }
+      
+      console.log('Login response received:', { 
+        token: '***', 
+        user: response.data.user 
+      });
+      
+      // Store auth data
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
+      
+      return response.data;
+    } catch (error) {
+      console.error('Login error:', error);
+      // Clear any existing auth data on error
+      this.clearAuth();
+      throw error;
     }
-    return response.data;
   }
 
   async register(data: RegisterData): Promise<AuthResponse> {
@@ -55,7 +73,9 @@ class AuthService {
   }
 
   isAuthenticated(): boolean {
-    return !!localStorage.getItem('token');
+    const token = this.getToken();
+    const user = this.getUser();
+    return !!(token && user);
   }
 
   getToken(): string | null {

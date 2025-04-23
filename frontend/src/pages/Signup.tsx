@@ -1,6 +1,7 @@
 import { FC, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { authService } from '../services/auth';
 import '../styles/Auth.css';
 
 const Signup: FC = () => {
@@ -30,6 +31,14 @@ const Signup: FC = () => {
       setError('Please fill in all required fields');
       return false;
     }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Please enter a valid email address');
+      return false;
+    }
+    
     return true;
   };
 
@@ -71,15 +80,33 @@ const Signup: FC = () => {
     }
     
     setIsLoading(true);
-    // Simulate API call
+    setError('');
+    
     try {
-      // In a real app, this would be an API call to register
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      console.log('Starting registration process...');
       
-      // If successful, redirect to login
-      navigate('/login');
-    } catch (err) {
-      setError('An error occurred during registration. Please try again.');
+      // Call the auth service to register
+      const response = await authService.register({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password
+      });
+      
+      console.log('Registration successful:', response);
+      
+      // If successful, redirect to login with success message
+      navigate('/login', { 
+        state: { 
+          message: 'Registration successful! Please log in with your credentials.' 
+        } 
+      });
+      
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      setError(
+        err.response?.data?.message || 
+        'An error occurred during registration. Please try again.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -146,15 +173,7 @@ const Signup: FC = () => {
                 transition: {
                   duration: Math.random() * 20 + 10,
                   repeat: Infinity,
-                  repeatType: "reverse",
-                  ease: "linear"
                 }
-              }}
-              style={{
-                backgroundColor: `rgba(${Math.floor(Math.random() * 100)}, ${Math.floor(Math.random() * 100)}, ${Math.floor(Math.random() * 255)}, 0.1)`,
-                width: `${Math.random() * 300 + 50}px`,
-                height: `${Math.random() * 300 + 50}px`,
-                borderRadius: `${Math.random() * 50}%`
               }}
             />
           ))}

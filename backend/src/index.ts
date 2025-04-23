@@ -22,9 +22,31 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ids')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((error) => console.error('MongoDB connection error:', error));
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ids';
+
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    console.log('Connected to MongoDB');
+    console.log('Database URI:', MONGODB_URI);
+    
+    // Verify the database exists
+    const db = mongoose.connection.db;
+    db.listCollections().toArray()
+      .then((collections) => {
+        console.log('Available collections:', collections.map((c: { name: string }) => c.name));
+      })
+      .catch((error) => {
+        console.error('Error listing collections:', error);
+      });
+  })
+  .catch((error) => {
+    console.error('MongoDB connection error:', error);
+    console.log('Please make sure:');
+    console.log('1. MongoDB is installed and running');
+    console.log('2. The MongoDB service is started');
+    console.log('3. You can connect to mongodb://localhost:27017');
+    process.exit(1);
+  });
 
 // Routes
 app.use('/api/auth', authRoutes);

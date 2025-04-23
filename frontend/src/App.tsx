@@ -1,5 +1,6 @@
 import { FC, useEffect, useState } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { authService } from './services/auth'
 import Dashboard from './pages/Dashboard'
 import Activities from './pages/Activities'
 import EventsLog from './pages/EventsLog'
@@ -13,13 +14,13 @@ import './App.css'
 const App: FC = () => {
   // Use state to track authentication status so it updates the UI when it changes
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
-    localStorage.getItem('isAuthenticated') === 'true'
+    authService.isAuthenticated()
   );
 
   // Listen for changes to localStorage and custom events
   useEffect(() => {
     const checkAuthStatus = () => {
-      const authStatus = localStorage.getItem('isAuthenticated') === 'true';
+      const authStatus = authService.isAuthenticated();
       console.log('Auth status changed:', authStatus);
       setIsAuthenticated(authStatus);
     };
@@ -28,33 +29,37 @@ const App: FC = () => {
     checkAuthStatus();
 
     // Add event listener for storage changes (in case of multiple tabs)
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'isAuthenticated') {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'token' || e.key === 'user') {
+        console.log('Storage change detected for:', e.key);
         checkAuthStatus();
       }
-    });
-
-    // Custom event for auth changes within the same tab
-    window.addEventListener('auth-change', checkAuthStatus);
-
-    // Add a direct event listener for logout button clicks
-    const handleLogoutClick = () => {
-      // This is a backup mechanism to ensure auth state updates
-      setTimeout(checkAuthStatus, 200);
     };
-    
-    // Find and attach listeners to any logout buttons
-    const logoutButtons = document.querySelectorAll('.logout-button');
-    logoutButtons.forEach(button => {
-      button.addEventListener('click', handleLogoutClick);
-    });
 
+    // Add event listener for auth changes within the same tab
+    const handleAuthChange = () => {
+      console.log('Auth change event received');
+      checkAuthStatus();
+    };
+
+    // Add event listener for logout button clicks as a backup mechanism
+    const handleLogoutClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('.logout-button')) {
+        console.log('Logout button click detected');
+        setTimeout(checkAuthStatus, 100);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('auth-change', handleAuthChange);
+    document.addEventListener('click', handleLogoutClick);
+
+    // Cleanup function
     return () => {
-      window.removeEventListener('storage', checkAuthStatus);
-      window.removeEventListener('auth-change', checkAuthStatus);
-      logoutButtons.forEach(button => {
-        button.removeEventListener('click', handleLogoutClick);
-      });
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('auth-change', handleAuthChange);
+      document.removeEventListener('click', handleLogoutClick);
     };
   }, []);
 

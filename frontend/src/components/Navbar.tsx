@@ -1,6 +1,7 @@
 import { FC } from 'react';
-import { useLocation, Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { authService } from '../services/auth';
 import '../styles/Navbar.css';
 
 interface NavItem {
@@ -23,24 +24,32 @@ const Navbar: FC = () => {
     { id: 'support', label: 'Support', icon: '💬', path: '/support' },
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     try {
-      // Clear all authentication data
-      localStorage.removeItem('isAuthenticated');
+      console.log('Starting logout process...');
+      
+      // Call the logout endpoint
+      await authService.logout();
+      console.log('Logout API call successful');
       
       // Create and dispatch a custom event to notify about authentication change
-      const authEvent = new Event('auth-change');
-      window.dispatchEvent(authEvent);
+      const authChangeEvent = new Event('auth-change');
+      window.dispatchEvent(authChangeEvent);
+      console.log('Auth change event dispatched');
       
-      // Log the action
-      console.log('User logged out successfully');
-      
-      // Force redirect to login page
+      // Small delay to ensure state updates are processed
       setTimeout(() => {
+        // Navigate to login page
         navigate('/login', { replace: true });
+        console.log('Navigation to login complete');
       }, 100);
+      
     } catch (error) {
       console.error('Error during logout:', error);
+      // Still clear auth data and redirect even if API call fails
+      authService.clearAuth();
+      window.dispatchEvent(new Event('auth-change'));
+      navigate('/login', { replace: true });
     }
   };
 
