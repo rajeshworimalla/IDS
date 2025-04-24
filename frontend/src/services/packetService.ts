@@ -1,6 +1,7 @@
-import axios from 'axios';
+import api from './api';
+import { API_BASE_URL } from '../config/api';
 
-const API_URL = 'http://localhost:5001/api/packets';
+const API_URL = `${API_BASE_URL}/api/packets`;
 
 export interface PacketData {
   date: Date;
@@ -18,24 +19,32 @@ export interface PacketData {
 }
 
 export interface PacketStats {
-  _id: string;
-  count: number;
+  totalPackets: number;
+  totalBytes: number;
   avgBytes: number;
+  criticalCount: number;
+  mediumCount: number;
+  normalCount: number;
+  maliciousCount: number;
+  criticalPercentage: number;
+  mediumPercentage: number;
+  normalPercentage: number;
+  maliciousPercentage: number;
 }
 
 export const packetService = {
   async getPackets(): Promise<PacketData[]> {
-    const response = await axios.get(`${API_URL}/all`);
+    const response = await api.get(`${API_URL}/all`);
     return response.data;
   },
 
-  async getPacketStats(): Promise<PacketStats[]> {
-    const response = await axios.get(`${API_URL}/stats`);
+  async getPacketStats(): Promise<PacketStats> {
+    const response = await api.get(`${API_URL}/stats`);
     return response.data;
   },
 
   async getPacketsByTimeRange(from: Date, to: Date): Promise<PacketData[]> {
-    const response = await axios.get(`${API_URL}/filter`, {
+    const response = await api.get(`${API_URL}/filter`, {
       params: { from, to }
     });
     return response.data;

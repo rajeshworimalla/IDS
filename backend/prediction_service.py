@@ -214,13 +214,31 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
 def predict():
     try:
         data = request.json
-        if not data or not isinstance(data, list):
-            return jsonify({'error': 'Invalid input format'}), 400
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        if not isinstance(data, list):
+            return jsonify({'error': 'Input must be a list of packets'}), 400
+            
+        if len(data) == 0:
+            return jsonify({'error': 'Empty packet list'}), 400
 
         results = []
         for packet in data:
+            # Validate packet structure
+            if not isinstance(packet, dict):
+                return jsonify({'error': 'Each packet must be a dictionary'}), 400
+                
+            required_fields = ['start_bytes', 'end_bytes', 'protocol', 'description']
+            for field in required_fields:
+                if field not in packet:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
+
             # Preprocess packet
-            features = preprocess_packet(packet)
+            try:
+                features = preprocess_packet(packet)
+            except Exception as e:
+                return jsonify({'error': f'Error preprocessing packet: {str(e)}'}), 400
             
             # Get predictions
             try:
@@ -248,22 +266,15 @@ def predict():
                     'attack_type': attack_type,
                     'confidence': {
                         'binary': float(binary_model.predict_proba(features)[0][1]),
-                        'multiclass': float(max(multiclass_model.predict_proba(features)[0]))
+                        'multiclass': float(multiclass_model.predict_proba(features)[0][multiclass_pred])
                     }
                 })
             except Exception as e:
-                print(f"Error making prediction: {e}")
-                print(f"Error type: {type(e)}")
-                print(f"Error args: {e.args}")
-                raise
+                return jsonify({'error': f'Error making predictions: {str(e)}'}), 500
 
-        return jsonify({'predictions': results})
-
+        return jsonify(results)
     except Exception as e:
-        print(f"Error in predict endpoint: {e}")
-        print(f"Error type: {type(e)}")
-        print(f"Error args: {e.args}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     try:

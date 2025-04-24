@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema } from 'mongoose';
+import mongoose, { Document, Schema, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 export interface IUser extends Document {
@@ -10,7 +10,11 @@ export interface IUser extends Document {
   comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
-const userSchema = new Schema<IUser>({
+export interface IUserModel extends Model<IUser> {
+  // Add any static methods here if needed
+}
+
+const userSchema = new Schema<IUser, IUserModel>({
   email: {
     type: String,
     required: true,
@@ -57,4 +61,6 @@ userSchema.methods.comparePassword = async function(candidatePassword: string): 
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-export default mongoose.model<IUser>('User', userSchema); 
+// Create and export the model
+const User = mongoose.model<IUser, IUserModel>('User', userSchema);
+export { User }; 

@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import '../styles/EventsLog.css';
+import { authService } from '../services/auth';
 
 interface Packet {
   _id: string;
@@ -40,14 +41,31 @@ const EventsLog: FC = () => {
   useEffect(() => {
     const fetchPackets = async () => {
       try {
+        const token = authService.getToken();
+        if (!token) {
+          console.error('No authentication token found');
+          return;
+        }
+
         console.log('Fetching packets from backend...');
-        const response = await fetch('http://localhost:5001/api/packets/all');
+        const response = await fetch('http://localhost:5001/api/packets/all', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          credentials: 'include'
+        });
+
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
           setPackets(data);
         } else {
-          console.error('Failed to fetch packets:', await response.text());
+          const error = await response.text();
+          console.error('Failed to fetch packets:', error);
+          if (response.status === 401) {
+            console.error('Authentication failed');
+          }
         }
       } catch (error) {
         console.error('Error fetching packets:', error);
@@ -59,7 +77,16 @@ const EventsLog: FC = () => {
 
   // Initialize socket connection
   useEffect(() => {
-    const newSocket = io('http://localhost:5001', {
+    const token = authService.getToken();
+    if (!token) {
+      console.error('No authentication token found');
+      return;
+    }
+
+    const socket = io('http://localhost:5001', {
+      auth: {
+        token: token
+      },
       withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -69,66 +96,56 @@ const EventsLog: FC = () => {
       timeout: 20000
     });
 
-    newSocket.on('connect', () => {
-      console.log('Socket connected successfully');
+    socket.on('connect', () => {
+      console.log('Socket connected');
+      setSocket(socket);
+      setIsScanning(true);
     });
 
-    newSocket.on('connect_error', (error) => {
+    socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
+      setIsScanning(false);
     });
 
-    newSocket.on('disconnect', (reason) => {
+    socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
-      if (reason === 'io server disconnect') {
-        // The disconnection was initiated by the server, you need to reconnect manually
-        newSocket.connect();
-      }
+      setIsScanning(false);
     });
 
-    newSocket.on('reconnect', (attemptNumber) => {
-      console.log('Socket reconnected after', attemptNumber, 'attempts');
-    });
-
-    newSocket.on('reconnect_error', (error) => {
-      console.error('Socket reconnection error:', error);
-    });
-
-    newSocket.on('reconnect_failed', () => {
-      console.error('Socket reconnection failed');
-    });
-
-    setSocket(newSocket);
-
-    // Listen for new packets
-    newSocket.on('new-packet', (packet: Packet) => {
-      console.log('Received new packet:', packet);
-      setPackets(prev => [packet, ...prev]);
-    });
-
-    // Listen for scanning status updates
-    newSocket.on('scanning-status', (status: { isScanning: boolean; error?: string }) => {
-      console.log('Scanning status update:', status);
+    socket.on('scanning-status', (status) => {
+      console.log('Scanning status:', status);
       setIsScanning(status.isScanning);
       if (status.error) {
         console.error('Scanning error:', status.error);
       }
     });
 
+    socket.on('new-packet', (packet) => {
+      console.log('Received new packet:', packet);
+      setPackets(prev => [packet, ...prev]);
+    });
+
     return () => {
-      if (newSocket) {
-        newSocket.removeAllListeners();
-        newSocket.disconnect();
+      if (socket) {
+        socket.disconnect();
       }
     };
   }, []);
 
   const handleReset = async () => {
     try {
+      const token = authService.getToken();
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
+
       console.log('Sending reset request...');
       const response = await fetch('http://localhost:5001/api/packets/reset', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
       });
       
@@ -148,7 +165,17 @@ const EventsLog: FC = () => {
 
   const handleDateFilter = async () => {
     try {
-      const response = await fetch(`http://localhost:5001/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`);
+      const token = authService.getToken();
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
+
+      const response = await fetch(`http://localhost:5001/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       setPackets(data);
     } catch (error) {
@@ -158,7 +185,17 @@ const EventsLog: FC = () => {
 
   const handleSearch = async () => {
     try {
-      const response = await fetch(`http://localhost:5001/api/packets/search?q=${searchTerm}`);
+      const token = authService.getToken();
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
+
+      const response = await fetch(`http://localhost:5001/api/packets/search?q=${searchTerm}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       setPackets(data);
     } catch (error) {
@@ -210,15 +247,25 @@ const EventsLog: FC = () => {
 
   const handleStartScanning = () => {
     if (socket) {
+      const token = authService.getToken();
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
       console.log('Emitting start-scanning event');
-      socket.emit('start-scanning');
+      socket.emit('start-scanning', { token });
     }
   };
 
   const handleStopScanning = () => {
     if (socket) {
+      const token = authService.getToken();
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
       console.log('Emitting stop-scanning event');
-      socket.emit('stop-scanning');
+      socket.emit('stop-scanning', { token });
     }
   };
 

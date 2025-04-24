@@ -2,10 +2,25 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import { createServer } from 'http';
+import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
 import { config } from './config/env';
 import { initializeSocket } from './socket';
+
+// Load environment variables
+dotenv.config();
+
+// Set environment variables from config if not already set
+process.env.JWT_SECRET = process.env.JWT_SECRET || config.JWT_SECRET;
+process.env.MONGODB_URI = process.env.MONGODB_URI || config.MONGODB_URI;
+process.env.PORT = process.env.PORT || config.PORT.toString();
+
+console.log('Starting server with config:', {
+  MONGODB_URI: process.env.MONGODB_URI,
+  JWT_SECRET: process.env.JWT_SECRET ? '***' : 'Not set',
+  PORT: process.env.PORT
+});
 
 const app = express();
 const httpServer = createServer(app);
@@ -15,27 +30,18 @@ initializeSocket(httpServer);
 
 console.log('Starting server with config:', config);
 
-// Enable pre-flight requests for all routes
-app.options('*', cors());
-
 // CORS configuration
 const corsOptions = {
-  origin: true, // Allow all origins in development
+  origin: 'http://localhost:5173', // Your frontend URL
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-  exposedHeaders: ['Content-Length', 'X-Requested-With', 'Authorization'],
-  maxAge: 86400, // 24 hours
-  optionsSuccessStatus: 200
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Length', 'Authorization'],
+  maxAge: 86400 // 24 hours
 };
-
-console.log('Setting up CORS with options:', corsOptions);
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
 
 // Body parser middleware
 app.use(express.json());

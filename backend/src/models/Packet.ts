@@ -13,6 +13,7 @@ export interface IPacket extends Document {
   is_malicious: boolean;
   attack_type: string;
   confidence: number;
+  user: mongoose.Types.ObjectId;
 }
 
 const PacketSchema = new Schema({
@@ -27,7 +28,8 @@ const PacketSchema = new Schema({
   end_bytes: { type: Number, required: true },
   is_malicious: { type: Boolean, default: false },
   attack_type: { type: String, default: 'normal' },
-  confidence: { type: Number, default: 0 }
+  confidence: { type: Number, default: 0 },
+  user: { type: Schema.Types.ObjectId, ref: 'User', required: true }
 });
 
 export const Packet = mongoose.model<IPacket>('Packet', PacketSchema); 

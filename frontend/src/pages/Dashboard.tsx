@@ -11,30 +11,35 @@ import '../styles/Dashboard.css';
 
 const Dashboard: FC = () => {
   const [activeTab, setActiveTab] = useState('status');
-  const [statsCards, setStatsCards] = useState([
-    { id: 'alarms', title: 'ALARMS', value: 0, icon: '🔔' },
-    { id: 'critical', title: 'CRITICAL', value: 0, icon: '❌' },
-    { id: 'warnings', title: 'WARNINGS', value: 0, icon: '⚠️' },
-    { id: 'info', title: 'INFO', value: 0, icon: 'ℹ️' },
-  ]);
+  const [stats, setStats] = useState({
+    totalPackets: 0,
+    totalBytes: 0,
+    avgBytes: 0,
+    criticalCount: 0,
+    mediumCount: 0,
+    normalCount: 0,
+    maliciousCount: 0,
+    criticalPercentage: 0,
+    mediumPercentage: 0,
+    normalPercentage: 0,
+    maliciousPercentage: 0
+  });
   const [pieData, setPieData] = useState<{ name: string; value: number; color: string }[]>([]);
   const [lineData, setLineData] = useState<{ time: string; value1: number; value2: number }[]>([]);
   const [barData, setBarData] = useState<{ name: string; value: number }[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
+        setError(null);
+        // Fetch packet statistics
+        const packetStats = await packetService.getPacketStats();
+        setStats(packetStats);
+
         // Fetch status distribution for pie chart
         const statusData = await packetService.getStatusDistribution();
         setPieData(statusData);
-
-        // Update stats cards
-        setStatsCards([
-          { id: 'alarms', title: 'ALARMS', value: statusData.reduce((sum, item) => sum + item.value, 0), icon: '🔔' },
-          { id: 'critical', title: 'CRITICAL', value: statusData.find(item => item.name === 'Critical')?.value || 0, icon: '❌' },
-          { id: 'warnings', title: 'WARNINGS', value: statusData.find(item => item.name === 'Warning')?.value || 0, icon: '⚠️' },
-          { id: 'info', title: 'INFO', value: statusData.find(item => item.name === 'Info')?.value || 0, icon: 'ℹ️' },
-        ]);
 
         // Fetch network load for line chart
         const networkData = await packetService.getNetworkLoad();
@@ -45,6 +50,7 @@ const Dashboard: FC = () => {
         setBarData(topHosts);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
+        setError('Failed to fetch dashboard data. Please try again later.');
       }
     };
 
@@ -64,6 +70,16 @@ const Dashboard: FC = () => {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
+        {error && (
+          <motion.div 
+            className="error-message"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            {error}
+          </motion.div>
+        )}
+        
         <div className="dashboard-header">
           <div className="tabs">
             <button 
@@ -87,21 +103,54 @@ const Dashboard: FC = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
-          {statsCards.map((card, index) => (
-            <motion.div
-              key={card.id}
-              className="stats-card"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 * (index + 1) }}
-            >
-              <span className="stats-icon">{card.icon}</span>
-              <div className="stats-info">
-                <span className="stats-value">{card.value}</span>
-                <span className="stats-title">{card.title}</span>
-              </div>
-            </motion.div>
-          ))}
+          <motion.div
+            className="stats-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <span className="stats-icon">📊</span>
+            <div className="stats-info">
+              <span className="stats-value">{stats.totalPackets}</span>
+              <span className="stats-title">TOTAL PACKETS</span>
+            </div>
+          </motion.div>
+          <motion.div
+            className="stats-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <span className="stats-icon">⚠️</span>
+            <div className="stats-info">
+              <span className="stats-value">{stats.criticalCount}</span>
+              <span className="stats-title">CRITICAL</span>
+            </div>
+          </motion.div>
+          <motion.div
+            className="stats-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <span className="stats-icon">🔍</span>
+            <div className="stats-info">
+              <span className="stats-value">{stats.maliciousCount}</span>
+              <span className="stats-title">MALICIOUS</span>
+            </div>
+          </motion.div>
+          <motion.div
+            className="stats-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            <span className="stats-icon">📦</span>
+            <div className="stats-info">
+              <span className="stats-value">{Math.round(stats.avgBytes)}</span>
+              <span className="stats-title">AVG BYTES</span>
+            </div>
+          </motion.div>
         </motion.div>
 
         <motion.div 

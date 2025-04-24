@@ -1,14 +1,45 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import User from '../models/User';
+import { User, IUser } from '../models/User';
+import { config } from '../config/env';
 
 // Generate JWT token
 const generateToken = (userId: string, role: string): string => {
-  return jwt.sign(
-    { id: userId, role },
-    process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: '24h' }
+  // Use the JWT secret from config if not set in env
+  const jwtSecret = process.env.JWT_SECRET || config.JWT_SECRET;
+  
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET is not defined in environment variables or config');
+  }
+  
+  console.log('Generating token with:', {
+    userId,
+    role,
+    secretExists: !!jwtSecret,
+    secretLength: jwtSecret.length
+  });
+
+  const payload = { 
+    _id: userId, 
+    id: userId, 
+    role 
+  };
+  
+  console.log('Token payload:', payload);
+  
+  const token = jwt.sign(
+    payload,
+    jwtSecret,
+    { 
+      expiresIn: '24h',
+      algorithm: 'HS256' // Explicitly set the algorithm
+    }
   );
+  
+  console.log('Generated token length:', token.length);
+  console.log('Generated token format:', token.split('.').length === 3 ? 'Valid JWT format' : 'Invalid JWT format');
+  
+  return token;
 };
 
 export const register = async (req: Request, res: Response) => {
@@ -32,7 +63,7 @@ export const register = async (req: Request, res: Response) => {
     await user.save();
 
     // Generate token
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(user._id.toString(), user.role);
 
     res.status(201).json({
       token,
@@ -72,8 +103,8 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Generate token
-    const token = generateToken(user._id, user.role);
+    // Generate token with correct payload structure
+    const token = generateToken(user._id.toString(), user.role);
     console.log('Token generated successfully for user:', email);
 
     res.json({
@@ -97,13 +128,23 @@ export const logout = (req: Request, res: Response) => {
 
 export const getCurrentUser = async (req: Request, res: Response) => {
   try {
-    const user = await User.findById(req.user?.id).select('-password');
+    if (!req.user) {
+      return res.status(401).json({ message: 'User not authenticated' });
+    }
+
+    const user = await User.findById(req.user.id).select('-password');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json(user);
+
+    res.json({
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
   } catch (error) {
-    console.error('Get current user error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Error fetching current user:', error);
+    res.status(500).json({ message: 'Server error fetching user' });
   }
 }; 

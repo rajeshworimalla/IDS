@@ -13,12 +13,14 @@ export class PacketCaptureService {
   private buffer: Buffer;
   private predictionServiceUrl: string;
   private packetHandler: ((nbytes: number, trunc: boolean) => void) | null = null;
+  private userId: string;
 
-  constructor() {
+  constructor(userId: string) {
     this.cap = new Cap();
     this.linkType = 'ETHERNET';
     this.buffer = Buffer.alloc(65535);
     this.predictionServiceUrl = 'http://127.0.0.1:5002/predict';
+    this.userId = userId;
     
     // List all available interfaces
     const interfaces = Cap.deviceList();
@@ -121,7 +123,8 @@ export class PacketCaptureService {
         end_bytes: raw.length,
         is_malicious: false,
         attack_type: 'normal',
-        confidence: 0
+        confidence: 0,
+        user: this.userId
       };
 
       // Determine status based on protocol and frequency
@@ -150,7 +153,12 @@ export class PacketCaptureService {
       
       // Broadcast to connected clients
       const io = getIO();
-      io.emit('new-packet', savedPacket);
+      if (io) {
+        console.log('Emitting new packet to clients');
+        io.emit('new-packet', savedPacket);
+      } else {
+        console.error('Socket.IO not initialized');
+      }
     } catch (err) {
       const error = err as Error;
       console.error('Error saving packet:', error);
