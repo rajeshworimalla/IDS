@@ -1,4 +1,4 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -6,40 +6,54 @@ import {
   BarChart, Bar
 } from 'recharts';
 import Navbar from '../components/Navbar';
+import { packetService } from '../services/packetService';
 import '../styles/Dashboard.css';
 
 const Dashboard: FC = () => {
   const [activeTab, setActiveTab] = useState('status');
+  const [statsCards, setStatsCards] = useState([
+    { id: 'alarms', title: 'ALARMS', value: 0, icon: '🔔' },
+    { id: 'critical', title: 'CRITICAL', value: 0, icon: '❌' },
+    { id: 'warnings', title: 'WARNINGS', value: 0, icon: '⚠️' },
+    { id: 'info', title: 'INFO', value: 0, icon: 'ℹ️' },
+  ]);
+  const [pieData, setPieData] = useState<{ name: string; value: number; color: string }[]>([]);
+  const [lineData, setLineData] = useState<{ time: string; value1: number; value2: number }[]>([]);
+  const [barData, setBarData] = useState<{ name: string; value: number }[]>([]);
 
-  const statsCards = [
-    { id: 'alarms', title: 'ALARME', value: 1, icon: '🔔' },
-    { id: 'critical', title: 'KRITISCHE', value: 0, icon: '❌' },
-    { id: 'warnings', title: 'WARNUNGEN', value: 24, icon: '⚠️' },
-    { id: 'info', title: 'INFOS', value: 14, icon: 'ℹ️' },
-  ];
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Fetch status distribution for pie chart
+        const statusData = await packetService.getStatusDistribution();
+        setPieData(statusData);
 
-  const pieData = [
-    { name: 'Critical', value: 20, color: '#ff4d4f' },
-    { name: 'Warning', value: 45, color: '#faad14' },
-    { name: 'Info', value: 35, color: '#1890ff' },
-  ];
+        // Update stats cards
+        setStatsCards([
+          { id: 'alarms', title: 'ALARMS', value: statusData.reduce((sum, item) => sum + item.value, 0), icon: '🔔' },
+          { id: 'critical', title: 'CRITICAL', value: statusData.find(item => item.name === 'Critical')?.value || 0, icon: '❌' },
+          { id: 'warnings', title: 'WARNINGS', value: statusData.find(item => item.name === 'Warning')?.value || 0, icon: '⚠️' },
+          { id: 'info', title: 'INFO', value: statusData.find(item => item.name === 'Info')?.value || 0, icon: 'ℹ️' },
+        ]);
 
-  const lineData = [
-    { time: '00:00', value1: 30, value2: 20 },
-    { time: '04:00', value1: 45, value2: 25 },
-    { time: '08:00', value1: 35, value2: 35 },
-    { time: '12:00', value1: 55, value2: 40 },
-    { time: '16:00', value1: 40, value2: 30 },
-    { time: '20:00', value1: 50, value2: 45 },
-  ];
+        // Fetch network load for line chart
+        const networkData = await packetService.getNetworkLoad();
+        setLineData(networkData);
 
-  const barData = [
-    { name: '192.168.1.1', value: 85 },
-    { name: '192.168.1.2', value: 75 },
-    { name: '192.168.1.3', value: 65 },
-    { name: '192.168.1.4', value: 55 },
-    { name: '192.168.1.5', value: 45 },
-  ];
+        // Fetch top hosts for bar chart
+        const topHosts = await packetService.getTopHosts();
+        setBarData(topHosts);
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      }
+    };
+
+    fetchData();
+    // Set up polling interval to refresh data every 5 seconds
+    const interval = setInterval(fetchData, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="dashboard-page">
@@ -97,7 +111,7 @@ const Dashboard: FC = () => {
           transition={{ delay: 0.6 }}
         >
           <div className="chart-card">
-            <h3>EREIGNISVERTEILUNG</h3>
+            <h3>EVENT DISTRIBUTION</h3>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie
@@ -119,15 +133,15 @@ const Dashboard: FC = () => {
           </div>
 
           <div className="chart-card">
-            <h3>LAST PROZESSNETZE</h3>
+            <h3>NETWORK LOAD</h3>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={lineData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                 <XAxis dataKey="time" stroke="#8a8d9f" />
                 <YAxis stroke="#8a8d9f" />
                 <Tooltip />
-                <Line type="monotone" dataKey="value1" stroke="#3699ff" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="value2" stroke="#00d0ff" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="value1" stroke="#3699ff" strokeWidth={2} dot={false} name="TCP" />
+                <Line type="monotone" dataKey="value2" stroke="#00d0ff" strokeWidth={2} dot={false} name="UDP" />
               </LineChart>
             </ResponsiveContainer>
           </div>
