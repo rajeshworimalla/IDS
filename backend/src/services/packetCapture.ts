@@ -1,6 +1,6 @@
 import { Cap } from 'cap';
 import { Packet as PacketModel, IPacket } from '../models/Packet';
-import { io } from '../socket';
+import { getIO } from '../socket';
 import axios from 'axios';
 
 // Track packet frequencies for status determination
@@ -12,6 +12,7 @@ export class PacketCaptureService {
   private linkType: string;
   private buffer: Buffer;
   private predictionServiceUrl: string;
+  private packetHandler: ((nbytes: number, trunc: boolean) => void) | null = null;
 
   constructor() {
     this.cap = new Cap();
@@ -51,10 +52,16 @@ export class PacketCaptureService {
   }
 
   startCapture() {
-    if (this.isCapturing) return;
+    if (this.isCapturing) {
+      console.log('Packet capture already running');
+      return;
+    }
+    
     this.isCapturing = true;
+    console.log('Starting packet capture...');
 
-    this.cap.on('packet', (nbytes: number, trunc: boolean) => {
+    // Create new packet handler
+    this.packetHandler = (nbytes: number, trunc: boolean) => {
       if (nbytes === 0) return;
 
       try {
@@ -64,13 +71,37 @@ export class PacketCaptureService {
         const error = err as Error;
         console.error('Error processing packet:', error);
       }
-    });
+    };
+
+    // Add the packet handler
+    this.cap.on('packet', this.packetHandler);
   }
 
   stopCapture() {
-    if (!this.isCapturing) return;
-    this.cap.close();
+    if (!this.isCapturing) {
+      console.log('Packet capture not running');
+      return;
+    }
+    
     this.isCapturing = false;
+    console.log('Stopping packet capture...');
+    
+    try {
+      // Close the capture device - this will automatically remove all listeners
+      this.cap.close();
+      
+      // Reset the buffer
+      this.buffer.fill(0);
+      
+      // Reset the packet handler
+      this.packetHandler = null;
+      
+      console.log('Packet capture stopped successfully');
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error stopping packet capture:', error);
+      throw error;
+    }
   }
 
   private async processPacket(raw: Buffer) {
@@ -84,25 +115,27 @@ export class PacketCaptureService {
         end_ip: this.getDestinationIP(raw),
         protocol: this.getProtocol(raw),
         frequency: this.updateFrequency(this.getSourceIP(raw)),
-        status: this.determineStatus({
-          protocol: this.getProtocol(raw),
-          frequency: this.updateFrequency(this.getSourceIP(raw))
-        }),
+        status: 'normal',
         description: this.generateDescription(raw),
         start_bytes: raw.length,
-        end_bytes: 0,
+        end_bytes: raw.length,
         is_malicious: false,
         attack_type: 'normal',
         confidence: 0
       };
 
-      // Save to MongoDB using the model
+      // Determine status based on protocol and frequency
+      packetData.status = this.determineStatus(packetData);
+
+      // Save to MongoDB
       const savedPacket = await PacketModel.create(packetData);
 
       try {
-        // Send to prediction service
-        const response = await axios.post(this.predictionServiceUrl, [savedPacket]);
-        const predictions = response.data.predictions[0];
+        // Get predictions from ML service
+        const response = await axios.post(this.predictionServiceUrl, {
+          packet: packetData
+        });
+        const predictions = response.data;
 
         // Update packet with predictions
         savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
@@ -116,6 +149,7 @@ export class PacketCaptureService {
       }
       
       // Broadcast to connected clients
+      const io = getIO();
       io.emit('new-packet', savedPacket);
     } catch (err) {
       const error = err as Error;

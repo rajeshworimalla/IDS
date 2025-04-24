@@ -1,11 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
+import { createServer } from 'http';
 import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
 import { config } from './config/env';
+import { initializeSocket } from './socket';
 
 const app = express();
+const httpServer = createServer(app);
+
+// Initialize Socket.IO
+initializeSocket(httpServer);
 
 console.log('Starting server with config:', config);
 
@@ -84,6 +90,6 @@ app.get('/', (req, res) => {
 
 // Start server
 console.log('Starting HTTP server...');
-app.listen(config.PORT, () => {
+httpServer.listen(config.PORT, () => {
   console.log(`Server running on port ${config.PORT}`);
 }); 

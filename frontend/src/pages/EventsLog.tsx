@@ -41,7 +41,7 @@ const EventsLog: FC = () => {
     const fetchPackets = async () => {
       try {
         console.log('Fetching packets from backend...');
-        const response = await fetch('http://localhost:5000/api/packets/all');
+        const response = await fetch('http://localhost:5001/api/packets/all');
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
@@ -59,25 +59,73 @@ const EventsLog: FC = () => {
 
   // Initialize socket connection
   useEffect(() => {
-    const newSocket = io('http://localhost:5000');
+    const newSocket = io('http://localhost:5001', {
+      withCredentials: true,
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
+    });
+
+    newSocket.on('connect', () => {
+      console.log('Socket connected successfully');
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Socket connection error:', error);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        // The disconnection was initiated by the server, you need to reconnect manually
+        newSocket.connect();
+      }
+    });
+
+    newSocket.on('reconnect', (attemptNumber) => {
+      console.log('Socket reconnected after', attemptNumber, 'attempts');
+    });
+
+    newSocket.on('reconnect_error', (error) => {
+      console.error('Socket reconnection error:', error);
+    });
+
+    newSocket.on('reconnect_failed', () => {
+      console.error('Socket reconnection failed');
+    });
+
     setSocket(newSocket);
 
     // Listen for new packets
     newSocket.on('new-packet', (packet: Packet) => {
-      if (isScanning) {
-        setPackets(prev => [packet, ...prev]);
+      console.log('Received new packet:', packet);
+      setPackets(prev => [packet, ...prev]);
+    });
+
+    // Listen for scanning status updates
+    newSocket.on('scanning-status', (status: { isScanning: boolean; error?: string }) => {
+      console.log('Scanning status update:', status);
+      setIsScanning(status.isScanning);
+      if (status.error) {
+        console.error('Scanning error:', status.error);
       }
     });
 
     return () => {
-      newSocket.disconnect();
+      if (newSocket) {
+        newSocket.removeAllListeners();
+        newSocket.disconnect();
+      }
     };
-  }, [isScanning]);
+  }, []);
 
   const handleReset = async () => {
     try {
       console.log('Sending reset request...');
-      const response = await fetch('http://localhost:5000/api/packets/reset', {
+      const response = await fetch('http://localhost:5001/api/packets/reset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -100,7 +148,7 @@ const EventsLog: FC = () => {
 
   const handleDateFilter = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`);
+      const response = await fetch(`http://localhost:5001/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`);
       const data = await response.json();
       setPackets(data);
     } catch (error) {
@@ -110,7 +158,7 @@ const EventsLog: FC = () => {
 
   const handleSearch = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/packets/search?q=${searchTerm}`);
+      const response = await fetch(`http://localhost:5001/api/packets/search?q=${searchTerm}`);
       const data = await response.json();
       setPackets(data);
     } catch (error) {
@@ -161,13 +209,17 @@ const EventsLog: FC = () => {
   };
 
   const handleStartScanning = () => {
-    setIsScanning(true);
-    socket?.emit('start-scanning');
+    if (socket) {
+      console.log('Emitting start-scanning event');
+      socket.emit('start-scanning');
+    }
   };
 
   const handleStopScanning = () => {
-    setIsScanning(false);
-    socket?.emit('stop-scanning');
+    if (socket) {
+      console.log('Emitting stop-scanning event');
+      socket.emit('stop-scanning');
+    }
   };
 
   return (
