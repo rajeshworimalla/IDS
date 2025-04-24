@@ -1,5 +1,5 @@
-import { FC, useState } from 'react';
-import { motion } from 'framer-motion';
+import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search as SearchIcon,
   FilterList as FilterIcon,
@@ -11,81 +11,67 @@ import {
 import '../styles/DataTable.css';
 
 interface TableData {
-  id: number;
+  _id: string;
   date: string;
-  endDate: string;
-  ip: string;
-  port: string;
+  start_ip: string;
+  end_ip: string;
   protocol: string;
-  status: 'warning' | 'error' | 'info' | 'success';
-  message: string;
-  severity: string;
+  status: 'critical' | 'medium' | 'normal';
+  description: string;
+  is_malicious: boolean;
+  attack_type: string;
 }
 
-const DataTable: FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
+interface DataTableProps {
+  data: TableData[];
+  isLoading: boolean;
+}
 
-  const mockData: TableData[] = [
-    { id: 1, date: '20.03.2024', endDate: '20.03.2024', ip: '10.98.106.154', port: '8080', protocol: 'HTTP', status: 'error', message: 'ET CMS Active Threat Intelligence Poor', severity: '1/5' },
-    { id: 2, date: '20.03.2024', endDate: '20.03.2024', ip: '10.98.106.154', port: '443', protocol: 'HTTPS', status: 'warning', message: 'Reputation IP group 11', severity: '2/5' },
-    { id: 3, date: '20.03.2024', endDate: '20.03.2024', ip: '10.98.106.154', port: '80', protocol: 'HTTP', status: 'info', message: 'SURICATA STREAM excessive retransmissions', severity: '1/5' },
-    // Add more mock data as needed
-  ];
+const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [selectedStatus, setSelectedStatus] = React.useState<string[]>([]);
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'success':
-        return <CheckIcon className="status-icon success" />;
-      case 'warning':
-        return <WarningIcon className="status-icon warning" />;
-      case 'error':
+    switch (status.toLowerCase()) {
+      case 'critical':
         return <ErrorIcon className="status-icon error" />;
-      case 'info':
-        return <InfoIcon className="status-icon info" />;
+      case 'medium':
+        return <WarningIcon className="status-icon warning" />;
+      case 'normal':
+        return <CheckIcon className="status-icon success" />;
       default:
-        return null;
+        return <InfoIcon className="status-icon info" />;
     }
   };
 
-  const filteredData = mockData.filter(item => {
+  const filteredData = data.filter(item => {
     const matchesSearch = Object.values(item).some(
-      value => value.toString().toLowerCase().includes(searchTerm.toLowerCase())
+      value => value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
     );
     const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(item.status);
     return matchesSearch && matchesStatus;
   });
 
-  const tableVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
-    }
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString();
   };
 
-  const rowVariants = {
-    hidden: { opacity: 0, x: -20 },
-    visible: {
-      opacity: 1,
-      x: 0,
-      transition: {
-        type: "spring",
-        stiffness: 100
-      }
-    }
-  };
+  if (isLoading) {
+    return (
+      <div className="table-loading">
+        <motion.div
+          className="loading-spinner"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+        />
+        <p>Loading data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="data-table-container">
-      <motion.div 
-        className="table-header"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
+      <div className="table-header">
         <div className="search-bar">
           <SearchIcon />
           <input
@@ -98,8 +84,8 @@ const DataTable: FC = () => {
         <div className="filter-section">
           <FilterIcon />
           <div className="status-filters">
-            {['error', 'warning', 'info', 'success'].map((status) => (
-              <motion.button
+            {['critical', 'medium', 'normal'].map((status) => (
+              <button
                 key={status}
                 className={`filter-btn ${selectedStatus.includes(status) ? 'active' : ''}`}
                 onClick={() => {
@@ -109,56 +95,48 @@ const DataTable: FC = () => {
                       : [...prev, status]
                   );
                 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
               >
                 {getStatusIcon(status)}
                 {status.charAt(0).toUpperCase() + status.slice(1)}
-              </motion.button>
+              </button>
             ))}
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div 
-        className="table-wrapper"
-        variants={tableVariants}
-        initial="hidden"
-        animate="visible"
-      >
+      <div className="table-wrapper">
         <table className="data-table">
           <thead>
             <tr>
               <th>Status</th>
               <th>Date</th>
-              <th>End Date</th>
-              <th>IP</th>
-              <th>Port</th>
+              <th>Source IP</th>
+              <th>Destination IP</th>
               <th>Protocol</th>
-              <th>Message</th>
-              <th>Severity</th>
+              <th>Description</th>
+              <th>Attack Type</th>
             </tr>
           </thead>
-          <motion.tbody>
+          <tbody>
             {filteredData.map((row) => (
-              <motion.tr
-                key={row.id}
-                variants={rowVariants}
-                whileHover={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}
-              >
+              <tr key={row._id}>
                 <td>{getStatusIcon(row.status)}</td>
-                <td>{row.date}</td>
-                <td>{row.endDate}</td>
-                <td>{row.ip}</td>
-                <td>{row.port}</td>
+                <td>{formatDate(row.date)}</td>
+                <td>{row.start_ip}</td>
+                <td>{row.end_ip}</td>
                 <td>{row.protocol}</td>
-                <td>{row.message}</td>
-                <td>{row.severity}</td>
-              </motion.tr>
+                <td>{row.description}</td>
+                <td>{row.attack_type}</td>
+              </tr>
             ))}
-          </motion.tbody>
+          </tbody>
         </table>
-      </motion.div>
+        {filteredData.length === 0 && (
+          <div className="no-data">
+            No data available
+          </div>
+        )}
+      </div>
     </div>
   );
 };

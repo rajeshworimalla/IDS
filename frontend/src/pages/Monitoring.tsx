@@ -1,18 +1,8 @@
-import { FC, useState } from 'react';
-import { motion } from 'framer-motion';
+import { FC, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
+import { packetService, ThreatAlert } from '../services/packetService';
 import '../styles/Monitoring.css';
-
-interface ThreatAlert {
-  id: number;
-  severity: 'critical' | 'high' | 'medium' | 'low';
-  type: string;
-  source: string;
-  destination: string;
-  timestamp: string;
-  description: string;
-  status: 'active' | 'investigating' | 'mitigated' | 'resolved';
-}
 
 interface FilterState {
   severity: string[];
@@ -22,66 +12,21 @@ interface FilterState {
 
 const Monitoring: FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [expandedAlertId, setExpandedAlertId] = useState<number | null>(null);
+  const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<ThreatAlert[]>([]);
+  const [alertStats, setAlertStats] = useState({
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     severity: [],
     status: [],
     timeRange: '24h'
   });
-
-  // Mock threat data
-  const threatAlerts: ThreatAlert[] = [
-    {
-      id: 1,
-      severity: 'critical',
-      type: 'Data Exfiltration',
-      source: '192.168.1.45',
-      destination: '103.245.67.89',
-      timestamp: '2024-03-20 14:37:22',
-      description: 'Suspicious outbound data transfer detected. Large encrypted files sent to unknown external server.',
-      status: 'active'
-    },
-    {
-      id: 2,
-      severity: 'high',
-      type: 'Brute Force Attack',
-      source: '45.67.89.123',
-      destination: '192.168.1.254',
-      timestamp: '2024-03-20 13:22:15',
-      description: 'Multiple failed login attempts detected on authentication server. Pattern indicates automated password guessing.',
-      status: 'investigating'
-    },
-    {
-      id: 3,
-      severity: 'medium',
-      type: 'Port Scanning',
-      source: '78.45.123.87',
-      destination: '192.168.1.1',
-      timestamp: '2024-03-20 12:15:34',
-      description: 'Sequential port scanning detected from external IP. Multiple common service ports targeted.',
-      status: 'mitigated'
-    },
-    {
-      id: 4,
-      severity: 'high',
-      type: 'Malware Detection',
-      source: '192.168.1.87',
-      destination: 'Internal Network',
-      timestamp: '2024-03-20 11:03:47',
-      description: 'Trojan signature detected on workstation. Potential command and control communication observed.',
-      status: 'active'
-    },
-    {
-      id: 5,
-      severity: 'low',
-      type: 'Suspicious Traffic',
-      source: '192.168.1.123',
-      destination: '45.78.123.45',
-      timestamp: '2024-03-20 09:45:12',
-      description: 'Unusual traffic pattern detected. Non-business hours communication with flagged IP address.',
-      status: 'resolved'
-    }
-  ];
 
   const timeRangeOptions = [
     { value: '1h', label: 'Last Hour' },
@@ -106,7 +51,34 @@ const Monitoring: FC = () => {
     ]
   };
 
-  const handleToggleExpand = (id: number) => {
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        // Get alerts and stats
+        const [alertsData, statsData] = await Promise.all([
+          packetService.getAlerts(),
+          packetService.getAlertStats()
+        ]);
+
+        setAlerts(alertsData);
+        setAlertStats(statsData);
+      } catch (err) {
+        console.error('Error fetching monitoring data:', err);
+        setError('Failed to fetch monitoring data. Please try again later.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleToggleExpand = (id: string) => {
     setExpandedAlertId(expandedAlertId === id ? null : id);
   };
 
@@ -129,26 +101,33 @@ const Monitoring: FC = () => {
     setFilters(prev => ({ ...prev, timeRange: range }));
   };
 
+  const handleUpdateStatus = async (alertId: string, newStatus: ThreatAlert['status']) => {
+    try {
+      await packetService.updateAlertStatus(alertId, newStatus);
+      // Refresh alerts after status update
+      const updatedAlerts = await packetService.getAlerts();
+      setAlerts(updatedAlerts);
+    } catch (err) {
+      console.error('Error updating alert status:', err);
+      setError('Failed to update alert status. Please try again.');
+    }
+  };
+
   // Filter alerts based on current filters
-  const filteredAlerts = threatAlerts.filter(alert => {
-    // Search term filter
+  const filteredAlerts = alerts.filter(alert => {
     const matchesSearch = 
       searchTerm === '' || 
       Object.values(alert).some(
         value => typeof value === 'string' && value.toLowerCase().includes(searchTerm.toLowerCase())
       );
     
-    // Severity filter
     const matchesSeverity = 
       filters.severity.length === 0 || 
       filters.severity.includes(alert.severity);
     
-    // Status filter
     const matchesStatus = 
       filters.status.length === 0 || 
       filters.status.includes(alert.status);
-    
-    // Time filter would be implemented with real data
     
     return matchesSearch && matchesSeverity && matchesStatus;
   });
@@ -173,22 +152,44 @@ const Monitoring: FC = () => {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="monitoring-page">
+        <Navbar />
+        <div className="loading-container">
+          <div className="loading-spinner" />
+          <p>Loading monitoring data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="security-alerts-page">
+    <div className="monitoring-page">
       <Navbar />
       <motion.main
-        className="security-alerts-content"
+        className="monitoring-content"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
+        {error && (
+          <motion.div 
+            className="error-message"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            {error}
+          </motion.div>
+        )}
+
         <motion.div 
-          className="security-header"
+          className="monitoring-header"
           initial={{ y: -20 }}
           animate={{ y: 0 }}
         >
           <h1>Monitoring</h1>
-          <div className="security-stats">
+          <div className="monitoring-stats">
             <motion.div 
               className="stat-card critical"
               initial={{ scale: 0.9, opacity: 0 }}
@@ -196,7 +197,7 @@ const Monitoring: FC = () => {
               transition={{ delay: 0.1 }}
             >
               <h3>Critical</h3>
-              <span className="stat-value">1</span>
+              <span className="stat-value">{alertStats.critical}</span>
             </motion.div>
             <motion.div 
               className="stat-card high"
@@ -205,7 +206,7 @@ const Monitoring: FC = () => {
               transition={{ delay: 0.2 }}
             >
               <h3>High</h3>
-              <span className="stat-value">2</span>
+              <span className="stat-value">{alertStats.high}</span>
             </motion.div>
             <motion.div 
               className="stat-card medium"
@@ -214,7 +215,7 @@ const Monitoring: FC = () => {
               transition={{ delay: 0.3 }}
             >
               <h3>Medium</h3>
-              <span className="stat-value">1</span>
+              <span className="stat-value">{alertStats.medium}</span>
             </motion.div>
             <motion.div 
               className="stat-card low"
@@ -223,7 +224,7 @@ const Monitoring: FC = () => {
               transition={{ delay: 0.4 }}
             >
               <h3>Low</h3>
-              <span className="stat-value">1</span>
+              <span className="stat-value">{alertStats.low}</span>
             </motion.div>
           </div>
         </motion.div>
@@ -297,100 +298,130 @@ const Monitoring: FC = () => {
           </div>
         </div>
 
-        <div className="alerts-list">
-          {filteredAlerts.length > 0 ? (
-            filteredAlerts.map((alert) => (
-              <motion.div
-                key={alert.id}
-                className={`alert-card ${alert.severity} ${expandedAlertId === alert.id ? 'expanded' : ''}`}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: alert.id * 0.1 }}
-                layoutId={`alert-${alert.id}`}
+        <AnimatePresence>
+          <div className="alerts-list">
+            {filteredAlerts.length > 0 ? (
+              filteredAlerts.map((alert) => (
+                <motion.div
+                  key={alert._id}
+                  className={`alert-card ${alert.severity} ${expandedAlertId === alert._id ? 'expanded' : ''}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  layout
+                >
+                  <div className="alert-header" onClick={() => handleToggleExpand(alert._id)}>
+                    <div className="alert-icon-container">
+                      <span className="alert-icon">{getSeverityIcon(alert.severity)}</span>
+                    </div>
+                    <div className="alert-basic-info">
+                      <h3>{alert.type}</h3>
+                      <div className="alert-meta">
+                        <span className="timestamp">
+                          {new Date(alert.timestamp).toLocaleString()}
+                        </span>
+                        {getStatusBadge(alert.status)}
+                      </div>
+                    </div>
+                    <div className="alert-actions">
+                      <motion.button
+                        className="expand-btn"
+                        animate={{ rotate: expandedAlertId === alert._id ? 180 : 0 }}
+                      >
+                        ▼
+                      </motion.button>
+                    </div>
+                  </div>
+                  
+                  <AnimatePresence>
+                    {expandedAlertId === alert._id && (
+                      <motion.div 
+                        className="alert-details"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        <div className="detail-group">
+                          <div className="detail-item">
+                            <span className="detail-label">Source</span>
+                            <span className="detail-value">{alert.source}</span>
+                          </div>
+                          <div className="detail-item">
+                            <span className="detail-label">Destination</span>
+                            <span className="detail-value">{alert.destination}</span>
+                          </div>
+                          <div className="detail-item">
+                            <span className="detail-label">Attack Type</span>
+                            <span className="detail-value">{alert.attack_type}</span>
+                          </div>
+                          <div className="detail-item">
+                            <span className="detail-label">Confidence</span>
+                            <span className="detail-value">{alert.confidence}%</span>
+                          </div>
+                        </div>
+                        <div className="detail-description">
+                          <p>{alert.description}</p>
+                        </div>
+                        <div className="detail-actions">
+                          {alert.status !== 'investigating' && (
+                            <motion.button 
+                              className="action-btn investigate"
+                              onClick={() => handleUpdateStatus(alert._id, 'investigating')}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              Investigate
+                            </motion.button>
+                          )}
+                          {alert.status !== 'mitigated' && (
+                            <motion.button 
+                              className="action-btn mitigate"
+                              onClick={() => handleUpdateStatus(alert._id, 'mitigated')}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              Mitigate
+                            </motion.button>
+                          )}
+                          {alert.status !== 'resolved' && (
+                            <motion.button 
+                              className="action-btn resolve"
+                              onClick={() => handleUpdateStatus(alert._id, 'resolved')}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              Resolve
+                            </motion.button>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              ))
+            ) : (
+              <motion.div 
+                className="no-results"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
               >
-                <div className="alert-header" onClick={() => handleToggleExpand(alert.id)}>
-                  <div className="alert-icon-container">
-                    <span className="alert-icon">{getSeverityIcon(alert.severity)}</span>
-                  </div>
-                  <div className="alert-basic-info">
-                    <h3>{alert.type}</h3>
-                    <div className="alert-meta">
-                      <span className="timestamp">{alert.timestamp}</span>
-                      {getStatusBadge(alert.status)}
-                    </div>
-                  </div>
-                  <div className="alert-actions">
-                    <motion.button
-                      className="expand-btn"
-                      animate={{ rotate: expandedAlertId === alert.id ? 180 : 0 }}
-                    >
-                      ▼
-                    </motion.button>
-                  </div>
-                </div>
-                
-                {expandedAlertId === alert.id && (
-                  <motion.div 
-                    className="alert-details"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                  >
-                    <div className="detail-group">
-                      <div className="detail-item">
-                        <span className="detail-label">Source</span>
-                        <span className="detail-value">{alert.source}</span>
-                      </div>
-                      <div className="detail-item">
-                        <span className="detail-label">Destination</span>
-                        <span className="detail-value">{alert.destination}</span>
-                      </div>
-                    </div>
-                    <div className="detail-description">
-                      <p>{alert.description}</p>
-                    </div>
-                    <div className="detail-actions">
-                      <motion.button 
-                        className="action-btn investigate"
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        Investigate
-                      </motion.button>
-                      <motion.button 
-                        className="action-btn mitigate"
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        Mitigate
-                      </motion.button>
-                      <motion.button 
-                        className="action-btn resolve"
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        Resolve
-                      </motion.button>
-                    </div>
-                  </motion.div>
-                )}
+                <p>No alerts match your current filters</p>
+                <motion.button 
+                  className="reset-btn"
+                  onClick={() => {
+                    setFilters({ severity: [], status: [], timeRange: '24h' });
+                    setSearchTerm('');
+                  }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Reset Filters
+                </motion.button>
               </motion.div>
-            ))
-          ) : (
-            <div className="no-results">
-              <p>No alerts match your current filters</p>
-              <button 
-                className="reset-btn"
-                onClick={() => {
-                  setFilters({ severity: [], status: [], timeRange: '24h' });
-                  setSearchTerm('');
-                }}
-              >
-                Reset Filters
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </AnimatePresence>
       </motion.main>
     </div>
   );

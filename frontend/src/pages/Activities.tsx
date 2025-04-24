@@ -1,10 +1,58 @@
-import { FC } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import DataTable from '../components/DataTable';
+import { packetService } from '../services/packetService';
 import '../styles/Activities.css';
 
+interface ActivityStats {
+  totalEvents: number;
+  activeAlerts: number;
+  systemHealth: number;
+}
+
 const Activities: FC = () => {
+  const [stats, setStats] = useState<ActivityStats>({
+    totalEvents: 0,
+    activeAlerts: 0,
+    systemHealth: 0
+  });
+  const [packets, setPackets] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        const [packetStats, packetData] = await Promise.all([
+          packetService.getPacketStats(),
+          packetService.getPackets()
+        ]);
+
+        setStats({
+          totalEvents: packetStats.totalPackets,
+          activeAlerts: packetStats.criticalCount + packetStats.mediumCount,
+          systemHealth: calculateSystemHealth(packetStats)
+        });
+        setPackets(packetData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const calculateSystemHealth = (packetStats: any) => {
+    const total = packetStats.totalPackets || 1;
+    const normalPackets = packetStats.normalCount;
+    return Math.round((normalPackets / total) * 100);
+  };
+
   return (
     <div className="activities-page">
       <Navbar />
@@ -28,7 +76,7 @@ const Activities: FC = () => {
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.3 }}
             >
-              <span className="stat-value">152</span>
+              <span className="stat-value">{stats.totalEvents}</span>
               <span className="stat-label">Total Events</span>
             </motion.div>
             <motion.div
@@ -37,7 +85,7 @@ const Activities: FC = () => {
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.4 }}
             >
-              <span className="stat-value">24</span>
+              <span className="stat-value">{stats.activeAlerts}</span>
               <span className="stat-label">Active Alerts</span>
             </motion.div>
             <motion.div
@@ -46,12 +94,12 @@ const Activities: FC = () => {
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.5 }}
             >
-              <span className="stat-value">98%</span>
+              <span className="stat-value">{stats.systemHealth}%</span>
               <span className="stat-label">System Health</span>
             </motion.div>
           </div>
         </motion.div>
-        <DataTable />
+        <DataTable data={packets} isLoading={isLoading} />
       </motion.main>
     </div>
   );

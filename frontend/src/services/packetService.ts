@@ -32,6 +32,27 @@ export interface PacketStats {
   maliciousPercentage: number;
 }
 
+export interface ThreatAlert {
+  _id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  type: string;
+  source: string;
+  destination: string;
+  timestamp: Date;
+  description: string;
+  status: 'active' | 'investigating' | 'mitigated' | 'resolved';
+  attack_type: string;
+  confidence: number;
+}
+
+export interface AlertStats {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  total: number;
+}
+
 export const packetService = {
   async getPackets(): Promise<PacketData[]> {
     const response = await api.get(`${API_URL}/all`);
@@ -110,5 +131,46 @@ export const packetService = {
         value1: data.tcp,
         value2: data.udp
       }));
+  },
+
+  async getAlerts(): Promise<ThreatAlert[]> {
+    const response = await api.get(`${API_URL}/alerts`);
+    return response.data;
+  },
+
+  async getAlertStats(): Promise<AlertStats> {
+    const alerts = await this.getAlerts();
+    const stats = {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      total: alerts.length
+    };
+
+    alerts.forEach(alert => {
+      stats[alert.severity]++;
+    });
+
+    return stats;
+  },
+
+  async updateAlertStatus(alertId: string, status: ThreatAlert['status']): Promise<ThreatAlert> {
+    const response = await api.patch(`${API_URL}/alerts/${alertId}`, { status });
+    return response.data;
+  },
+
+  async getAlertsByTimeRange(from: Date, to: Date): Promise<ThreatAlert[]> {
+    const response = await api.get(`${API_URL}/alerts/filter`, {
+      params: { from, to }
+    });
+    return response.data;
+  },
+
+  async getRecentAlerts(limit: number = 10): Promise<ThreatAlert[]> {
+    const response = await api.get(`${API_URL}/alerts/recent`, {
+      params: { limit }
+    });
+    return response.data;
   }
 }; 
