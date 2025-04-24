@@ -5,7 +5,7 @@ import { PacketCaptureService } from './services/packetCapture';
 
 const app = express();
 const httpServer = createServer(app);
-const packetCapture = new PacketCaptureService();
+let packetCapture: PacketCaptureService | null = null;
 
 export const io = new Server(httpServer, {
   cors: {
@@ -19,20 +19,27 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('start-scanning', () => {
     console.log('Starting packet capture...');
+    if (!packetCapture) {
+      packetCapture = new PacketCaptureService();
+    }
     packetCapture.startCapture();
     socket.emit('scanning-status', { isScanning: true });
   });
 
   socket.on('stop-scanning', () => {
     console.log('Stopping packet capture...');
-    packetCapture.stopCapture();
+    if (packetCapture) {
+      packetCapture.stopCapture();
+    }
     socket.emit('scanning-status', { isScanning: false });
   });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     // Stop scanning when client disconnects to prevent orphaned captures
-    packetCapture.stopCapture();
+    if (packetCapture) {
+      packetCapture.stopCapture();
+    }
   });
 });
 
