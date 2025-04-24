@@ -1,53 +1,132 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import '../styles/EventsLog.css';
 
-interface FilterOption {
-  id: string;
-  label: string;
-  active: boolean;
-}
-
-interface EventData {
-  id: number;
+interface Packet {
+  _id: string;
   date: string;
-  endDate: string;
-  startIP: string;
-  endIP: string;
+  start_ip: string;
+  end_ip: string;
   protocol: string;
+  frequency: number;
+  status: 'critical' | 'medium' | 'normal';
   description: string;
-  frequency: string;
-  startBytes: string;
-  endBytes: string;
+  start_bytes: number;
+  end_bytes: number;
 }
 
 const EventsLog: FC = () => {
-  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [packets, setPackets] = useState<Packet[]>([]);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    from: '10.03.2024',
+    to: '20.03.2024'
+  });
   
   // Filter options
-  const filterOptions: FilterOption[] = [
-    { id: 'all', label: 'Alle', active: true },
-    { id: 'open', label: 'Geöffnet', active: false },
-    { id: 'closed', label: 'Geschlossen', active: false },
-  ];
-  
-  // Mock events data
-  const eventsData: EventData[] = [
-    { id: 1, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTP', description: 'Lorem ipsum dolor sit amet, consectetur adipiscing', frequency: '1.452/2', startBytes: '118', endBytes: '94' },
-    { id: 2, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTPS', description: 'Sed do eiusmod tempor incididunt ut labore et dolore', frequency: '566', startBytes: '89', endBytes: '120' },
-    { id: 3, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'FTP', description: 'Magna aliqua. Ut enim ad minim veniam, quis nostrud', frequency: '39', startBytes: '74', endBytes: '102' },
-    { id: 4, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'SSH', description: 'Exercitation ullamco laboris nisi ut aliquip ex ea', frequency: '144', startBytes: '95', endBytes: '120' },
-    { id: 5, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'ICMP', description: 'Commodo consequat', frequency: '403', startBytes: '110', endBytes: '78' },
-    { id: 6, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTPS', description: 'Lorem ipsum dolor sit amet, consectetur adipiscing', frequency: '122', startBytes: '112', endBytes: '94' },
-    { id: 7, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTP', description: 'Sed do eiusmod tempor incididunt ut labore et dolore', frequency: '256', startBytes: '85', endBytes: '120' },
-    { id: 8, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'HTTPS', description: 'Magna aliqua. Ut enim ad minim veniam, quis nostrud', frequency: '39', startBytes: '74', endBytes: '102' },
-    { id: 9, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'SSH', description: 'Exercitation ullamco laboris nisi ut aliquip ex ea', frequency: '144', startBytes: '95', endBytes: '120' },
-    { id: 10, date: '20.03.2024', endDate: '20.03.2024', startIP: '10.98.106.154', endIP: '10.99.120.1', protocol: 'ICMP', description: 'Commodo consequat', frequency: '403', startBytes: '110', endBytes: '78' },
+  const filterOptions = [
+    { id: 'all', label: 'All', active: true },
+    { id: 'open', label: 'Open', active: false },
+    { id: 'closed', label: 'Closed', active: false },
   ];
 
-  const toggleRowSelection = (id: number) => {
+  // Fetch packets on component mount
+  useEffect(() => {
+    const fetchPackets = async () => {
+      try {
+        console.log('Fetching packets from backend...');
+        const response = await fetch('http://localhost:5000/api/packets/all');
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`Received ${data.length} packets from backend`);
+          setPackets(data);
+        } else {
+          console.error('Failed to fetch packets:', await response.text());
+        }
+      } catch (error) {
+        console.error('Error fetching packets:', error);
+      }
+    };
+
+    fetchPackets();
+  }, []);
+
+  // Initialize socket connection
+  useEffect(() => {
+    const newSocket = io('http://localhost:5000');
+    setSocket(newSocket);
+
+    // Listen for new packets
+    newSocket.on('new-packet', (packet: Packet) => {
+      if (isScanning) {
+        setPackets(prev => [packet, ...prev]);
+      }
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [isScanning]);
+
+  const handleReset = async () => {
+    try {
+      console.log('Sending reset request...');
+      const response = await fetch('http://localhost:5000/api/packets/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Reset successful:', result);
+        setPackets([]);
+        setShowResetConfirm(false);
+      } else {
+        const error = await response.text();
+        console.error('Failed to reset packets:', error);
+      }
+    } catch (error) {
+      console.error('Error resetting packets:', error);
+    }
+  };
+
+  const handleDateFilter = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`);
+      const data = await response.json();
+      setPackets(data);
+    } catch (error) {
+      console.error('Error filtering packets:', error);
+    }
+  };
+
+  const handleSearch = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/packets/search?q=${searchTerm}`);
+      const data = await response.json();
+      setPackets(data);
+    } catch (error) {
+      console.error('Error searching packets:', error);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      if (e.currentTarget.id === 'search-input') {
+        handleSearch();
+      }
+    }
+  };
+
+  const toggleRowSelection = (id: string) => {
     setSelectedRows(prev => 
       prev.includes(id)
         ? prev.filter(rowId => rowId !== id)
@@ -56,11 +135,39 @@ const EventsLog: FC = () => {
   };
 
   const handleSelectAll = () => {
-    if (selectedRows.length === eventsData.length) {
+    if (selectedRows.length === packets.length) {
       setSelectedRows([]);
     } else {
-      setSelectedRows(eventsData.map(item => item.id));
+      setSelectedRows(packets.map(packet => packet._id));
     }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'critical': return 'error';
+      case 'medium': return 'warning';
+      case 'normal': return 'success';
+      default: return '';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'critical': return 'Critical Threat';
+      case 'medium': return 'Medium Threat';
+      case 'normal': return 'Normal Traffic';
+      default: return 'Unknown';
+    }
+  };
+
+  const handleStartScanning = () => {
+    setIsScanning(true);
+    socket?.emit('start-scanning');
+  };
+
+  const handleStopScanning = () => {
+    setIsScanning(false);
+    socket?.emit('stop-scanning');
   };
 
   return (
@@ -89,21 +196,33 @@ const EventsLog: FC = () => {
             
             <div className="date-filters">
               <div className="date-field">
-                <label>Von</label>
-                <input type="text" defaultValue="10.03.2024" />
+                <label>From</label>
+                <input 
+                  type="text" 
+                  value={dateRange.from}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+                  onKeyPress={(e) => e.key === 'Enter' && handleDateFilter()}
+                />
               </div>
               <div className="date-field">
-                <label>Bis</label>
-                <input type="text" defaultValue="20.03.2024" />
+                <label>To</label>
+                <input 
+                  type="text" 
+                  value={dateRange.to}
+                  onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+                  onKeyPress={(e) => e.key === 'Enter' && handleDateFilter()}
+                />
               </div>
             </div>
             
             <div className="search-filter">
-              <input 
+              <input
                 type="text" 
-                placeholder="0.0.0.0/0 Suche"
+                id="search-input"
+                placeholder="0.0.0.0/0 Search"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={handleKeyPress}
               />
             </div>
           </div>
@@ -112,6 +231,7 @@ const EventsLog: FC = () => {
             className="filter-action-btn"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
+            onClick={handleDateFilter}
           >
             Filter
           </motion.button>
@@ -129,50 +249,53 @@ const EventsLog: FC = () => {
                 <th>
                   <input 
                     type="checkbox" 
-                    checked={selectedRows.length === eventsData.length}
+                    checked={selectedRows.length === packets.length}
                     onChange={handleSelectAll}
                   />
                 </th>
                 <th>Status</th>
-                <th>Datum</th>
-                <th>Ende</th>
+                <th>Date</th>
+                <th>End</th>
                 <th>Start IP</th>
                 <th>End IP</th>
-                <th>Protokoll</th>
-                <th>Beschreibung</th>
-                <th>Frequenz</th>
+                <th>Protocol</th>
+                <th>Description</th>
+                <th>Frequency</th>
                 <th>Start Bytes</th>
                 <th>End Bytes</th>
               </tr>
             </thead>
             <tbody>
-              {eventsData.map((event, index) => (
-                <motion.tr 
-                  key={event.id}
+              {packets.map((packet, index) => (
+                <motion.tr
+                  key={packet._id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.05 * index }}
-                  className={selectedRows.includes(event.id) ? 'selected' : ''}
+                  className={selectedRows.includes(packet._id) ? 'selected' : ''}
                 >
                   <td>
                     <input 
                       type="checkbox" 
-                      checked={selectedRows.includes(event.id)}
-                      onChange={() => toggleRowSelection(event.id)}
+                      checked={selectedRows.includes(packet._id)}
+                      onChange={() => toggleRowSelection(packet._id)}
                     />
                   </td>
                   <td>
-                    <span className={`status-indicator ${index % 3 === 0 ? 'error' : index % 3 === 1 ? 'warning' : 'success'}`}></span>
+                    <div className="status-container" title={getStatusText(packet.status)}>
+                      <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
+                      <span className="status-text">{packet.status}</span>
+                    </div>
                   </td>
-                  <td>{event.date}</td>
-                  <td>{event.endDate}</td>
-                  <td>{event.startIP}</td>
-                  <td>{event.endIP}</td>
-                  <td>{event.protocol}</td>
-                  <td className="description-cell">{event.description}</td>
-                  <td>{event.frequency}</td>
-                  <td>{event.startBytes}</td>
-                  <td>{event.endBytes}</td>
+                  <td>{new Date(packet.date).toLocaleDateString()}</td>
+                  <td>{new Date(packet.date).toLocaleDateString()}</td>
+                  <td>{packet.start_ip}</td>
+                  <td>{packet.end_ip}</td>
+                  <td>{packet.protocol}</td>
+                  <td className="description-cell">{packet.description}</td>
+                  <td>{packet.frequency}</td>
+                  <td>{packet.start_bytes}</td>
+                  <td>{packet.end_bytes}</td>
                 </motion.tr>
               ))}
             </tbody>
@@ -180,12 +303,69 @@ const EventsLog: FC = () => {
         </div>
         
         <div className="pagination-controls">
-          <div className="records-info">Anzeige 1-10 von 435</div>
+          <div className="records-info">Showing 1-10 of {packets.length}</div>
           <div className="pagination-buttons">
-            <button className="pagination-btn">Zurücksetzen</button>
-            <button className="pagination-btn primary">Übernehmen</button>
+            <motion.button
+              className="pagination-btn"
+              onClick={() => setShowResetConfirm(true)}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Reset
+            </motion.button>
+            {!isScanning ? (
+              <motion.button
+                className="pagination-btn primary"
+                onClick={handleStartScanning}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Start Scanning
+              </motion.button>
+            ) : (
+              <motion.button
+                className="pagination-btn danger"
+                onClick={handleStopScanning}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                Stop Scanning
+              </motion.button>
+            )}
           </div>
         </div>
+
+        {/* Reset Confirmation Dialog */}
+        {showResetConfirm && (
+          <motion.div 
+            className="confirmation-dialog"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="dialog-content">
+              <h3>Confirm Reset</h3>
+              <p>Are you sure you want to clear all packets? This action cannot be undone.</p>
+              <div className="dialog-buttons">
+                <motion.button
+                  className="dialog-btn cancel"
+                  onClick={() => setShowResetConfirm(false)}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Cancel
+                </motion.button>
+                <motion.button
+                  className="dialog-btn confirm"
+                  onClick={handleReset}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  Confirm Reset
+                </motion.button>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </motion.main>
     </div>
   );
