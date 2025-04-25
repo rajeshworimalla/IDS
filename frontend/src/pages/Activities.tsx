@@ -19,6 +19,7 @@ const Activities: FC = () => {
   });
   const [packets, setPackets] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -37,14 +38,13 @@ const Activities: FC = () => {
         setPackets(packetData);
       } catch (error) {
         console.error('Error fetching data:', error);
+        setError('Failed to fetch data. Please try again later.');
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const calculateSystemHealth = (packetStats: any) => {

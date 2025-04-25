@@ -133,4 +133,136 @@ router.get('/debug/count', async (req, res) => {
   }
 });
 
+// Get alerts
+router.get('/alerts', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    
+    console.log('Fetching alerts from MongoDB for user:', req.user._id);
+    const alerts = await Packet.find({ 
+      user: req.user._id,
+      $or: [
+        { status: 'critical' },
+        { status: 'medium' }
+      ]
+    }).sort({ date: -1 });
+    
+    // Transform packets into alerts format
+    const formattedAlerts = alerts.map(packet => ({
+      id: packet._id,
+      date: packet.date,
+      source: packet.start_ip,
+      destination: packet.end_ip,
+      protocol: packet.protocol,
+      severity: packet.status === 'critical' ? 'critical' : 'medium',
+      status: 'open',
+      description: packet.description,
+      confidence: packet.confidence,
+      attack_type: packet.attack_type
+    }));
+    
+    console.log(`Found ${formattedAlerts.length} alerts for user ${req.user._id}`);
+    res.json(formattedAlerts);
+  } catch (error) {
+    console.error('Error fetching alerts:', error);
+    res.status(500).json({ error: 'Error fetching alerts' });
+  }
+});
+
+// Get recent alerts
+router.get('/alerts/recent', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    
+    const limit = parseInt(req.query.limit as string) || 10;
+    console.log('Fetching recent alerts from MongoDB for user:', req.user._id);
+    
+    const alerts = await Packet.find({ 
+      user: req.user._id,
+      $or: [
+        { status: 'critical' },
+        { status: 'medium' }
+      ]
+    })
+    .sort({ date: -1 })
+    .limit(limit);
+    
+    // Transform packets into alerts format
+    const formattedAlerts = alerts.map(packet => ({
+      id: packet._id,
+      date: packet.date,
+      source: packet.start_ip,
+      destination: packet.end_ip,
+      protocol: packet.protocol,
+      severity: packet.status === 'critical' ? 'critical' : 'medium',
+      status: 'open',
+      description: packet.description,
+      confidence: packet.confidence,
+      attack_type: packet.attack_type
+    }));
+    
+    console.log(`Found ${formattedAlerts.length} recent alerts for user ${req.user._id}`);
+    res.json(formattedAlerts);
+  } catch (error) {
+    console.error('Error fetching recent alerts:', error);
+    res.status(500).json({ error: 'Error fetching recent alerts' });
+  }
+});
+
+// Filter alerts by date range
+router.get('/alerts/filter', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const { from, to } = req.query;
+    if (!from || !to) {
+      return res.status(400).json({ error: 'Missing from or to date parameters' });
+    }
+
+    const fromDate = new Date(from as string);
+    const toDate = new Date(to as string);
+    
+    if (isNaN(fromDate.getTime()) || isNaN(toDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid date format' });
+    }
+    
+    const alerts = await Packet.find({
+      user: req.user._id,
+      date: {
+        $gte: fromDate,
+        $lte: toDate
+      },
+      $or: [
+        { status: 'critical' },
+        { status: 'medium' }
+      ]
+    }).sort({ date: -1 });
+    
+    // Transform packets into alerts format
+    const formattedAlerts = alerts.map(packet => ({
+      id: packet._id,
+      date: packet.date,
+      source: packet.start_ip,
+      destination: packet.end_ip,
+      protocol: packet.protocol,
+      severity: packet.status === 'critical' ? 'critical' : 'medium',
+      status: 'open',
+      description: packet.description,
+      confidence: packet.confidence,
+      attack_type: packet.attack_type
+    }));
+    
+    res.json(formattedAlerts);
+  } catch (error) {
+    console.error('Error filtering alerts:', error);
+    res.status(500).json({ error: 'Error filtering alerts' });
+  }
+});
+
 export default router; 

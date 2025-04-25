@@ -51,31 +51,30 @@ const Monitoring: FC = () => {
     ]
   };
 
+  const fetchData = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Get alerts and stats
+      const [alertsData, statsData] = await Promise.all([
+        packetService.getAlerts(),
+        packetService.getAlertStats()
+      ]);
+
+      setAlerts(alertsData);
+      setAlertStats(statsData);
+    } catch (err) {
+      console.error('Error fetching monitoring data:', err);
+      setError('Failed to fetch monitoring data. Please try again later.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch data on component mount
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        
-        // Get alerts and stats
-        const [alertsData, statsData] = await Promise.all([
-          packetService.getAlerts(),
-          packetService.getAlertStats()
-        ]);
-
-        setAlerts(alertsData);
-        setAlertStats(statsData);
-      } catch (err) {
-        console.error('Error fetching monitoring data:', err);
-        setError('Failed to fetch monitoring data. Please try again later.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleToggleExpand = (id: string) => {
@@ -188,7 +187,22 @@ const Monitoring: FC = () => {
           initial={{ y: -20 }}
           animate={{ y: 0 }}
         >
-          <h1>Monitoring</h1>
+          <div className="header-row">
+            <h1>Monitoring</h1>
+            <motion.button
+              className="refresh-button"
+              onClick={fetchData}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <span className="loading-spinner" />
+              ) : (
+                <span>🔄 Refresh</span>
+              )}
+            </motion.button>
+          </div>
           <div className="monitoring-stats">
             <motion.div 
               className="stat-card critical"

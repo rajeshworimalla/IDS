@@ -55,10 +55,6 @@ const Dashboard: FC = () => {
     };
 
     fetchData();
-    // Set up polling interval to refresh data every 5 seconds
-    const interval = setInterval(fetchData, 5000);
-
-    return () => clearInterval(interval);
   }, []);
 
   return (
