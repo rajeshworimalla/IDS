@@ -260,7 +260,7 @@ const Monitoring: FC = () => {
               <div className="filter-options">
                 {filterOptions.severity.map(option => (
                   <motion.button
-                    key={option.value}
+                    key={`severity-${option.value}`}
                     className={`filter-chip ${filters.severity.includes(option.value) ? 'active' : ''}`}
                     style={{ 
                       '--chip-color': option.color,
@@ -281,7 +281,7 @@ const Monitoring: FC = () => {
               <div className="filter-options">
                 {filterOptions.status.map(option => (
                   <motion.button
-                    key={option.value}
+                    key={`status-${option.value}`}
                     className={`filter-chip ${filters.status.includes(option.value) ? 'active' : ''}`}
                     onClick={() => handleFilterToggle('status', option.value)}
                     whileHover={{ scale: 1.05 }}

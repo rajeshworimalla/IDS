@@ -134,6 +134,11 @@ class AuthService {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
   }
+
+  getAuthHeader(): { Authorization: string } | {} {
+    const token = this.getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
 }
 
 export const authService = new AuthService(); 

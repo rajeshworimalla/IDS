@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
+import settingsRoutes from './routes/settings';
 import { config } from './config/env';
 import { initializeSocket } from './socket';
 
@@ -23,16 +24,16 @@ console.log('Starting server with config:', {
 });
 
 const app = express();
-const httpServer = createServer(app);
+const server = createServer(app);
 
 // Initialize Socket.IO
-initializeSocket(httpServer);
+initializeSocket(server);
 
 console.log('Starting server with config:', config);
 
 // CORS configuration
 const corsOptions = {
-  origin: 'http://localhost:5173', // Your frontend URL
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -61,10 +62,16 @@ console.log('Setting up routes...');
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/packets', packetRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Database connection
 console.log('Connecting to MongoDB...');
-mongoose.connect(config.MONGODB_URI)
+mongoose.connect(config.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+} as any)
   .then(() => {
     console.log('Connected to MongoDB');
     console.log('Database URI:', config.MONGODB_URI);
@@ -96,6 +103,6 @@ app.get('/', (req, res) => {
 
 // Start server
 console.log('Starting HTTP server...');
-httpServer.listen(config.PORT, () => {
+server.listen(config.PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${config.PORT}`);
 }); 

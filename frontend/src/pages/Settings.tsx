@@ -1,168 +1,34 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
+import { settingsService, SettingGroup } from '../services/settingsService';
 import '../styles/Settings.css';
-
-interface SettingGroup {
-  id: string;
-  title: string;
-  settings: Setting[];
-}
-
-interface Setting {
-  id: string;
-  name: string;
-  description: string;
-  type: 'toggle' | 'dropdown' | 'input' | 'radio';
-  value: any;
-  options?: { value: string; label: string }[];
-}
 
 const Settings: FC = () => {
   const [activeTab, setActiveTab] = useState('general');
-  
-  // Initial settings configuration
-  const [settings, setSettings] = useState<SettingGroup[]>([
-    {
-      id: 'general',
-      title: 'General Settings',
-      settings: [
-        {
-          id: 'darkMode',
-          name: 'Dark Mode',
-          description: 'Enable dark mode for the application.',
-          type: 'toggle',
-          value: true
-        },
-        {
-          id: 'notifications',
-          name: 'Notifications',
-          description: 'Enable notifications for important events.',
-          type: 'toggle',
-          value: true
-        },
-        {
-          id: 'language',
-          name: 'Language',
-          description: 'Select your preferred language.',
-          type: 'dropdown',
-          value: 'en',
-          options: [
-            { value: 'en', label: 'English' },
-            { value: 'de', label: 'German' },
-            { value: 'fr', label: 'French' }
-          ]
-        }
-      ]
-    },
-    {
-      id: 'alerts',
-      title: 'Alert Settings',
-      settings: [
-        {
-          id: 'emailAlerts',
-          name: 'Email Alerts',
-          description: 'Receive alert notifications via email.',
-          type: 'toggle',
-          value: true
-        },
-        {
-          id: 'alertThreshold',
-          name: 'Alert Threshold',
-          description: 'Minimum severity level for notifications.',
-          type: 'dropdown',
-          value: 'medium',
-          options: [
-            { value: 'low', label: 'Low' },
-            { value: 'medium', label: 'Medium' },
-            { value: 'high', label: 'High' },
-            { value: 'critical', label: 'Critical' }
-          ]
-        },
-        {
-          id: 'alertFrequency',
-          name: 'Alert Frequency',
-          description: 'How often to send batched alerts.',
-          type: 'dropdown',
-          value: 'immediate',
-          options: [
-            { value: 'immediate', label: 'Immediate' },
-            { value: 'hourly', label: 'Hourly' },
-            { value: 'daily', label: 'Daily' }
-          ]
-        }
-      ]
-    },
-    {
-      id: 'system',
-      title: 'System Settings',
-      settings: [
-        {
-          id: 'dataRetention',
-          name: 'Data Retention Period',
-          description: 'How long to store historical data.',
-          type: 'dropdown',
-          value: '90days',
-          options: [
-            { value: '30days', label: '30 Days' },
-            { value: '90days', label: '90 Days' },
-            { value: '180days', label: '180 Days' },
-            { value: '1year', label: '1 Year' }
-          ]
-        },
-        {
-          id: 'autoUpdate',
-          name: 'Automatic Updates',
-          description: 'Allow the system to update automatically.',
-          type: 'toggle',
-          value: true
-        },
-        {
-          id: 'logLevel',
-          name: 'Logging Level',
-          description: 'Level of detail for system logs.',
-          type: 'dropdown',
-          value: 'info',
-          options: [
-            { value: 'error', label: 'Error' },
-            { value: 'warn', label: 'Warning' },
-            { value: 'info', label: 'Info' },
-            { value: 'debug', label: 'Debug' }
-          ]
-        }
-      ]
-    },
-    {
-      id: 'account',
-      title: 'Account Settings',
-      settings: [
-        {
-          id: 'userName',
-          name: 'Username',
-          description: 'Your login username.',
-          type: 'input',
-          value: 'admin'
-        },
-        {
-          id: 'email',
-          name: 'Email Address',
-          description: 'Your account email address.',
-          type: 'input',
-          value: 'admin@example.com'
-        },
-        {
-          id: 'twoFactor',
-          name: 'Two-factor Authentication',
-          description: 'Enable additional security for your account.',
-          type: 'toggle',
-          value: false
-        }
-      ]
-    }
-  ]);
-
+  const [settings, setSettings] = useState<SettingGroup[]>([]);
   const [savedState, setSavedState] = useState(true);
   const [showSaveMessage, setShowSaveMessage] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await settingsService.getSettings();
+        setSettings(data);
+      } catch (err) {
+        console.error('Error fetching settings:', err);
+        setError('Failed to load settings. Please try again later.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSettings();
+  }, []);
 
   const handleToggleChange = (groupId: string, settingId: string) => {
     setSettings(prev => 
@@ -210,18 +76,31 @@ const Settings: FC = () => {
     setSavedState(false);
   };
 
-  const handleSave = () => {
-    // In a real app, this would save to a backend
-    setSavedState(true);
-    setShowSaveMessage(true);
-    setTimeout(() => setShowSaveMessage(false), 3000);
+  const handleSave = async () => {
+    try {
+      setError(null);
+      await settingsService.updateSettings(settings);
+      setSavedState(true);
+      setShowSaveMessage(true);
+      setTimeout(() => setShowSaveMessage(false), 3000);
+    } catch (err) {
+      console.error('Error saving settings:', err);
+      setError('Failed to save settings. Please try again later.');
+    }
   };
 
-  const handleReset = () => {
-    // For demo, just show a confirmation
+  const handleReset = async () => {
     if (window.confirm("Are you sure you want to reset settings to default values?")) {
-      // Reset logic would go here in a real app
-      setSavedState(true);
+      try {
+        setError(null);
+        await settingsService.resetSettings();
+        const data = await settingsService.getSettings();
+        setSettings(data);
+        setSavedState(true);
+      } catch (err) {
+        console.error('Error resetting settings:', err);
+        setError('Failed to reset settings. Please try again later.');
+      }
     }
   };
 
@@ -285,44 +164,27 @@ const Settings: FC = () => {
     }
   };
 
-  // Animation variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: { 
-      opacity: 1,
-      transition: { 
-        staggerChildren: 0.05,
-        delayChildren: 0.1
-      } 
-    }
-  };
+  if (isLoading) {
+    return (
+      <div className="settings-page">
+        <Navbar />
+        <div className="settings-content">
+          <div className="loading-message">Loading settings...</div>
+        </div>
+      </div>
+    );
+  }
 
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: { 
-      y: 0, 
-      opacity: 1,
-      transition: { type: "spring", stiffness: 300, damping: 24 }
-    }
-  };
-
-  const tabVariants = {
-    inactive: { 
-      backgroundColor: 'rgba(30, 41, 59, 0.8)',
-      color: 'var(--text-secondary)',
-      scale: 1
-    },
-    active: { 
-      backgroundColor: 'rgba(54, 153, 255, 0.1)',
-      color: 'var(--accent-color)',
-      scale: 1.02 
-    },
-    hover: { 
-      scale: 1.05, 
-      backgroundColor: 'rgba(255, 255, 255, 0.08)'
-    },
-    tap: { scale: 0.98 }
-  };
+  if (error) {
+    return (
+      <div className="settings-page">
+        <Navbar />
+        <div className="settings-content">
+          <div className="error-message">{error}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-page">
@@ -400,7 +262,7 @@ const Settings: FC = () => {
                         className="setting-item"
                         variants={itemVariants}
                         custom={idx}
-                        whileHover={{ 
+                        whileHover={{
                           backgroundColor: 'rgba(255, 255, 255, 0.03)',
                           transition: { duration: 0.2 } 
                         }}
@@ -451,6 +313,45 @@ const Settings: FC = () => {
       </motion.div>
     </div>
   );
+};
+
+// Animation variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { 
+    opacity: 1,
+    transition: { 
+      staggerChildren: 0.05,
+      delayChildren: 0.1
+    } 
+  }
+};
+
+const itemVariants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: { 
+    y: 0, 
+    opacity: 1,
+    transition: { type: "spring", stiffness: 300, damping: 24 }
+  }
+};
+
+const tabVariants = {
+  inactive: { 
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    color: 'var(--text-secondary)',
+    scale: 1
+  },
+  active: { 
+    backgroundColor: 'rgba(54, 153, 255, 0.1)',
+    color: 'var(--accent-color)',
+    scale: 1.02 
+  },
+  hover: { 
+    scale: 1.05, 
+    backgroundColor: 'rgba(255, 255, 255, 0.08)'
+  },
+  tap: { scale: 0.98 }
 };
 
 export default Settings; 
