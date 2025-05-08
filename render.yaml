@@ -1,13 +1,9 @@
 services:
   # Frontend Service
-  - type: web
+  - type: static
     name: ids-frontend
-    env: node
+    env: static
     buildCommand: cd frontend && npm install && npm run build
-    startCommand: cd frontend && npm run preview
-    envVars:
-      - key: VITE_API_URL
-        value: https://ids-backend.onrender.com
     staticPublishPath: frontend/dist
     routes:
       - type: rewrite
@@ -17,8 +13,12 @@ services:
   # Backend Service
   - type: web
     name: ids-backend
-    env: node
-    buildCommand: cd backend && npm install && npm run build
+    env: python
+    buildCommand: |
+      cd backend
+      pip install -r requirements.txt
+      npm install
+      npm run build
     startCommand: cd backend && npm start
     envVars:
       - key: NODE_ENV
