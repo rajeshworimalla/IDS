@@ -1,6 +1,6 @@
 services:
   # Frontend Service
-  - type: static
+  - type: web
     name: ids-frontend
     env: static
     buildCommand: cd frontend && npm install && npm run build
