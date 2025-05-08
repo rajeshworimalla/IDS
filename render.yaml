@@ -1,29 +1,25 @@
 services:
-  # Frontend Service
   - type: web
     name: ids-frontend
     env: static
+    repo: https://github.com/rajeshworimalla/IDS
+    branch: main
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    autoDeploy: true
 
-  # Backend Service
   - type: web
     name: ids-backend
-    env: python
-    buildCommand: |
-      cd backend
-      pip install -r requirements.txt
-      npm install
-      npm run build
+    env: node
+    repo: https://github.com/rajeshworimalla/IDS
+    branch: main
+    buildCommand: cd backend && npm install && npm run build
     startCommand: cd backend && npm start
+    autoDeploy: true
     envVars:
-      - key: NODE_ENV
-        value: production
+      - key: MONGODB_URI
+        value: your-mongodb-connection-uri
+      - key: JWT_SECRET
+        value: your-jwt-secret
       - key: PORT
-        value: 3000
-      - key: CORS_ORIGIN
-        value: https://ids-frontend.onrender.com
+        value: 10000
