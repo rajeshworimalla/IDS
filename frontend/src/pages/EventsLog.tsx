@@ -23,7 +23,7 @@ const EventsLog: FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [packets, setPackets] = useState<Packet[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
+  const [scanningState, setScanningState] = useState<'idle' | 'starting' | 'scanning' | 'stopping'>('idle');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [dateRange, setDateRange] = useState({
     from: '10.03.2024',
@@ -97,32 +97,42 @@ const EventsLog: FC = () => {
     });
 
     socket.on('connect', () => {
-      console.log('Socket connected');
+      console.log('Socket connected successfully');
       setSocket(socket);
-      setIsScanning(true);
+      // Don't automatically set scanning to true on connect
     });
 
     socket.on('connect_error', (error) => {
       console.error('Socket connection error:', error);
-      setIsScanning(false);
+      setScanningState('idle');
     });
 
     socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
-      setIsScanning(false);
+      setScanningState('idle');
     });
 
     socket.on('scanning-status', (status) => {
       console.log('Scanning status:', status);
-      setIsScanning(status.isScanning);
+      setScanningState(status.isScanning ? 'scanning' : 'idle');
       if (status.error) {
         console.error('Scanning error:', status.error);
+        setScanningState('idle');
       }
     });
 
     socket.on('new-packet', (packet) => {
-      console.log('Received new packet:', packet);
-      setPackets(prev => [packet, ...prev]);
+      console.log('Received new packet via WebSocket:', packet);
+      setPackets(prev => {
+        // Check if packet already exists to avoid duplicates
+        const exists = prev.some(p => p._id === packet._id);
+        if (exists) {
+          console.log('Packet already exists, skipping duplicate');
+          return prev;
+        }
+        console.log('Adding new packet to list');
+        return [packet, ...prev];
+      });
     });
 
     return () => {
@@ -246,26 +256,36 @@ const EventsLog: FC = () => {
   };
 
   const handleStartScanning = () => {
-    if (socket) {
+    if (scanningState !== 'idle') return;
+
+    if (socket && socket.connected) {
       const token = authService.getToken();
       if (!token) {
         console.error('No authentication token found');
         return;
       }
-      console.log('Emitting start-scanning event');
+      console.log('Emitting start-scanning event with token');
+      setScanningState('starting');
       socket.emit('start-scanning', { token });
+    } else {
+      console.error('Socket not connected');
     }
   };
 
   const handleStopScanning = () => {
-    if (socket) {
+    if (scanningState !== 'scanning') return;
+
+    if (socket && socket.connected) {
       const token = authService.getToken();
       if (!token) {
         console.error('No authentication token found');
         return;
       }
-      console.log('Emitting stop-scanning event');
+      console.log('Emitting stop-scanning event with token');
+      setScanningState('stopping');
       socket.emit('stop-scanning', { token });
+    } else {
+      console.error('Socket not connected');
     }
   };
 
@@ -412,7 +432,7 @@ const EventsLog: FC = () => {
             >
               Reset
             </motion.button>
-            {!isScanning ? (
+            {scanningState === 'idle' ? (
               <motion.button
                 className="pagination-btn primary"
                 onClick={handleStartScanning}
@@ -421,7 +441,15 @@ const EventsLog: FC = () => {
               >
                 Start Scanning
               </motion.button>
-            ) : (
+            ) : scanningState === 'starting' ? (
+              <motion.button
+                className="pagination-btn primary"
+                disabled
+                style={{ opacity: 0.6 }}
+              >
+                Starting...
+              </motion.button>
+            ) : scanningState === 'scanning' ? (
               <motion.button
                 className="pagination-btn danger"
                 onClick={handleStopScanning}
@@ -429,6 +457,14 @@ const EventsLog: FC = () => {
                 whileTap={{ scale: 0.95 }}
               >
                 Stop Scanning
+              </motion.button>
+            ) : (
+              <motion.button
+                className="pagination-btn danger"
+                disabled
+                style={{ opacity: 0.6 }}
+              >
+                Stopping...
               </motion.button>
             )}
           </div>

@@ -216,39 +216,23 @@ def predict():
         data = request.json
         if not data:
             return jsonify({'error': 'No data provided'}), 400
-
-        print(f"Received data: {data}")
-
-        # Handle both single packet and list of packets
-        if isinstance(data, dict) and 'packet' in data:
-            # Single packet wrapped in object
-            packets = [data['packet']]
-        elif isinstance(data, list):
-            # List of packets
-            packets = data
-        elif isinstance(data, dict):
-            # Single packet
-            packets = [data]
-        else:
-            return jsonify({'error': 'Invalid data format'}), 400
-
-        if len(packets) == 0:
+            
+        if not isinstance(data, list):
+            return jsonify({'error': 'Input must be a list of packets'}), 400
+            
+        if len(data) == 0:
             return jsonify({'error': 'Empty packet list'}), 400
 
         results = []
-        for packet in packets:
+        for packet in data:
             # Validate packet structure
             if not isinstance(packet, dict):
                 return jsonify({'error': 'Each packet must be a dictionary'}), 400
-
-            print(f"Processing packet: {packet}")
-
-            # Set default values for missing fields
-            packet.setdefault('start_bytes', 0)
-            packet.setdefault('end_bytes', 0)
-            packet.setdefault('protocol', 'TCP')
-            packet.setdefault('description', 'Unknown')
-            packet.setdefault('frequency', 1)
+                
+            required_fields = ['start_bytes', 'end_bytes', 'protocol', 'description']
+            for field in required_fields:
+                if field not in packet:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
 
             # Preprocess packet
             try:
@@ -276,32 +260,18 @@ def predict():
                     4: 'u2r'
                 }.get(multiclass_pred, 'unknown')
                 
-                # Get confidence scores safely
-                try:
-                    binary_confidence = float(binary_model.predict_proba(features)[0][1])
-                except:
-                    binary_confidence = 0.5
-
-                try:
-                    multiclass_confidence = float(multiclass_model.predict_proba(features)[0][multiclass_pred])
-                except:
-                    multiclass_confidence = 0.5
-
                 results.append({
                     'packet_id': packet.get('_id', ''),
                     'binary_prediction': binary_label,
                     'attack_type': attack_type,
                     'confidence': {
-                        'binary': binary_confidence,
-                        'multiclass': multiclass_confidence
+                        'binary': float(binary_model.predict_proba(features)[0][1]),
+                        'multiclass': float(multiclass_model.predict_proba(features)[0][multiclass_pred])
                     }
                 })
             except Exception as e:
                 return jsonify({'error': f'Error making predictions: {str(e)}'}), 500
 
-        # Return single result if single packet was sent
-        if len(results) == 1:
-            return jsonify(results[0])
         return jsonify(results)
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500

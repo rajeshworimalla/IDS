@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: ids-frontend
-    env: static
-    repo: https://github.com/rajeshworimalla/IDS
-    branch: main
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
-    autoDeploy: true

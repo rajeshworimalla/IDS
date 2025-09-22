@@ -1,7 +1,7 @@
 import { FC, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
-import { settingsService, SettingGroup } from '../services/settingsService';
+import { settingsService, SettingGroup, Setting } from '../services/settingsService';
 import '../styles/Settings.css';
 
 const Settings: FC = () => {
@@ -140,7 +140,7 @@ const Settings: FC = () => {
             onChange={(e) => handleInputChange(group.id, setting.id, e.target.value)}
             transition={{ duration: 0.2 }}
           >
-            {setting.options?.map(option => (
+            {setting.options?.map((option: any) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -336,22 +336,24 @@ const itemVariants = {
   }
 };
 
+/*
 const tabVariants = {
-  inactive: { 
+  inactive: {
     backgroundColor: 'rgba(30, 41, 59, 0.8)',
     color: 'var(--text-secondary)',
     scale: 1
   },
-  active: { 
+  active: {
     backgroundColor: 'rgba(54, 153, 255, 0.1)',
     color: 'var(--accent-color)',
-    scale: 1.02 
+    scale: 1.02
   },
-  hover: { 
-    scale: 1.05, 
+  hover: {
+    scale: 1.05,
     backgroundColor: 'rgba(255, 255, 255, 0.08)'
   },
   tap: { scale: 0.98 }
 };
+*/
 
 export default Settings; 

@@ -64,7 +64,7 @@ const App: FC = () => {
   }, []);
 
   // Set up a protected route component
-  const ProtectedRoute = ({ element }: { element: JSX.Element }) => {
+  const ProtectedRoute = ({ element }: { element: React.ReactElement }) => {
     return isAuthenticated ? element : <Navigate to="/login" replace />;
   };
 

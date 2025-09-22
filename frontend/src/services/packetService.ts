@@ -33,16 +33,19 @@ export interface PacketStats {
 }
 
 export interface ThreatAlert {
+  _id: string;
   id: string;
   date: Date;
   source: string;
   destination: string;
   protocol: string;
   severity: 'critical' | 'high' | 'medium' | 'low';
-  status: 'open' | 'closed' | 'in-progress';
+  status: 'open' | 'closed' | 'in-progress' | 'investigating' | 'mitigated' | 'resolved';
   description: string;
   confidence: number;
   attack_type: string;
+  type: string;
+  timestamp: Date;
 }
 
 export interface AlertStats {

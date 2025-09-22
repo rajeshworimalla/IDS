@@ -93,6 +93,9 @@ export function initializeSocket(server: any) {
       const userId = socket.data.user._id;
       console.log('Client connected:', socket.id, 'User:', userId);
 
+      // Join user to their own room for targeted broadcasts
+      socket.join(`user_${userId}`);
+
       socket.on('start-scanning', (data) => {
         console.log('Starting packet capture for user:', userId);
         try {
@@ -103,20 +106,22 @@ export function initializeSocket(server: any) {
 
           // Clean up existing capture if any
           if (userCaptures[userId]) {
+            console.log('Stopping existing capture for user:', userId);
             userCaptures[userId].stopCapture();
             delete userCaptures[userId];
           }
-          
+
           // Create new capture instance for this user
+          console.log('Creating new packet capture service for user:', userId);
           userCaptures[userId] = new PacketCaptureService(userId);
           userCaptures[userId].startCapture();
-          
+
           // Notify client
           socket.emit('scanning-status', { isScanning: true });
           console.log('Packet capture started successfully for user:', userId);
         } catch (error) {
           console.error('Error starting packet capture:', error);
-          socket.emit('scanning-status', { isScanning: false, error: 'Failed to start packet capture' });
+          socket.emit('scanning-status', { isScanning: false, error: `Failed to start packet capture: ${error}` });
         }
       });
 
@@ -162,7 +167,8 @@ export function initializeSocket(server: any) {
 
 export function getIO() {
   if (!io) {
-    throw new Error('Socket.IO not initialized');
+    console.error('Socket.IO not initialized');
+    return null;
   }
   return io;
 }

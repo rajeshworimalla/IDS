@@ -17,9 +17,9 @@ const Activities: FC = () => {
     activeAlerts: 0,
     systemHealth: 0
   });
-  const [packets, setPackets] = useState([]);
+  const [packets, setPackets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {

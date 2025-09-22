@@ -21,8 +21,12 @@ export class PacketCaptureService {
     this.buffer = Buffer.alloc(65535);
     this.predictionServiceUrl = 'http://127.0.0.1:5002/predict';
     this.userId = userId;
-    
-    // List all available interfaces
+
+    // Initialize the capture device
+    this.initializeCapture();
+  }
+
+  private initializeCapture() {
     const interfaces = Cap.deviceList();
     console.log('Available network interfaces:', interfaces);
 
@@ -33,23 +37,85 @@ export class PacketCaptureService {
         '3. You have at least one network interface enabled');
     }
 
-    // Use the first available interface
-    const device = interfaces[0].name;
-    console.log('Using network interface:', device);
+    // Try interfaces in order of preference
+    const interfacePreferences = [
+      // First preference: Real network interfaces with addresses
+      (iface: any) => iface.addresses &&
+        iface.addresses.length > 0 &&
+        !iface.name.toLowerCase().includes('loopback') &&
+        !iface.description.toLowerCase().includes('loopback') &&
+        !iface.description.toLowerCase().includes('miniport') &&
+        !iface.description.toLowerCase().includes('virtual') &&
+        !iface.description.toLowerCase().includes('vmware') &&
+        !iface.description.toLowerCase().includes('virtualbox') &&
+        (iface.description.toLowerCase().includes('wi-fi') ||
+         iface.description.toLowerCase().includes('ethernet') ||
+         iface.description.toLowerCase().includes('realtek') ||
+         iface.description.toLowerCase().includes('intel')),
 
-    const filter = 'ip';
-    const bufSize = 10 * 1024 * 1024;
+      // Second preference: Any interface with addresses (not loopback)
+      (iface: any) => iface.addresses &&
+        iface.addresses.length > 0 &&
+        !iface.name.toLowerCase().includes('loopback') &&
+        !iface.description.toLowerCase().includes('loopback'),
 
-    try {
-      this.cap.open(device, filter, bufSize, this.buffer);
-      if (this.cap.setMinBytes) {
-        this.cap.setMinBytes(0);
+      // Third preference: Any non-loopback interface
+      (iface: any) => !iface.name.toLowerCase().includes('loopback') &&
+        !iface.description.toLowerCase().includes('loopback'),
+
+      // Last resort: Any interface
+      () => true
+    ];
+
+    let selectedInterface = null;
+    let lastError = null;
+
+    for (const preference of interfacePreferences) {
+      const candidates = interfaces.filter(preference);
+
+      for (const candidate of candidates) {
+        try {
+          console.log(`Trying interface: ${candidate.name} (${candidate.description})`);
+          console.log('Interface addresses:', candidate.addresses);
+
+          const device = candidate.name;
+          const filter = '';  // Empty filter captures all packets
+          const bufSize = 10 * 1024 * 1024;
+
+          console.log('Opening capture device with filter:', filter || 'none');
+          this.cap.open(device, filter, bufSize, this.buffer);
+
+          // Set minimum bytes to capture immediately
+          if (this.cap.setMinBytes) {
+            this.cap.setMinBytes(0);
+            console.log('Set minimum bytes to 0 for immediate capture');
+          }
+
+          // Try to set non-blocking mode if available
+          if ('setNonBlock' in this.cap && typeof (this.cap as any).setNonBlock === 'function') {
+            try {
+              (this.cap as any).setNonBlock(true);
+              console.log('Set non-blocking mode');
+            } catch (err) {
+              console.log('Could not set non-blocking mode:', err);
+            }
+          }
+
+          selectedInterface = candidate;
+          console.log('Successfully opened capture device:', device);
+          break;
+        } catch (err) {
+          lastError = err;
+          console.log(`Failed to open interface ${candidate.name}:`, err);
+          continue;
+        }
       }
-      console.log('Successfully opened capture device');
-    } catch (err) {
-      const error = err as Error;
-      console.error('Error opening capture device:', error);
-      throw new Error(`Failed to open capture device: ${error.message || 'Unknown error'}`);
+
+      if (selectedInterface) break;
+    }
+
+    if (!selectedInterface) {
+      throw new Error(`Failed to open any capture device. Last error: ${lastError}`);
     }
   }
 
@@ -58,16 +124,22 @@ export class PacketCaptureService {
       console.log('Packet capture already running');
       return;
     }
-    
+
     this.isCapturing = true;
     console.log('Starting packet capture...');
 
     // Create new packet handler
     this.packetHandler = (nbytes: number, trunc: boolean) => {
-      if (nbytes === 0) return;
+      console.log(`Captured packet: ${nbytes} bytes, truncated: ${trunc}`);
+
+      if (nbytes === 0) {
+        console.log('Received packet with 0 bytes, skipping');
+        return;
+      }
 
       try {
         const raw = this.buffer.slice(0, nbytes);
+        console.log(`Processing packet of ${raw.length} bytes`);
         this.processPacket(raw);
       } catch (err) {
         const error = err as Error;
@@ -75,8 +147,18 @@ export class PacketCaptureService {
       }
     };
 
+    // Remove any existing listeners first (if method exists)
+    if ('removeAllListeners' in this.cap && typeof this.cap.removeAllListeners === 'function') {
+      (this.cap as any).removeAllListeners('packet');
+    }
+
     // Add the packet handler
     this.cap.on('packet', this.packetHandler);
+
+    console.log('Packet capture started, waiting for packets...');
+
+    // Generate some test network traffic to verify capture is working
+    this.generateTestTraffic();
   }
 
   stopCapture() {
@@ -84,40 +166,74 @@ export class PacketCaptureService {
       console.log('Packet capture not running');
       return;
     }
-    
+
     this.isCapturing = false;
     console.log('Stopping packet capture...');
-    
+
     try {
-      // Close the capture device - this will automatically remove all listeners
-      this.cap.close();
-      
+      // Remove packet handler first
+      if (this.packetHandler) {
+        if ('removeListener' in this.cap && typeof (this.cap as any).removeListener === 'function') {
+          (this.cap as any).removeListener('packet', this.packetHandler);
+        }
+        this.packetHandler = null;
+      }
+
+      // Close the capture device with a small delay to prevent UV_HANDLE_CLOSING error
+      setTimeout(() => {
+        try {
+          this.cap.close();
+          console.log('Packet capture stopped successfully');
+        } catch (err) {
+          console.error('Error closing capture device:', err);
+        }
+      }, 100);
+
       // Reset the buffer
       this.buffer.fill(0);
-      
-      // Reset the packet handler
-      this.packetHandler = null;
-      
-      console.log('Packet capture stopped successfully');
+
     } catch (err) {
       const error = err as Error;
       console.error('Error stopping packet capture:', error);
-      throw error;
     }
   }
 
   private async processPacket(raw: Buffer) {
     try {
-      // Skip packets that are too small to contain IP headers
-      if (raw.length < 34) return;
+      console.log(`Processing packet of ${raw.length} bytes`);
+
+      // Check if packet has Ethernet header (minimum 14 bytes)
+      if (raw.length < 14) {
+        console.log('Packet too small for Ethernet header, skipping');
+        return;
+      }
+
+      // Check if it's an IP packet (EtherType 0x0800)
+      const etherType = raw.readUInt16BE(12);
+      if (etherType !== 0x0800) {
+        console.log(`Non-IP packet (EtherType: 0x${etherType.toString(16)}), skipping`);
+        return;
+      }
+
+      // Check if packet has IP header (minimum 34 bytes total: 14 Ethernet + 20 IP)
+      if (raw.length < 34) {
+        console.log('Packet too small for IP header, skipping');
+        return;
+      }
+
+      const sourceIP = this.getSourceIP(raw);
+      const destIP = this.getDestinationIP(raw);
+      const protocol = this.getProtocol(raw);
+
+      console.log(`Packet: ${sourceIP} -> ${destIP} (${protocol})`);
 
       const packetData = {
         date: new Date(),
-        start_ip: this.getSourceIP(raw),
-        end_ip: this.getDestinationIP(raw),
-        protocol: this.getProtocol(raw),
-        frequency: this.updateFrequency(this.getSourceIP(raw)),
-        status: 'normal',
+        start_ip: sourceIP,
+        end_ip: destIP,
+        protocol: protocol,
+        frequency: this.updateFrequency(sourceIP),
+        status: 'normal' as 'normal' | 'medium' | 'critical',
         description: this.generateDescription(raw),
         start_bytes: raw.length,
         end_bytes: raw.length,
@@ -127,17 +243,26 @@ export class PacketCaptureService {
         user: this.userId
       };
 
-      // Determine status based on protocol and frequency
-      packetData.status = this.determineStatus(packetData);
+      // Determine status based on protocol, frequency, and IP addresses
+      packetData.status = this.determineStatus({
+        protocol: packetData.protocol,
+        frequency: packetData.frequency,
+        start_ip: packetData.start_ip,
+        end_ip: packetData.end_ip
+      });
+
+      console.log('Saving packet to database:', packetData);
 
       // Save to MongoDB
       const savedPacket = await PacketModel.create(packetData);
+      console.log('Packet saved successfully with ID:', savedPacket._id);
 
+      // Try to get predictions from ML service (non-blocking)
       try {
-        // Get predictions from ML service
         const response = await axios.post(this.predictionServiceUrl, {
           packet: packetData
-        });
+        }, { timeout: 5000 });
+
         const predictions = response.data;
 
         // Update packet with predictions
@@ -147,84 +272,214 @@ export class PacketCaptureService {
 
         // Update in MongoDB
         await savedPacket.save();
+        console.log('Packet updated with ML predictions');
       } catch (err) {
-        console.error('Error getting predictions:', err);
+        console.log('ML service not available, continuing without predictions');
       }
-      
+
       // Broadcast to connected clients
       const io = getIO();
       if (io) {
-        console.log('Emitting new packet to clients');
-        io.emit('new-packet', savedPacket);
+        console.log('Broadcasting new packet to clients');
+        io.emit('new-packet', savedPacket.toObject());
       } else {
         console.error('Socket.IO not initialized');
       }
     } catch (err) {
       const error = err as Error;
-      console.error('Error saving packet:', error);
+      console.error('Error processing packet:', error);
     }
   }
 
   private getSourceIP(raw: Buffer): string {
-    // Skip Ethernet header (14 bytes) and get source IP from IP header
-    const offset = 14;
-    return `${raw[offset + 12]}.${raw[offset + 13]}.${raw[offset + 14]}.${raw[offset + 15]}`;
+    try {
+      // Skip Ethernet header (14 bytes) and get source IP from IP header
+      const offset = 14;
+      if (raw.length < offset + 20) {
+        throw new Error('Buffer too small for IP header');
+      }
+      return `${raw[offset + 12]}.${raw[offset + 13]}.${raw[offset + 14]}.${raw[offset + 15]}`;
+    } catch (err) {
+      console.error('Error extracting source IP:', err);
+      return '0.0.0.0';
+    }
   }
 
   private getDestinationIP(raw: Buffer): string {
-    // Skip Ethernet header (14 bytes) and get destination IP from IP header
-    const offset = 14;
-    return `${raw[offset + 16]}.${raw[offset + 17]}.${raw[offset + 18]}.${raw[offset + 19]}`;
+    try {
+      // Skip Ethernet header (14 bytes) and get destination IP from IP header
+      const offset = 14;
+      if (raw.length < offset + 20) {
+        throw new Error('Buffer too small for IP header');
+      }
+      return `${raw[offset + 16]}.${raw[offset + 17]}.${raw[offset + 18]}.${raw[offset + 19]}`;
+    } catch (err) {
+      console.error('Error extracting destination IP:', err);
+      return '0.0.0.0';
+    }
   }
 
   private getProtocol(raw: Buffer): string {
-    // Skip Ethernet header (14 bytes) and get protocol from IP header
-    const offset = 14;
-    const protocol = raw[offset + 9];
-    switch (protocol) {
-      case 6: return 'TCP';
-      case 17: return 'UDP';
-      case 1: return 'ICMP';
-      default: return 'OTHER';
+    try {
+      // Skip Ethernet header (14 bytes) and get protocol from IP header
+      const offset = 14;
+      if (raw.length < offset + 10) {
+        throw new Error('Buffer too small for protocol field');
+      }
+      const protocol = raw[offset + 9];
+      switch (protocol) {
+        case 6: return 'TCP';
+        case 17: return 'UDP';
+        case 1: return 'ICMP';
+        case 2: return 'IGMP';
+        case 4: return 'IPv4';
+        case 41: return 'IPv6';
+        case 47: return 'GRE';
+        case 50: return 'ESP';
+        case 51: return 'AH';
+        default: return `PROTO_${protocol}`;
+      }
+    } catch (err) {
+      console.error('Error extracting protocol:', err);
+      return 'UNKNOWN';
     }
   }
 
-  private updateFrequency(ip: string): number {
+  private updateFrequency(sourceIP: string): number {
     const now = Date.now();
-    const key = `${ip}-${Math.floor(now / 60000)}`; // Group by minute
+    // Group by 5-minute intervals to get more realistic frequency counts
+    const key = `${sourceIP}-${Math.floor(now / 300000)}`;
 
     if (!packetFrequencies[key]) {
-      packetFrequencies[key] = { count: 0, timestamp: now };
+      packetFrequencies[key] = { count: 1, timestamp: now };
+      return 1;
+    }
+
+    // Reset count if more than 5 minutes have passed
+    if (now - packetFrequencies[key].timestamp > 300000) {
+      packetFrequencies[key] = { count: 1, timestamp: now };
+      return 1;
     }
 
     packetFrequencies[key].count++;
+    packetFrequencies[key].timestamp = now;
+
+    // Clean up old entries (older than 1 hour)
+    const oneHourAgo = now - 3600000;
+    Object.keys(packetFrequencies).forEach(k => {
+      if (packetFrequencies[k].timestamp < oneHourAgo) {
+        delete packetFrequencies[k];
+      }
+    });
+
     return packetFrequencies[key].count;
   }
 
-  private determineStatus(packet: { protocol: string; frequency: number }): 'critical' | 'medium' | 'normal' {
-    // Critical conditions
-    if (packet.protocol === 'TCP' && packet.frequency > 20) return 'critical';
-    if (packet.protocol === 'UDP' && packet.frequency > 40) return 'critical';
-    
-    // Medium conditions
-    if (packet.protocol === 'TCP' && packet.frequency > 10) return 'medium';
-    if (packet.protocol === 'UDP' && packet.frequency > 20) return 'medium';
-    
+  private determineStatus(packet: { protocol: string; frequency: number; start_ip: string; end_ip: string }): 'critical' | 'medium' | 'normal' {
+    // Much more conservative thresholds to reduce false positives
+
+    // Check for suspicious IP patterns first
+    const isPrivateIP = (ip: string) => {
+      return ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.');
+    };
+
+    const isLocalhost = (ip: string) => {
+      return ip.startsWith('127.') || ip === '::1';
+    };
+
+    // Don't flag local/private network traffic as critical
+    if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
+      // Internal network traffic - be very conservative
+      if (packet.protocol === 'TCP' && packet.frequency > 500) return 'medium';
+      if (packet.protocol === 'UDP' && packet.frequency > 1000) return 'medium';
+      if (packet.protocol === 'ICMP' && packet.frequency > 100) return 'medium';
+      return 'normal';
+    }
+
+    // Don't flag localhost traffic
+    if (isLocalhost(packet.start_ip) || isLocalhost(packet.end_ip)) {
+      return 'normal';
+    }
+
+    // Critical conditions - extremely high frequency indicating definite attacks
+    if (packet.protocol === 'TCP' && packet.frequency > 1000) return 'critical';
+    if (packet.protocol === 'UDP' && packet.frequency > 2000) return 'critical';
+    if (packet.protocol === 'ICMP' && packet.frequency > 500) return 'critical';
+
+    // Medium conditions - high frequency that might be suspicious
+    if (packet.protocol === 'TCP' && packet.frequency > 200) return 'medium';
+    if (packet.protocol === 'UDP' && packet.frequency > 500) return 'medium';
+    if (packet.protocol === 'ICMP' && packet.frequency > 100) return 'medium';
+
     // Normal by default
     return 'normal';
   }
 
   private generateDescription(raw: Buffer): string {
-    const protocol = this.getProtocol(raw);
-    const offset = 14; // Skip Ethernet header
-    
-    // Get source and destination ports for TCP/UDP
-    if (protocol === 'TCP' || protocol === 'UDP') {
-      const srcPort = raw.readUInt16BE(offset + 20);
-      const dstPort = raw.readUInt16BE(offset + 22);
-      return `${protocol} ${srcPort} -> ${dstPort}`;
+    try {
+      const protocol = this.getProtocol(raw);
+      const offset = 14; // Skip Ethernet header
+
+      // Get IP header length
+      const ipHeaderLength = (raw[offset] & 0x0F) * 4;
+
+      // Get source and destination ports for TCP/UDP
+      if ((protocol === 'TCP' || protocol === 'UDP') && raw.length >= offset + ipHeaderLength + 4) {
+        const srcPort = raw.readUInt16BE(offset + ipHeaderLength);
+        const dstPort = raw.readUInt16BE(offset + ipHeaderLength + 2);
+
+        // Add common port descriptions
+        const portDesc = this.getPortDescription(dstPort);
+        return `${protocol} ${srcPort} -> ${dstPort}${portDesc ? ` (${portDesc})` : ''}`;
+      }
+
+      return `${protocol} packet (${raw.length} bytes)`;
+    } catch (err) {
+      console.error('Error generating description:', err);
+      return `Packet (${raw.length} bytes)`;
     }
-    
-    return `${protocol} packet`;
   }
-} 
+
+  private getPortDescription(port: number): string {
+    const commonPorts: { [key: number]: string } = {
+      20: 'FTP Data',
+      21: 'FTP Control',
+      22: 'SSH',
+      23: 'Telnet',
+      25: 'SMTP',
+      53: 'DNS',
+      67: 'DHCP Server',
+      68: 'DHCP Client',
+      80: 'HTTP',
+      110: 'POP3',
+      143: 'IMAP',
+      443: 'HTTPS',
+      993: 'IMAPS',
+      995: 'POP3S'
+    };
+
+    return commonPorts[port] || '';
+  }
+
+  private generateTestTraffic() {
+    // Generate some HTTP requests to create network traffic for testing
+    setTimeout(() => {
+      console.log('Generating test network traffic...');
+
+      // Make a few HTTP requests to generate packets
+      const testUrls = [
+        'http://httpbin.org/ip',
+        'http://httpbin.org/user-agent',
+        'https://api.github.com'
+      ];
+
+      testUrls.forEach((url, index) => {
+        setTimeout(() => {
+          axios.get(url, { timeout: 5000 })
+            .then(() => console.log(`Test request ${index + 1} completed`))
+            .catch(() => console.log(`Test request ${index + 1} failed (expected)`));
+        }, index * 1000);
+      });
+    }, 2000); // Wait 2 seconds after starting capture
+  }
+}
