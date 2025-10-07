@@ -18,7 +18,7 @@ const Navbar: FC = () => {
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: '📊', path: '/dashboard' },
     { id: 'activities', label: 'Activities', icon: '📝', path: '/activities' },
-    { id: 'events', label: 'Events Log', icon: '📋', path: '/events' },
+    { id: 'events', label: 'Traffic Collector', icon: '📋', path: '/events' },
     { id: 'monitoring', label: 'Monitoring', icon: '📈', path: '/monitoring' },
     { id: 'settings', label: 'Settings', icon: '⚙️', path: '/settings' },
     { id: 'support', label: 'Support', icon: '💬', path: '/support' },

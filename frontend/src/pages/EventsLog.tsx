@@ -372,7 +372,7 @@ const EventsLog: FC = () => {
                     onChange={handleSelectAll}
                   />
                 </th>
-                <th>Status</th>
+                <th>Packet Traff</th>
                 <th>Date</th>
                 <th>End</th>
                 <th>Start IP</th>

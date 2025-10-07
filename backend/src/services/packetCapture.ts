@@ -3,8 +3,21 @@ import { Packet as PacketModel, IPacket } from '../models/Packet';
 import { getIO } from '../socket';
 import axios from 'axios';
 
-// Track packet frequencies for status determination
+// Track packet frequencies for status determination with automatic cleanup
 const packetFrequencies: { [key: string]: { count: number; timestamp: number } } = {};
+
+// Cleanup old frequency data every 5 minutes to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  const tenMinutesAgo = Math.floor(now / 60000) - 10;
+
+  Object.keys(packetFrequencies).forEach(key => {
+    const keyMinute = parseInt(key.split('-').pop() || '0');
+    if (keyMinute < tenMinutesAgo) {
+      delete packetFrequencies[key];
+    }
+  });
+}, 300000); // Run every 5 minutes
 
 export class PacketCaptureService {
   private cap: Cap;
@@ -243,12 +256,14 @@ export class PacketCaptureService {
         user: this.userId
       };
 
-      // Determine status based on protocol, frequency, and IP addresses
+      // Determine status based on protocol, frequency, IP addresses, and packet size
       packetData.status = this.determineStatus({
         protocol: packetData.protocol,
         frequency: packetData.frequency,
         start_ip: packetData.start_ip,
-        end_ip: packetData.end_ip
+        end_ip: packetData.end_ip,
+        start_bytes: packetData.start_bytes,
+        end_bytes: packetData.end_bytes
       });
 
       console.log('Saving packet to database:', packetData);
@@ -347,16 +362,20 @@ export class PacketCaptureService {
 
   private updateFrequency(sourceIP: string): number {
     const now = Date.now();
-    // Group by 5-minute intervals to get more realistic frequency counts
-    const key = `${sourceIP}-${Math.floor(now / 300000)}`;
+    // Group by 1-minute intervals for proper per-minute frequency tracking
+    const minuteKey = Math.floor(now / 60000);
+    const key = `${sourceIP}-${minuteKey}`;
+
+    // Clean up old entries first (older than 10 minutes to prevent memory leaks)
+    const tenMinutesAgo = minuteKey - 10;
+    Object.keys(packetFrequencies).forEach(k => {
+      const keyMinute = parseInt(k.split('-').pop() || '0');
+      if (keyMinute < tenMinutesAgo) {
+        delete packetFrequencies[k];
+      }
+    });
 
     if (!packetFrequencies[key]) {
-      packetFrequencies[key] = { count: 1, timestamp: now };
-      return 1;
-    }
-
-    // Reset count if more than 5 minutes have passed
-    if (now - packetFrequencies[key].timestamp > 300000) {
       packetFrequencies[key] = { count: 1, timestamp: now };
       return 1;
     }
@@ -364,54 +383,70 @@ export class PacketCaptureService {
     packetFrequencies[key].count++;
     packetFrequencies[key].timestamp = now;
 
-    // Clean up old entries (older than 1 hour)
-    const oneHourAgo = now - 3600000;
-    Object.keys(packetFrequencies).forEach(k => {
-      if (packetFrequencies[k].timestamp < oneHourAgo) {
-        delete packetFrequencies[k];
-      }
-    });
-
     return packetFrequencies[key].count;
   }
 
-  private determineStatus(packet: { protocol: string; frequency: number; start_ip: string; end_ip: string }): 'critical' | 'medium' | 'normal' {
-    // Much more conservative thresholds to reduce false positives
+  private determineStatus(packet: { protocol: string; frequency: number; start_ip: string; end_ip: string; start_bytes: number; end_bytes: number }): 'critical' | 'medium' | 'normal' {
+    // Very conservative thresholds based on realistic network behavior
 
-    // Check for suspicious IP patterns first
     const isPrivateIP = (ip: string) => {
-      return ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.');
+      return ip.startsWith('192.168.') || ip.startsWith('10.') ||
+             (ip.startsWith('172.') && parseInt(ip.split('.')[1]) >= 16 && parseInt(ip.split('.')[1]) <= 31);
     };
 
     const isLocalhost = (ip: string) => {
-      return ip.startsWith('127.') || ip === '::1';
+      return ip.startsWith('127.') || ip === '::1' || ip === 'localhost';
     };
 
-    // Don't flag local/private network traffic as critical
-    if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
-      // Internal network traffic - be very conservative
-      if (packet.protocol === 'TCP' && packet.frequency > 500) return 'medium';
-      if (packet.protocol === 'UDP' && packet.frequency > 1000) return 'medium';
-      if (packet.protocol === 'ICMP' && packet.frequency > 100) return 'medium';
-      return 'normal';
-    }
+    const isBroadcast = (ip: string) => {
+      return ip.endsWith('.255') || ip === '255.255.255.255';
+    };
 
-    // Don't flag localhost traffic
+    // Never flag localhost or loopback traffic
     if (isLocalhost(packet.start_ip) || isLocalhost(packet.end_ip)) {
       return 'normal';
     }
 
-    // Critical conditions - extremely high frequency indicating definite attacks
+    // Analyze packet size for anomaly detection
+    const totalBytes = packet.start_bytes + packet.end_bytes;
+    const isLargePacket = totalBytes > 1500; // Larger than typical MTU
+    const isSmallPacket = totalBytes < 64;   // Smaller than minimum Ethernet frame
+
+    // Internal network traffic - very high thresholds
+    if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
+      // Critical: Extremely high frequency that indicates definite attack patterns
+      if (packet.protocol === 'TCP' && packet.frequency > 2000) return 'critical';
+      if (packet.protocol === 'UDP' && packet.frequency > 5000) return 'critical';
+      if (packet.protocol === 'ICMP' && packet.frequency > 1000) return 'critical';
+
+      // Medium: High frequency with suspicious characteristics
+      if (packet.protocol === 'TCP' && packet.frequency > 500 && (isSmallPacket || isLargePacket)) return 'medium';
+      if (packet.protocol === 'UDP' && packet.frequency > 1000 && (isSmallPacket || isLargePacket)) return 'medium';
+      if (packet.protocol === 'ICMP' && packet.frequency > 200) return 'medium';
+
+      return 'normal';
+    }
+
+    // External traffic - more sensitive but still realistic
+    if (isBroadcast(packet.start_ip) || isBroadcast(packet.end_ip)) {
+      // Broadcast traffic - flag high frequency
+      if (packet.frequency > 100) return 'medium';
+      return 'normal';
+    }
+
+    // Critical: Very high frequency external traffic (likely DDoS or scan)
     if (packet.protocol === 'TCP' && packet.frequency > 1000) return 'critical';
     if (packet.protocol === 'UDP' && packet.frequency > 2000) return 'critical';
     if (packet.protocol === 'ICMP' && packet.frequency > 500) return 'critical';
 
-    // Medium conditions - high frequency that might be suspicious
-    if (packet.protocol === 'TCP' && packet.frequency > 200) return 'medium';
-    if (packet.protocol === 'UDP' && packet.frequency > 500) return 'medium';
+    // Medium: Moderately high frequency with suspicious patterns
+    if (packet.protocol === 'TCP' && packet.frequency > 300 && isSmallPacket) return 'medium';
+    if (packet.protocol === 'UDP' && packet.frequency > 600) return 'medium';
     if (packet.protocol === 'ICMP' && packet.frequency > 100) return 'medium';
 
-    // Normal by default
+    // Port scan detection - many small TCP packets
+    if (packet.protocol === 'TCP' && packet.frequency > 200 && totalBytes < 100) return 'medium';
+
     return 'normal';
   }
 
