@@ -50,34 +50,32 @@ export class PacketCaptureService {
         '3. You have at least one network interface enabled');
     }
 
-    // Try interfaces in order of preference
     const interfacePreferences = [
-      // First preference: Real network interfaces with addresses
-      (iface: any) => iface.addresses &&
-        iface.addresses.length > 0 &&
-        !iface.name.toLowerCase().includes('loopback') &&
-        !iface.description.toLowerCase().includes('loopback') &&
-        !iface.description.toLowerCase().includes('miniport') &&
-        !iface.description.toLowerCase().includes('virtual') &&
-        !iface.description.toLowerCase().includes('vmware') &&
-        !iface.description.toLowerCase().includes('virtualbox') &&
-        (iface.description.toLowerCase().includes('wi-fi') ||
-         iface.description.toLowerCase().includes('ethernet') ||
-         iface.description.toLowerCase().includes('realtek') ||
-         iface.description.toLowerCase().includes('intel')),
+    (iface: any) =>
+      iface.addresses &&
+      iface.addresses.length > 0 &&
+      !iface.name?.toLowerCase().includes('loopback') &&
+      !iface.description?.toLowerCase().includes('loopback') &&
+      !iface.description?.toLowerCase().includes('miniport') &&
+      !iface.description?.toLowerCase().includes('virtual') &&
+      !iface.description?.toLowerCase().includes('vmware') &&
+      !iface.description?.toLowerCase().includes('virtualbox') &&
+      (iface.description?.toLowerCase().includes('wi-fi') ||
+      iface.description?.toLowerCase().includes('ethernet') ||
+      iface.description?.toLowerCase().includes('realtek') ||
+      iface.description?.toLowerCase().includes('intel')),
 
-      // Second preference: Any interface with addresses (not loopback)
-      (iface: any) => iface.addresses &&
-        iface.addresses.length > 0 &&
-        !iface.name.toLowerCase().includes('loopback') &&
-        !iface.description.toLowerCase().includes('loopback'),
+    (iface: any) =>
+      iface.addresses &&
+      iface.addresses.length > 0 &&
+      !iface.name?.toLowerCase().includes('loopback') &&
+      !iface.description?.toLowerCase().includes('loopback'),
 
-      // Third preference: Any non-loopback interface
-      (iface: any) => !iface.name.toLowerCase().includes('loopback') &&
-        !iface.description.toLowerCase().includes('loopback'),
+    (iface: any) =>
+      !iface.name?.toLowerCase().includes('loopback') &&
+      !iface.description?.toLowerCase().includes('loopback'),
 
-      // Last resort: Any interface
-      () => true
+    () => true
     ];
 
     let selectedInterface = null;

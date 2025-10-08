@@ -136,13 +136,44 @@ export const packetService = {
       }));
   },
 
-  async getAlerts(): Promise<ThreatAlert[]> {
-    const response = await api.get(`${API_URL}/alerts`);
+  async getAlerts(filters?: {
+    severity?: string[];
+    status?: string[];
+    timeRange?: string;
+    from?: Date;
+    to?: Date;
+  }): Promise<ThreatAlert[]> {
+    const params = new URLSearchParams();
+    
+    if (filters) {
+      if (filters.severity && filters.severity.length > 0) {
+        filters.severity.forEach(s => params.append('severity', s));
+      }
+      if (filters.status && filters.status.length > 0) {
+        filters.status.forEach(s => params.append('status', s));
+      }
+      if (filters.timeRange) {
+        params.append('timeRange', filters.timeRange);
+      }
+      if (filters.from && filters.to) {
+        params.append('from', filters.from.toISOString());
+        params.append('to', filters.to.toISOString());
+      }
+    }
+    
+    const url = `${API_URL}/alerts${params.toString() ? '?' + params.toString() : ''}`;
+    const response = await api.get(url);
     return response.data;
   },
 
-  async getAlertStats(): Promise<AlertStats> {
-    const alerts = await this.getAlerts();
+  async getAlertStats(filters?: {
+    severity?: string[];
+    status?: string[];
+    timeRange?: string;
+    from?: Date;
+    to?: Date;
+  }): Promise<AlertStats> {
+    const alerts = await this.getAlerts(filters);
     const stats = {
       critical: 0,
       high: 0,
@@ -152,7 +183,9 @@ export const packetService = {
     };
 
     alerts.forEach(alert => {
-      stats[alert.severity]++;
+      if (alert.severity in stats) {
+        (stats as any)[alert.severity]++;
+      }
     });
 
     return stats;

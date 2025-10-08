@@ -133,38 +133,128 @@ router.get('/debug/count', async (req, res) => {
   }
 });
 
-// Get alerts
+// Get alerts with filtering support
 router.get('/alerts', async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
     
-    console.log('Fetching alerts from MongoDB for user:', req.user._id);
-    const alerts = await Packet.find({ 
-      user: req.user._id,
-      $or: [
+    const { severity, status, from, to, timeRange } = req.query;
+    
+    // Build filter query
+    const filter: any = { user: req.user._id };
+    
+    // Add severity filters
+    if (severity) {
+      const severities = Array.isArray(severity) ? severity : [severity];
+      const statusFilters = severities
+        .map((sev) => {
+          const sevStr = String(sev);
+          if (sevStr === 'critical' || sevStr === 'high') return { status: 'critical' };
+          if (sevStr === 'medium') return { status: 'medium' };
+          if (sevStr === 'low') return { status: 'normal' };
+          return null;
+        })
+        .filter(Boolean);
+      
+      if (statusFilters.length > 0) {
+        filter.$or = statusFilters;
+      }
+    } else {
+      // Default: only show critical and medium severity alerts
+      filter.$or = [
         { status: 'critical' },
         { status: 'medium' }
-      ]
-    }).sort({ date: -1 });
+      ];
+    }
+    
+    // Add date range filters
+    let fromDate: Date | null = null;
+    let toDate: Date | null = null;
+    
+    if (from && to) {
+      fromDate = new Date(String(from));
+      toDate = new Date(String(to));
+    } else if (timeRange) {
+      toDate = new Date();
+      const now = new Date();
+      
+      const timeRangeStr = String(timeRange);
+      switch (timeRangeStr) {
+        case '1h':
+          fromDate = new Date(now.getTime() - 60 * 60 * 1000);
+          break;
+        case '24h':
+          fromDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          break;
+        case '7d':
+          fromDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case '30d':
+          fromDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case 'all':
+        default:
+          // No date filter for 'all'
+          break;
+      }
+    }
+    
+    if (fromDate && toDate) {
+      filter.date = {
+        $gte: fromDate,
+        $lte: toDate
+      };
+    }
+    
+    console.log('Fetching alerts from MongoDB for user:', req.user._id, 'with filter:', JSON.stringify(filter));
+    const alerts = await Packet.find(filter).sort({ date: -1 });
     
     // Transform packets into alerts format
-    const formattedAlerts = alerts.map(packet => ({
-      id: packet._id,
-      date: packet.date,
-      source: packet.start_ip,
-      destination: packet.end_ip,
-      protocol: packet.protocol,
-      severity: packet.status === 'critical' ? 'critical' : 'medium',
-      status: 'open',
-      description: packet.description,
-      confidence: packet.confidence,
-      attack_type: packet.attack_type
-    }));
+    const formattedAlerts = alerts.map(packet => {
+      let severity = 'low';
+      let alertStatus = 'active';
+      
+      // Map packet status to alert severity
+      if (packet.status === 'critical') severity = 'critical';
+      else if (packet.status === 'medium') severity = 'medium';
+      else if (packet.status === 'normal') severity = 'low';
+      
+      // Set default alert status (packets don't have investigation status)
+      alertStatus = 'active'; // Default status for new alerts
+      
+      return {
+        _id: packet._id,
+        id: packet._id,
+        date: packet.date,
+        source: packet.start_ip,
+        destination: packet.end_ip,
+        protocol: packet.protocol,
+        severity,
+        status: alertStatus,
+        description: packet.description,
+        confidence: packet.confidence,
+        attack_type: packet.attack_type,
+        type: packet.attack_type || 'Network Anomaly',
+        timestamp: packet.date
+      };
+    });
     
-    console.log(`Found ${formattedAlerts.length} alerts for user ${req.user._id}`);
-    res.json(formattedAlerts);
+    // Apply status filter on formatted alerts if specified
+    let filteredAlerts = formattedAlerts;
+    if (status) {
+      const statusArray = Array.isArray(status) ? status : [status];
+      const statusStrings = statusArray.map(s => String(s));
+      if (statusStrings.length > 0) {
+        filteredAlerts = formattedAlerts.filter(alert => 
+          statusStrings.includes(alert.status)
+        );
+      }
+    }
+    
+    console.log(`Found ${filteredAlerts.length} alerts for user ${req.user._id}`);
+    res.json(filteredAlerts);
   } catch (error) {
     console.error('Error fetching alerts:', error);
     res.status(500).json({ error: 'Error fetching alerts' });

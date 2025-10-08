@@ -1,13 +1,17 @@
 import { FC, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
+import DateRangePicker from '../components/DateRangePicker';
 import { packetService, ThreatAlert } from '../services/packetService';
 import '../styles/Monitoring.css';
 
 interface FilterState {
   severity: string[];
   status: string[];
-  timeRange: string;
+  dateRange?: {
+    from: Date | null;
+    to: Date | null;
+  };
 }
 
 const Monitoring: FC = () => {
@@ -25,16 +29,12 @@ const Monitoring: FC = () => {
   const [filters, setFilters] = useState<FilterState>({
     severity: [],
     status: [],
-    timeRange: '24h'
+    dateRange: {
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000), // 24 hours ago
+      to: new Date() // now
+    }
   });
 
-  const timeRangeOptions = [
-    { value: '1h', label: 'Last Hour' },
-    { value: '24h', label: 'Last 24 Hours' },
-    { value: '7d', label: 'Last 7 Days' },
-    { value: '30d', label: 'Last 30 Days' },
-    { value: 'all', label: 'All Time' }
-  ];
 
   const filterOptions = {
     severity: [
@@ -51,15 +51,33 @@ const Monitoring: FC = () => {
     ]
   };
 
-  const fetchData = async () => {
+  const fetchData = async (filterParams?: FilterState) => {
     try {
       setIsLoading(true);
       setError(null);
       
-      // Get alerts and stats
+      const currentFilters = filterParams || filters;
+      
+      // Prepare filter parameters for API
+      const apiFilters: any = {
+        // Backend defaults to only critical+medium when severity is omitted.
+        // To show results by default, include all severities when none are selected.
+        severity: (currentFilters.severity && currentFilters.severity.length > 0)
+          ? currentFilters.severity
+          : ['critical', 'medium', 'low'],
+        status: currentFilters.status
+      };
+      
+      // Add date range if specified
+      if (currentFilters.dateRange?.from && currentFilters.dateRange?.to) {
+        apiFilters.from = currentFilters.dateRange.from;
+        apiFilters.to = currentFilters.dateRange.to;
+      }
+      
+      // Get alerts and stats with filters
       const [alertsData, statsData] = await Promise.all([
-        packetService.getAlerts(),
-        packetService.getAlertStats()
+        packetService.getAlerts(apiFilters),
+        packetService.getAlertStats(apiFilters)
       ]);
 
       setAlerts(alertsData);
@@ -76,6 +94,11 @@ const Monitoring: FC = () => {
   useEffect(() => {
     fetchData();
   }, []);
+  
+  // Re-fetch data when filters change
+  useEffect(() => {
+    fetchData();
+  }, [filters]);
 
   const handleToggleExpand = (id: string) => {
     setExpandedAlertId(expandedAlertId === id ? null : id);
@@ -96,23 +119,31 @@ const Monitoring: FC = () => {
     });
   };
 
-  const handleTimeRangeChange = (range: string) => {
-    setFilters(prev => ({ ...prev, timeRange: range }));
+  const handleDateRangeChange = (from: Date | null, to: Date | null) => {
+    // Update filters and immediately fetch with the new range so results update on Apply
+    setFilters(prev => {
+      const next = {
+        ...prev,
+        dateRange: { from, to }
+      } as FilterState;
+      // Trigger a fetch using the updated filters instead of waiting for state effect
+      fetchData(next);
+      return next;
+    });
   };
 
   const handleUpdateStatus = async (alertId: string, newStatus: ThreatAlert['status']) => {
     try {
       await packetService.updateAlertStatus(alertId, newStatus);
-      // Refresh alerts after status update
-      const updatedAlerts = await packetService.getAlerts();
-      setAlerts(updatedAlerts);
+      // Refresh alerts after status update with current filters
+      await fetchData();
     } catch (err) {
       console.error('Error updating alert status:', err);
       setError('Failed to update alert status. Please try again.');
     }
   };
 
-  // Filter alerts based on current filters
+  // Apply client-side search filtering (since search is not handled by API yet)
   const filteredAlerts = alerts.filter(alert => {
     const matchesSearch = 
       searchTerm === '' || 
@@ -120,15 +151,7 @@ const Monitoring: FC = () => {
         value => typeof value === 'string' && value.toLowerCase().includes(searchTerm.toLowerCase())
       );
     
-    const matchesSeverity = 
-      filters.severity.length === 0 || 
-      filters.severity.includes(alert.severity);
-    
-    const matchesStatus = 
-      filters.status.length === 0 || 
-      filters.status.includes(alert.status);
-    
-    return matchesSearch && matchesSeverity && matchesStatus;
+    return matchesSearch;
   });
 
   const getSeverityIcon = (severity: string) => {
@@ -294,19 +317,13 @@ const Monitoring: FC = () => {
             </div>
             
             <div className="filter-group">
-              <h4>Time Range</h4>
+              <h4>📅 Date Range</h4>
               <div className="filter-options">
-                <select 
-                  value={filters.timeRange}
-                  onChange={(e) => handleTimeRangeChange(e.target.value)}
-                  className="time-select"
-                >
-                  {timeRangeOptions.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                <DateRangePicker
+                  fromDate={filters.dateRange?.from || undefined}
+                  toDate={filters.dateRange?.to || undefined}
+                  onDateChange={handleDateRangeChange}
+                />
               </div>
             </div>
           </div>
@@ -424,7 +441,14 @@ const Monitoring: FC = () => {
                 <motion.button 
                   className="reset-btn"
                   onClick={() => {
-                    setFilters({ severity: [], status: [], timeRange: '24h' });
+                    setFilters({ 
+                      severity: [], 
+                      status: [], 
+                      dateRange: {
+                        from: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                        to: new Date()
+                      }
+                    });
                     setSearchTerm('');
                   }}
                   whileHover={{ scale: 1.05 }}
