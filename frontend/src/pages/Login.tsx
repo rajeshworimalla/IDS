@@ -15,6 +15,8 @@ const Login: FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [lockMessage, setLockMessage] = useState('');
+  const [lockRemaining, setLockRemaining] = useState<number | null>(null);
 
   // Check if already authenticated and redirect if needed
   useEffect(() => {
@@ -40,6 +42,7 @@ const Login: FC = () => {
     });
     if (error) setError('');
     if (successMessage) setSuccessMessage('');
+    if (lockMessage) setLockMessage('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,31 +57,35 @@ const Login: FC = () => {
     setIsLoading(true);
     setError('');
     setSuccessMessage('');
+    setLockMessage('');
     
     try {
-      console.log('Starting login process...');
-      
       // Call the auth service to login
       const response = await authService.login({
         email: formData.email,
         password: formData.password
       });
       
-      console.log('Login successful, response:', response);
-      
       // Dispatch auth change event to update app state
       const authChangeEvent = new Event('auth-change');
       window.dispatchEvent(authChangeEvent);
       
-      // Small delay to ensure state updates are processed
+      // Navigate to dashboard
       setTimeout(() => {
-        console.log('Navigating to dashboard...');
         navigate('/dashboard', { replace: true });
       }, 100);
       
-    } catch (err) {
-      console.error('Login error:', err);
-      setError('Invalid email or password');
+    } catch (err: any) {
+      const msg = String(err?.message || 'Login failed');
+      // Parse remaining seconds if included
+      const remainingMatch = msg.match(/(\d+)s/);
+      if (msg.toLowerCase().includes('too many failed attempts') || remainingMatch) {
+        setLockMessage(msg);
+        const seconds = remainingMatch ? parseInt(remainingMatch[1], 10) : 60;
+        setLockRemaining(seconds);
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -105,6 +112,16 @@ const Login: FC = () => {
       transition: { type: "spring", stiffness: 300, damping: 24 }
     }
   };
+
+  // Countdown effect for lockRemaining
+  useEffect(() => {
+    if (lockRemaining && lockRemaining > 0) {
+      const t = setInterval(() => {
+        setLockRemaining(prev => (prev && prev > 0 ? prev - 1 : 0));
+      }, 1000);
+      return () => clearInterval(t);
+    }
+  }, [lockRemaining]);
 
   return (
     <div className="auth-page">
@@ -143,6 +160,16 @@ const Login: FC = () => {
           <h1 className="auth-title">Welcome Back</h1>
           <p className="auth-subtitle">Sign in to your account</p>
           
+          {lockMessage && (
+            <motion.div 
+              className="auth-error"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              {lockMessage}
+            </motion.div>
+          )}
+
           {error && (
             <motion.div 
               className="auth-error"
@@ -207,11 +234,11 @@ const Login: FC = () => {
             <motion.button
               type="submit"
               className="auth-button"
-              disabled={isLoading}
+              disabled={isLoading || (lockRemaining !== null && lockRemaining > 0)}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading ? 'Signing in...' : (lockRemaining && lockRemaining > 0 ? `Locked (${lockRemaining}s)` : 'Sign In')}
             </motion.button>
           </form>
           

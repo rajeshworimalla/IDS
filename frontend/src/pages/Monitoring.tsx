@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import DateRangePicker from '../components/DateRangePicker';
 import { packetService, ThreatAlert } from '../services/packetService';
+import { ipBlockService, BlockedIP } from '../services/ipBlockService';
 import '../styles/Monitoring.css';
 
 interface FilterState {
@@ -34,6 +35,10 @@ const Monitoring: FC = () => {
       to: new Date() // now
     }
   });
+  const [showBlockedIPs, setShowBlockedIPs] = useState(false);
+  const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
+  const [blockedLoading, setBlockedLoading] = useState(false);
+  const [blockedError, setBlockedError] = useState<string | null>(null);
 
 
   const filterOptions = {
@@ -135,11 +140,56 @@ const Monitoring: FC = () => {
   const handleUpdateStatus = async (alertId: string, newStatus: ThreatAlert['status']) => {
     try {
       await packetService.updateAlertStatus(alertId, newStatus);
-      // Refresh alerts after status update with current filters
       await fetchData();
     } catch (err) {
       console.error('Error updating alert status:', err);
       setError('Failed to update alert status. Please try again.');
+    }
+  };
+
+  const handleBlockIP = async (ip: string) => {
+    const ok = window.confirm(`Block IP ${ip}?`);
+    if (!ok) return;
+    try {
+      await ipBlockService.blockIP(ip);
+      // Optimistically update list if modal is open
+      if (showBlockedIPs) {
+        await loadBlockedIPs();
+      }
+    } catch (e) {
+      console.error('Error blocking IP:', e);
+      setError('Failed to block IP.');
+    }
+  };
+
+  const loadBlockedIPs = async () => {
+    try {
+      setBlockedLoading(true);
+      setBlockedError(null);
+      const list = await ipBlockService.getBlockedIPs();
+      setBlockedIPs(list);
+    } catch (e) {
+      console.error('Error fetching blocked IPs:', e);
+      setBlockedError('Failed to fetch blocked IPs.');
+    } finally {
+      setBlockedLoading(false);
+    }
+  };
+
+  const handleOpenBlockedIPs = async () => {
+    setShowBlockedIPs(true);
+    await loadBlockedIPs();
+  };
+
+  const handleUnblockIP = async (ip: string) => {
+    const ok = window.confirm(`Unblock IP ${ip}?`);
+    if (!ok) return;
+    try {
+      await ipBlockService.unblockIP(ip);
+      await loadBlockedIPs();
+    } catch (e) {
+      console.error('Error unblocking IP:', e);
+      setBlockedError('Failed to unblock IP.');
     }
   };
 
@@ -212,19 +262,29 @@ const Monitoring: FC = () => {
         >
           <div className="header-row">
             <h1>Monitoring</h1>
-            <motion.button
-              className="refresh-button"
-              onClick={fetchData}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <span className="loading-spinner" />
-              ) : (
-                <span>🔄 Refresh</span>
-              )}
-            </motion.button>
+            <div className="header-actions">
+              <motion.button
+                className="view-blocked-button"
+                onClick={handleOpenBlockedIPs}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                🚫 View blocked IPs
+              </motion.button>
+              <motion.button
+                className="refresh-button"
+                onClick={fetchData}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <span className="loading-spinner" />
+                ) : (
+                  <span>🔄 Refresh</span>
+                )}
+              </motion.button>
+            </div>
           </div>
           <div className="monitoring-stats">
             <motion.div 
@@ -425,6 +485,14 @@ const Monitoring: FC = () => {
                               Resolve
                             </motion.button>
                           )}
+                          <motion.button 
+                            className="action-btn block"
+                            onClick={(e) => { e.stopPropagation(); handleBlockIP(alert.source); }}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                          >
+                            Block IP
+                          </motion.button>
                         </div>
                       </motion.div>
                     )}
@@ -460,9 +528,41 @@ const Monitoring: FC = () => {
             )}
           </div>
         </AnimatePresence>
+        {/* Blocked IPs Modal */}
+        {showBlockedIPs && (
+          <div className="modal-backdrop" onClick={() => setShowBlockedIPs(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>Blocked IPs</h3>
+                <button className="modal-close" onClick={() => setShowBlockedIPs(false)}>✕</button>
+              </div>
+              <div className="modal-body">
+                {blockedLoading && <p>Loading...</p>}
+                {blockedError && <p className="error-text">{blockedError}</p>}
+                {!blockedLoading && !blockedError && (
+                  blockedIPs.length > 0 ? (
+                    <ul className="blocked-list">
+                      {blockedIPs.map((item) => (
+                        <li key={item.ip} className="blocked-item">
+                          <div className="blocked-info">
+                            <span className="blocked-ip">{item.ip}</span>
+                            <span className="blocked-at">{new Date(item.blockedAt).toLocaleString()}</span>
+                          </div>
+                          <button className="unblock-btn" onClick={() => handleUnblockIP(item.ip)}>Unblock</button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>No blocked IPs.</p>
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </motion.main>
     </div>
   );
 };
 
-export default Monitoring; 
+export default Monitoring;

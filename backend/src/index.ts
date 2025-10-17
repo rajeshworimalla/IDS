@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
 import settingsRoutes from './routes/settings';
+import ipsRoutes from './routes/ips';
 import { config } from './config/env';
 import { initializeSocket } from './socket';
 
@@ -63,6 +64,7 @@ console.log('Setting up routes...');
 app.use('/api/auth', authRoutes);
 app.use('/api/packets', packetRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/ips', ipsRoutes);
 
 // Database connection
 console.log('Connecting to MongoDB...');

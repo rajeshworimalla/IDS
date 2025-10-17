@@ -94,14 +94,24 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
+    // Check if locked
+    if ((user as any).isLocked) {
+      const remaining = user.lockUntil ? Math.max(0, Math.ceil((user.lockUntil.getTime() - Date.now()) / 1000)) : 60;
+      return res.status(423).json({ message: `Too many failed attempts. Try again in ${remaining}s.` });
+    }
+
     // Check password
     const isMatch = await user.comparePassword(password);
     console.log('Password match:', isMatch);
     
     if (!isMatch) {
       console.log('Password mismatch for user:', email);
+      await (user as any).incLoginAttempts();
       return res.status(401).json({ message: 'Invalid credentials' });
     }
+
+    // Success: reset attempts
+    await (user as any).resetLoginAttempts();
 
     // Generate token with correct payload structure
     const token = generateToken(user._id.toString(), user.role);

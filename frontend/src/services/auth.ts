@@ -56,7 +56,10 @@ class AuthService {
       this.clearAuth();
       
       // Throw a more user-friendly error
-      if (error.response?.status === 401) {
+      if (error.response?.status === 423) {
+        // Account locked (from backend)
+        throw new Error(error.response?.data?.message || 'Too many failed attempts. Try again later.');
+      } else if (error.response?.status === 401) {
         throw new Error('Invalid email or password');
       } else if (!error.response) {
         throw new Error('Network error. Please check your connection and try again.');
