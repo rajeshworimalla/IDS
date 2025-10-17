@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { BlockedIP } from '../models/BlockedIP';
 import { isIP } from 'net';
+import { firewall } from '../services/firewall';
 
 // Extend Express Request type to include user
 declare global {
@@ -45,7 +46,13 @@ export const blockIP = async (req: Request, res: Response) => {
       { new: true, upsert: true }
     );
 
-    return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt });
+    // Apply OS-level firewall rule
+    const result = await firewall.blockIP(ip);
+    if ('applied' in result && result.applied) {
+      return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: result.method });
+    }
+
+    return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: false, error: (result as any).error });
   } catch (e: any) {
     console.error('blockIP error:', e);
     // Handle duplicate key
@@ -63,7 +70,8 @@ export const unblockIP = async (req: Request, res: Response) => {
     if (!ip) return res.status(400).json({ error: 'ip param is required' });
 
     await BlockedIP.deleteOne({ user: req.user._id, ip });
-    return res.json({ message: 'Unblocked' });
+    const result = await firewall.unblockIP(ip);
+    return res.json({ message: 'Unblocked', removed: (result as any).removed !== false });
   } catch (e) {
     console.error('unblockIP error:', e);
     return res.status(500).json({ error: 'Failed to unblock IP' });

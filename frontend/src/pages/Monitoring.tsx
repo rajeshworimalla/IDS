@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import DateRangePicker from '../components/DateRangePicker';
 import { packetService, ThreatAlert } from '../services/packetService';
-import { ipBlockService, BlockedIP } from '../services/ipBlockService';
+import { ipBlockService, BlockedIP, BlockResponse } from '../services/ipBlockService';
 import '../styles/Monitoring.css';
 
 interface FilterState {
@@ -151,14 +151,16 @@ const Monitoring: FC = () => {
     const ok = window.confirm(`Block IP ${ip}?`);
     if (!ok) return;
     try {
-      await ipBlockService.blockIP(ip);
-      // Optimistically update list if modal is open
+      const res: BlockResponse = await ipBlockService.blockIP(ip);
+      if (res.applied === false) {
+        setError(`Blocked in app, but firewall not applied: ${res.error || 'insufficient privileges or unsupported firewall'}`);
+      }
       if (showBlockedIPs) {
         await loadBlockedIPs();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error blocking IP:', e);
-      setError('Failed to block IP.');
+      setError(e?.message || 'Failed to block IP.');
     }
   };
 

@@ -7,6 +7,8 @@ import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
 import settingsRoutes from './routes/settings';
 import ipsRoutes from './routes/ips';
+import { firewall } from './services/firewall';
+import { BlockedIP } from './models/BlockedIP';
 import { config } from './config/env';
 import { initializeSocket } from './socket';
 
@@ -74,9 +76,26 @@ mongoose.connect(config.MONGODB_URI, {
   serverSelectionTimeoutMS: 5000,
   socketTimeoutMS: 45000,
 } as any)
-  .then(() => {
+  .then(async () => {
     console.log('Connected to MongoDB');
     console.log('Database URI:', config.MONGODB_URI);
+
+    // Ensure firewall base rules and sync existing blocked IPs
+    try {
+      await firewall.ensureBaseRules();
+      const items = await BlockedIP.find({});
+      const v4: string[] = [];
+      const v6: string[] = [];
+      for (const item of items) {
+        // naive split based on validator
+        if ((item.ip || '').includes(':')) v6.push(item.ip);
+        else v4.push(item.ip);
+      }
+      await firewall.syncFromDB({ v4, v6 });
+      console.log(`Synced firewall with ${v4.length + v6.length} blocked IP(s).`);
+    } catch (e) {
+      console.error('Failed to ensure firewall rules or sync blocklist:', e);
+    }
     
     // Verify the database exists
     const db = mongoose.connection.db;
