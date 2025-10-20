@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Demo Login</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #0e1116; color: #e6edf3; }
+    .card { width: 100%; max-width: 380px; padding: 28px; border-radius: 12px; background: #161b22; box-shadow: 0 8px 24px rgba(0,0,0,.35); border: 1px solid #30363d; }
+    h1 { margin: 0 0 18px; font-size: 1.25rem; font-weight: 600; }
+    form { display: grid; gap: 12px; }
+    label { font-size: .9rem; color: #c9d1d9; }
+    input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; }
+    input:focus { outline: 2px solid #1f6feb; border-color: #1f6feb; }
+    button { padding: 10px 12px; border: 0; border-radius: 8px; background: #238636; color: #fff; font-weight: 600; cursor: pointer; }
+    button:hover { background: #2ea043; }
+    .msg { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: .95rem; display: none; }
+    .msg.show { display: block; }
+    .msg.success { background: #132d19; color: #7ee787; border: 1px solid #2ea043; }
+    .msg.error { background: #2a1414; color: #ff7b72; border: 1px solid #f85149; }
+    .hint { margin-top: 8px; font-size: .85rem; color: #8b949e; }
+    .footer { margin-top: 18px; font-size: .8rem; color: #8b949e; text-align: center; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  </style>
+</head>
+<body>
+  <main class="card" role="main">
+    <h1>Demo Login</h1>
+    <form id="login-form" autocomplete="off" novalidate>
+      <div>
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" inputmode="text" required placeholder="e.g. alice" />
+      </div>
+      <div>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required placeholder="••••••••" />
+      </div>
+      <button type="submit">Log in</button>
+      <div id="message" class="msg" aria-live="polite"></div>
+      <p class="hint">Try: <code>alice/password123</code> or <code>bob/hunter2</code></p>
+    </form>
+    <p class="footer">Standalone demo page for local testing.</p>
+  </main>
+
+  <script>
+    // Demo credentials stored client-side for testing only
+    const users = [
+      { username: 'alice', password: 'password123' },
+      { username: 'bob',   password: 'hunter2' }
+    ];
+
+    const form = document.getElementById('login-form');
+    const usernameEl = document.getElementById('username');
+    const passwordEl = document.getElementById('password');
+    const messageEl  = document.getElementById('message');
+
+    function showMessage(text, isSuccess) {
+      messageEl.textContent = text;
+      messageEl.className = 'msg show ' + (isSuccess ? 'success' : 'error');
+    }
+
+    // IDS backend base URL (defaults to same host on port 5001)
+    const IDS_BASE = `${location.protocol}//${location.hostname}:5001`;
+
+    function getBanUntil() {
+      const v = Number(localStorage.getItem('ids.loginBanUntil') || '0');
+      return isNaN(v) ? 0 : v;
+    }
+    function setBanFor(seconds) {
+      const until = Date.now() + seconds * 1000;
+      localStorage.setItem('ids.loginBanUntil', String(until));
+      return until;
+    }
+    function secondsLeft(ts) {
+      return Math.max(0, Math.ceil((ts - Date.now()) / 1000));
+    }
+    function updateBanUI() {
+      const until = getBanUntil();
+      if (until > Date.now()) {
+        const left = secondsLeft(until);
+        showMessage(`Temporarily banned. Try again in ${left}s.`, false);
+        form.querySelector('button[type="submit"]').disabled = true;
+      } else {
+        form.querySelector('button[type="submit"]').disabled = false;
+      }
+    }
+    let banTimer = null;
+    function scheduleBanTick() {
+      if (banTimer) clearInterval(banTimer);
+      banTimer = setInterval(() => {
+        const until = getBanUntil();
+        if (until > Date.now()) {
+          updateBanUI();
+        } else {
+          clearInterval(banTimer);
+          banTimer = null;
+          updateBanUI();
+        }
+      }, 1000);
+    }
+
+    // Local fallback counter if IDS is unreachable
+    function bumpLocalFailCount() {
+      const windowSeconds = 60;
+      const bucket = Math.floor(Date.now() / 1000 / windowSeconds);
+      const key = `ids.localFail:${location.host}:${bucket}`;
+      const n = Number(localStorage.getItem(key) || '0') + 1;
+      localStorage.setItem(key, String(n));
+      return n;
+    }
+
+    async function reportFailedLogin() {
+      try {
+        const res = await fetch(`${IDS_BASE}/api/events/login-failed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors',
+          body: JSON.stringify({ host: location.host })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data && data.banned) {
+          const until = setBanFor(data.ttlSeconds || 30);
+          updateBanUI();
+          scheduleBanTick();
+        }
+        return data;
+      } catch (e) {
+        // Fallback: locally ban after 3 fails within 60s even if server unreachable
+        const count = bumpLocalFailCount();
+        if (count >= 3) {
+          setBanFor(30);
+          updateBanUI();
+          scheduleBanTick();
+        }
+        return null;
+      }
+    }
+
+    // Initialize ban state on load
+    updateBanUI();
+    if (getBanUntil() > Date.now()) scheduleBanTick();
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      // If locally banned, block attempt
+      const until = getBanUntil();
+      if (until > Date.now()) {
+        updateBanUI();
+        return;
+      }
+
+      const username = usernameEl.value.trim();
+      const password = passwordEl.value;
+
+      if (!username || !password) {
+        showMessage('Please enter both username and password.', false);
+        return;
+      }
+
+      const ok = users.some(u => u.username === username && u.password === password);
+
+      const ts = new Date().toISOString();
+      if (ok) {
+        console.log(`[${ts}] login success: user="${username}"`);
+        showMessage('Login successful.', true);
+      } else {
+        console.warn(`[${ts}] login failed: user="${username}"`);
+        showMessage('Invalid username or password.', false);
+        // Notify IDS backend for rate-limiting/ban
+        await reportFailedLogin();
+      }
+
+      // Optional: clear password after attempt
+      passwordEl.value = '';
+      passwordEl.focus();
+    });
+  </script>
+</body>
+</html>
