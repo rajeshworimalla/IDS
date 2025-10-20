@@ -56,8 +56,9 @@ async function ensureBins() {
 
 async function ensureIpsetSets() {
   if (!bins.ipset) throw new Error('ipset not available');
-  await run(bins.ipset, ['-exist', 'create', 'ids_blocklist', 'hash:ip', 'family', 'inet']);
-  await run(bins.ipset, ['-exist', 'create', 'ids6_blocklist', 'hash:ip', 'family', 'inet6']);
+  // Create sets with timeout support so per-element timeouts can be used
+  await run(bins.ipset, ['-exist', 'create', 'ids_blocklist', 'hash:ip', 'family', 'inet', 'timeout', '0']);
+  await run(bins.ipset, ['-exist', 'create', 'ids6_blocklist', 'hash:ip', 'family', 'inet6', 'timeout', '0']);
 }
 
 async function ensureIptablesSetRules(v6 = false) {
@@ -88,10 +89,14 @@ async function flushConntrack(ip: string, v6 = false) {
   await tryRun(bins.conntrack, ['-D', v6 ? '-f' : '-f', v6 ? 'ipv6' : 'ipv4', '-d', ip]);
 }
 
-async function ipsetAdd(ip: string, v6 = false) {
+async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
   if (!bins.ipset) throw new Error('ipset not available');
   const setName = v6 ? 'ids6_blocklist' : 'ids_blocklist';
-  await run(bins.ipset, ['-exist', 'add', setName, ip]);
+  const args = ['-exist', 'add', setName, ip];
+  if (ttlSeconds && ttlSeconds > 0) {
+    args.push('timeout', String(ttlSeconds));
+  }
+  await run(bins.ipset, args);
 }
 
 async function ipsetDel(ip: string, v6 = false) {
@@ -151,7 +156,7 @@ export const firewall = {
     }
   },
 
-  async blockIP(ip: string): Promise<{ applied: boolean; method: 'ipset-v4' | 'ipset-v6' | 'iptables-v4' | 'iptables-v6'; } | { applied: false; error: string } > {
+  async blockIP(ip: string, opts?: { ttlSeconds?: number }): Promise<{ applied: boolean; method: 'ipset-v4' | 'ipset-v6' | 'iptables-v4' | 'iptables-v6'; } | { applied: false; error: string } > {
     await ensureBins();
     const version = isIP(ip);
     if (version === 0) {
@@ -161,16 +166,16 @@ export const firewall = {
       if (bins.ipset) {
         await this.ensureBaseRules();
         if (version === 4) {
-          await ipsetAdd(ip, false);
+          await ipsetAdd(ip, false, opts?.ttlSeconds);
           await flushConntrack(ip, false);
           return { applied: true, method: 'ipset-v4' };
         } else {
-          await ipsetAdd(ip, true);
+          await ipsetAdd(ip, true, opts?.ttlSeconds);
           await flushConntrack(ip, true);
           return { applied: true, method: 'ipset-v6' };
         }
       }
-      // Fallback to raw iptables rules
+      // Fallback to raw iptables rules (no per-element TTL available)
       await iptablesCheckOrAdd(ip, version === 6);
       await flushConntrack(ip, version === 6);
       return { applied: true, method: (version === 6 ? 'iptables-v6' : 'iptables-v4') };

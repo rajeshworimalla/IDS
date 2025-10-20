@@ -1,0 +1,24 @@
+[Unit]
+Description=IDS Backend API (Node.js)
+After=network-online.target mongod.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Set a dedicated unprivileged user and group (create them first)
+User=ids
+Group=ids
+WorkingDirectory=/home/crow/Documents/Projects/IDS/backend
+EnvironmentFile=/etc/ids/backend.env
+# Ensure we have built JS before starting
+ExecStartPre=/usr/bin/npm run build
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+# Hardening (adjust if needed)
+NoNewPrivileges=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

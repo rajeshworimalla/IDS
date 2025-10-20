@@ -1,0 +1,8 @@
+# Allow the service user in group 'ids' to perform only required actions without password.
+# Copy to /etc/sudoers.d/ids-firewall (via visudo -f) and adjust paths if needed.
+
+%ids ALL=(root) NOPASSWD: /usr/sbin/nginx -s reload
+%ids ALL=(root) NOPASSWD: /usr/sbin/ipset *
+%ids ALL=(root) NOPASSWD: /usr/sbin/iptables *
+%ids ALL=(root) NOPASSWD: /usr/sbin/ip6tables *
+%ids ALL=(root) NOPASSWD: /usr/sbin/conntrack *

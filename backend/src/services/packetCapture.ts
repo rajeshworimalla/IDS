@@ -298,6 +298,16 @@ export class PacketCaptureService {
       } else {
         console.error('Socket.IO not initialized');
       }
+
+      // Auto-ban on critical events
+      try {
+        if (packetData.status === 'critical') {
+          const { autoBan } = await import('./policy');
+          await autoBan(packetData.start_ip, 'ids:critical');
+        }
+      } catch (e) {
+        console.error('Auto-ban failed for critical packet:', e);
+      }
     } catch (err) {
       const error = err as Error;
       console.error('Error processing packet:', error);

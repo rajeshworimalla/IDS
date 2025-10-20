@@ -29,6 +29,9 @@ console.log('Starting server with config:', {
 const app = express();
 const server = createServer(app);
 
+// Trust proxy to respect X-Forwarded-For from nginx
+app.set('trust proxy', true);
+
 // Initialize Socket.IO
 initializeSocket(server);
 
@@ -50,6 +53,16 @@ app.use(cors(corsOptions));
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Rate-limit and auto-ban middleware (Redis-based)
+(async () => {
+  try {
+    const { rateLimitMiddleware } = await import('./middleware/rateLimit');
+    app.use(rateLimitMiddleware);
+  } catch (e) {
+    console.error('Rate limit middleware failed to init:', e);
+  }
+})();
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
