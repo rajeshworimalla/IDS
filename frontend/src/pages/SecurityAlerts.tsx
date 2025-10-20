@@ -1,6 +1,7 @@
 import { FC, useState } from 'react';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
+import { ipBlockService } from '../services/ipBlockService';
 import '../styles/SecurityAlerts.css';
 
 interface ThreatAlert {
@@ -28,6 +29,8 @@ const SecurityAlerts: FC = () => {
     status: [],
     timeRange: '24h'
   });
+  const [blockMsg, setBlockMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Mock threat data
   const threatAlerts: ThreatAlert[] = [
@@ -173,6 +176,19 @@ const SecurityAlerts: FC = () => {
     }
   };
 
+  const handleBlockIP = async (ip: string) => {
+    const ok = window.confirm(`Block IP ${ip}?`);
+    if (!ok) return;
+    try {
+      setError(null);
+      await ipBlockService.blockIP(ip, 'Blocked via Security Alerts');
+      setBlockMsg(`Blocked ${ip}`);
+      setTimeout(() => setBlockMsg(null), 2500);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to block IP');
+    }
+  };
+
   return (
     <div className="security-alerts-page">
       <Navbar />
@@ -182,6 +198,16 @@ const SecurityAlerts: FC = () => {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
+        {error && (
+          <motion.div className="error-message" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            {error}
+          </motion.div>
+        )}
+        {blockMsg && (
+          <motion.div className="success-message" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            {blockMsg}
+          </motion.div>
+        )}
         <motion.div 
           className="security-header"
           initial={{ y: -20 }}
@@ -370,6 +396,14 @@ const SecurityAlerts: FC = () => {
                         whileTap={{ scale: 0.95 }}
                       >
                         Resolve
+                      </motion.button>
+                      <motion.button 
+                        className="action-btn block"
+                        onClick={(e) => { e.stopPropagation(); handleBlockIP(alert.source); }}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        Block IP
                       </motion.button>
                     </div>
                   </motion.div>

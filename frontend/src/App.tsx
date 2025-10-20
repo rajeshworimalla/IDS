@@ -9,6 +9,7 @@ import Settings from './pages/Settings'
 import Support from './pages/Support'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import Blocker from './pages/Blocker'
 import './App.css'
 
 const App: FC = () => {
@@ -86,6 +87,7 @@ const App: FC = () => {
         <Route path="/activities" element={<ProtectedRoute element={<Activities />} />} />
         <Route path="/events" element={<ProtectedRoute element={<EventsLog />} />} />
         <Route path="/monitoring" element={<ProtectedRoute element={<Monitoring />} />} />
+        <Route path="/blocker" element={<ProtectedRoute element={<Blocker />} />} />
         <Route path="/settings" element={<ProtectedRoute element={<Settings />} />} />
         <Route path="/support" element={<ProtectedRoute element={<Support />} />} />
         

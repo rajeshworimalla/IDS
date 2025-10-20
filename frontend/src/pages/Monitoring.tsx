@@ -39,6 +39,7 @@ const Monitoring: FC = () => {
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blockedError, setBlockedError] = useState<string | null>(null);
+  const [blockSuccess, setBlockSuccess] = useState<string | null>(null);
 
 
   const filterOptions = {
@@ -98,6 +99,8 @@ const Monitoring: FC = () => {
   // Fetch data on component mount
   useEffect(() => {
     fetchData();
+    // Load initial blocked list to mark items as blocked
+    loadBlockedIPs();
   }, []);
   
   // Re-fetch data when filters change
@@ -154,10 +157,11 @@ const Monitoring: FC = () => {
       const res: BlockResponse = await ipBlockService.blockIP(ip);
       if (res.applied === false) {
         setError(`Blocked in app, but firewall not applied: ${res.error || 'insufficient privileges or unsupported firewall'}`);
+      } else {
+        setBlockSuccess(`Blocked ${ip}${res.method ? ' via ' + res.method : ''}`);
+        setTimeout(() => setBlockSuccess(null), 2500);
       }
-      if (showBlockedIPs) {
-        await loadBlockedIPs();
-      }
+      await loadBlockedIPs();
     } catch (e: any) {
       console.error('Error blocking IP:', e);
       setError(e?.message || 'Failed to block IP.');
@@ -182,6 +186,8 @@ const Monitoring: FC = () => {
     setShowBlockedIPs(true);
     await loadBlockedIPs();
   };
+
+  const isBlocked = (ip: string) => blockedIPs.some(b => b.ip === ip);
 
   const handleUnblockIP = async (ip: string) => {
     const ok = window.confirm(`Unblock IP ${ip}?`);
@@ -254,6 +260,15 @@ const Monitoring: FC = () => {
             animate={{ opacity: 1, y: 0 }}
           >
             {error}
+          </motion.div>
+        )}
+        {blockSuccess && (
+          <motion.div 
+            className="success-message"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            {blockSuccess}
           </motion.div>
         )}
 
@@ -487,14 +502,21 @@ const Monitoring: FC = () => {
                               Resolve
                             </motion.button>
                           )}
-                          <motion.button 
-                            className="action-btn block"
-                            onClick={(e) => { e.stopPropagation(); handleBlockIP(alert.source); }}
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            Block IP
-                          </motion.button>
+                          {isBlocked(alert.source) ? (
+                            <div className="blocked-indicator">
+                              🚫 Blocked
+                              <button className="inline-unblock" onClick={(e) => { e.stopPropagation(); handleUnblockIP(alert.source); }}>Unblock</button>
+                            </div>
+                          ) : (
+                            <motion.button 
+                              className="action-btn block"
+                              onClick={(e) => { e.stopPropagation(); handleBlockIP(alert.source); }}
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                            >
+                              Block IP
+                            </motion.button>
+                          )}
                         </div>
                       </motion.div>
                     )}

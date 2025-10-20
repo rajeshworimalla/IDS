@@ -20,6 +20,7 @@ const Navbar: FC = () => {
     { id: 'activities', label: 'Activities', icon: '📝', path: '/activities' },
     { id: 'events', label: 'Traffic Collector', icon: '📋', path: '/events' },
     { id: 'monitoring', label: 'Monitoring', icon: '📈', path: '/monitoring' },
+    { id: 'blocker', label: 'Blocker', icon: '🚫', path: '/blocker' },
     { id: 'settings', label: 'Settings', icon: '⚙️', path: '/settings' },
     { id: 'support', label: 'Support', icon: '💬', path: '/support' },
   ];
