@@ -7,6 +7,7 @@ import authRoutes from './routes/auth';
 import packetRoutes from './routes/packets';
 import settingsRoutes from './routes/settings';
 import ipsRoutes from './routes/ips';
+import eventsRoutes from './routes/events';
 import { firewall } from './services/firewall';
 import { BlockedIP } from './models/BlockedIP';
 import { config } from './config/env';
@@ -38,17 +39,23 @@ initializeSocket(server);
 console.log('Starting server with config:', config);
 
 // CORS configuration
+// Allow all origins (demo sites on LAN, different ports, etc.)
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: true as any,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['Content-Length', 'Authorization'],
-  maxAge: 86400 // 24 hours
+  maxAge: 86400, // 24 hours
+  // Let CORS terminate preflight with 204 instead of passing to auth-protected routers
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
+// Handle generic OPTIONS early
+app.options('*', cors(corsOptions));
 
 // Body parser middleware
 app.use(express.json());
@@ -80,6 +87,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/packets', packetRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ips', ipsRoutes);
+app.use('/api/events', eventsRoutes);
 
 // Database connection
 console.log('Connecting to MongoDB...');

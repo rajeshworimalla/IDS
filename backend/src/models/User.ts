@@ -81,7 +81,7 @@ userSchema.methods.comparePassword = async function(candidatePassword: string): 
 // Method to increment login attempts and potentially lock account
 userSchema.methods.incLoginAttempts = async function(this: any): Promise<void> {
   const MAX_LOGIN_ATTEMPTS = 3;
-  const LOCK_TIME = 60 * 1000; // 1 minute in milliseconds
+  const LOCK_TIME = 30 * 1000; // 30 seconds
 
   // If lock expired, reset counters
   if (this.lockUntil && this.lockUntil.getTime() <= Date.now()) {

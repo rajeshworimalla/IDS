@@ -17,6 +17,11 @@ declare global {
 
 export const auth = (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Allow CORS preflight requests to pass through without auth
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     // Get token from header
     const authHeader = req.header('Authorization');
     console.log('Auth header:', authHeader);

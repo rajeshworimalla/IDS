@@ -15,9 +15,9 @@ export type TempBanRecord = {
   methods?: string[];
 };
 
-export async function enforceTempBan(ip: string, reason: string): Promise<TempBanRecord> {
+export async function enforceTempBan(ip: string, reason: string, opts?: { ttlSeconds?: number }): Promise<TempBanRecord> {
   const policy = await getPolicy();
-  const ttlSeconds = Math.max(1, Math.floor(policy.banMinutes * 60));
+  const ttlSeconds = Math.max(1, Math.floor((opts?.ttlSeconds ?? (policy.banMinutes * 60))));
   const now = Date.now();
   const expiresAt = now + ttlSeconds * 1000;
   const methods: string[] = [];
