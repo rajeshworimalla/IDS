@@ -1,9 +1,20 @@
 # Dependencies
 node_modules/
-npm-debug.log
-yarn-debug.log
-yarn-error.log
-env/
+
+# Python envs
+venv/
+.venv/
+**/venv/
+**/.venv/
+ENV/
+.envrc
+
+# Python artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.python-version
 
 # Environment variables
 .env
@@ -14,15 +25,18 @@ env/
 dist/
 build/
 
+# Logs
+logs/
+*.log
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
 # IDE and editor files
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# Logs
-logs/
-*.log
 
 # OS generated files
 .DS_Store
@@ -31,4 +45,4 @@ logs/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db

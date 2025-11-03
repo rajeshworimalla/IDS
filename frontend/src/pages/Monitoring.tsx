@@ -290,7 +290,7 @@ const Monitoring: FC = () => {
               </motion.button>
               <motion.button
                 className="refresh-button"
-                onClick={fetchData}
+                onClick={() => fetchData()}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 disabled={isLoading}
@@ -394,7 +394,7 @@ const Monitoring: FC = () => {
             </div>
             
             <div className="filter-group">
-              <h4>📅 Date Range</h4>
+              <h4>Date Range</h4>
               <div className="filter-options">
                 <DateRangePicker
                   fromDate={filters.dateRange?.from || undefined}

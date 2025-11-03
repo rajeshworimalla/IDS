@@ -135,7 +135,7 @@ const Dashboard: FC = () => {
               <span className="stats-title">MALICIOUS</span>
             </div>
           </motion.div>
-          <motion.div
+          {/* <motion.div
             className="stats-card"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -146,7 +146,7 @@ const Dashboard: FC = () => {
               <span className="stats-value">{Math.round(stats.avgBytes)}</span>
               <span className="stats-title">AVG BYTES</span>
             </div>
-          </motion.div>
+          </motion.div> */}
         </motion.div>
 
         <motion.div 

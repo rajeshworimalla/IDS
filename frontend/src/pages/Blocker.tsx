@@ -203,36 +203,38 @@ const Blocker: FC = () => {
     setScanning(false);
   }
 
+  const springy = { type: 'spring', stiffness: 120, damping: 20, mass: 0.8 } as const;
+
   return (
     <div className="blocker-page">
       <Navbar />
-      <motion.main className="blocker-content" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-        <div className="blocker-header">
+      <motion.main className="blocker-content" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={springy}>
+        <motion.div className="blocker-header" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...springy, delay: 0.05 }}>
           <h1>Management</h1>
-        </div>
+        </motion.div>
 
         {(error || policyError) && (
-          <div className="error-banner">
+          <motion.div className="error-banner" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={springy}>
             {error || policyError}
-          </div>
+          </motion.div>
         )}
 
-        <div className="tabs">
+        <motion.div className="tabs" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...springy, delay: 0.05 }}>
           <button className={`tab ${activeTab==='overview'?'active':''}`} onClick={()=>setActiveTab('overview')}>Overview</button>
           <button className={`tab ${activeTab==='blocked'?'active':''}`} onClick={()=>setActiveTab('blocked')}>Blocked IPs</button>
           <button className={`tab ${activeTab==='policies'?'active':''}`} onClick={()=>setActiveTab('policies')}>Policies</button>
           <button className={`tab ${activeTab==='websites'?'active':''}`} onClick={()=>setActiveTab('websites')}>Websites Control Panel</button>
-        </div>
+        </motion.div>
 
         <AnimatePresence mode="wait">
           {activeTab === 'overview' && (
-            <motion.section key="overview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <motion.section key="overview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springy}>
               <div className="stats-grid">
-                <div className="stat-card">
+                <motion.div className="stat-card" initial={{ opacity: 0, y: 12, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...springy, delay: 0.05 }}>
                   <div className="stat-title">Total Blocked</div>
                   <div className="stat-value">{totalBlocked}</div>
-                </div>
-                <div className="stat-card">
+                </motion.div>
+                <motion.div className="stat-card" initial={{ opacity: 0, y: 12, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...springy, delay: 0.1 }}>
                   <div className="stat-title">Enforcement</div>
                   <div className="stat-breakdown">
                     {Object.entries(byMethod).map(([m, c]) => (
@@ -243,8 +245,8 @@ const Blocker: FC = () => {
                     ))}
                     {Object.keys(byMethod).length === 0 && <div className="empty">No data</div>}
                   </div>
-                </div>
-                <div className="stat-card">
+                </motion.div>
+                <motion.div className="stat-card" initial={{ opacity: 0, y: 12, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ ...springy, delay: 0.15 }}>
                   <div className="stat-title">Current Policy</div>
                   <div className="policy-summary">
                     <div><strong>Window:</strong> {policy.windowSeconds}s</div>
@@ -253,7 +255,7 @@ const Blocker: FC = () => {
                     <div><strong>Firewall:</strong> {policy.useFirewall ? 'On' : 'Off'}</div>
                     <div><strong>Nginx deny:</strong> {policy.useNginxDeny ? 'On' : 'Off'}</div>
                   </div>
-                </div>
+                </motion.div>
               </div>
               <div className="actions-row">
                 <button className="btn" onClick={fetchBlocked} disabled={loading}>Refresh</button>
@@ -263,11 +265,11 @@ const Blocker: FC = () => {
           )}
 
           {activeTab === 'blocked' && (
-            <motion.section key="blocked" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <motion.section key="blocked" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springy}>
               <div className="block-form">
                 <input
                   type="text"
-                  placeholder="IP or CIDR (e.g., 1.2.3.4 or 1.2.3.0/24)"
+placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                   value={newIP}
                   onChange={(e)=>setNewIP(e.target.value)}
                 />
@@ -293,8 +295,12 @@ const Blocker: FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {blocked.map(item => (
-                      <tr key={`${item.ip}-${item.blockedAt}`}>
+                    {blocked.map((item, idx) => (
+                      <motion.tr key={`${item.ip}-${item.blockedAt}`}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ ...springy, delay: 0.02 * idx }}
+                      >
                         <td>{item.ip}</td>
                         <td>{item.reason || '-'}</td>
                         <td>{item.method || '-'}</td>
@@ -302,7 +308,7 @@ const Blocker: FC = () => {
                         <td>
                           <button className="btn danger" onClick={()=>handleUnblock(item.ip)}>Unblock</button>
                         </td>
-                      </tr>
+                      </motion.tr>
                     ))}
                     {blocked.length === 0 && (
                       <tr>
@@ -316,7 +322,7 @@ const Blocker: FC = () => {
           )}
 
           {activeTab === 'policies' && (
-            <motion.section key="policies" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <motion.section key="policies" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springy}>
               <div className="policy-grid">
                 <div className="form-item">
                   <label>Time window (seconds)</label>
@@ -362,15 +368,15 @@ const Blocker: FC = () => {
           )}
 
           {activeTab === 'websites' && (
-            <motion.section key="websites" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <motion.section key="websites" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springy}>
               <div className="websites-controls">
                 <div className="field">
                   <label>Subnet (CIDR or pattern)</label>
                   <input type="text" value={subnet} onChange={(e)=>setSubnet(e.target.value)} placeholder="e.g. 192.168.1.0/24 or 192.168.1.*" />
                 </div>
                 <div className="ports">
-                  {defaultPorts.map(p => (
-                    <label key={p} className="port-chip">
+                  {defaultPorts.map((p, i) => (
+                    <motion.label key={p} className="port-chip" whileTap={{ scale: 0.96 }} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...springy, delay: 0.02 * i }}>
                       <input
                         type="checkbox"
                         checked={selectedPorts.includes(p)}
@@ -379,7 +385,7 @@ const Blocker: FC = () => {
                         }}
                       />
                       :{p}
-                    </label>
+                    </motion.label>
                   ))}
                 </div>
               </div>
@@ -389,29 +395,48 @@ const Blocker: FC = () => {
                 <span className="hint" style={{ color: 'var(--text-secondary)' }}>{scanStatus}</span>
               </div>
 
-              <div className="progress" aria-hidden={progress.total===0} style={{ display: progress.total>0 ? 'block' : 'none' }}>
-                <div className="progress-bar" style={{ width: progress.total>0 ? `${Math.round((progress.done/progress.total)*100)}%` : '0%' }} />
-              </div>
+              <motion.div className="progress" aria-hidden={progress.total===0} style={{ display: progress.total>0 ? 'block' : 'none' }} initial={{ opacity: 0 }} animate={{ opacity: progress.total>0 ? 1 : 0 }} transition={springy}>
+                <motion.div className="progress-bar" style={{ width: progress.total>0 ? `${Math.round((progress.done/progress.total)*100)}%` : '0%' }} layout transition={{ type: 'spring', stiffness: 200, damping: 25 }} />
+              </motion.div>
 
-              <div className="sites-grid">
-                {sites.map(site => (
-                  <div key={site.host} className="site-card">
-                    <div className="site-host">{site.host}</div>
-                    <div style={{ margin: '6px 0', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {site.ports.map(p => {
-                        const scheme = p === 443 ? 'https' : 'http';
-                        const url = `${scheme}://${site.host}:${p}/`;
-                        return (
-                          <a key={p} href={url} target="_blank" rel="noopener noreferrer" className="btn" style={{ padding: '4px 8px', fontSize: '.8rem' }}>
-                            Open :{p}
-                          </a>
-                        );
-                      })}
-                    </div>
-                    <div className="site-ports">{site.ports.join(', ')}</div>
-                  </div>
-                ))}
-                {sites.length === 0 && !scanning && <div className="empty">No websites detected yet. Try scanning.</div>}
+              <div className="table-wrapper">
+                <table className="sites-table">
+                  <thead>
+                    <tr>
+                      <th>Host</th>
+                      <th>Open Ports</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sites.map((site, idx) => (
+                      <motion.tr key={site.host}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ ...springy, delay: 0.02 * idx }}
+                      >
+                        <td className="site-host">{site.host}</td>
+                        <td className="site-ports">{site.ports.join(', ')}</td>
+                        <td>
+                          <div className="site-actions">
+                            {site.ports.map(p => {
+                              const scheme = p === 443 ? 'https' : 'http';
+                              const url = `${scheme}://${site.host}:${p}/`;
+                              return (
+                                <a key={p} href={url} target="_blank" rel="noopener noreferrer" className="btn small">Open :{p}</a>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                    {sites.length === 0 && !scanning && (
+                      <tr>
+                        <td colSpan={3} className="empty">No websites detected yet. Try scanning.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </motion.section>
           )}

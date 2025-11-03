@@ -61,7 +61,7 @@ const Login: FC = () => {
     
     try {
       // Call the auth service to login
-      const response = await authService.login({
+      await authService.login({
         email: formData.email,
         password: formData.password
       });

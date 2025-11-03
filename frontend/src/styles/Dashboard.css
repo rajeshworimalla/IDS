@@ -8,7 +8,7 @@
   flex: 1;
   margin-left: 240px;
   min-height: 100vh;
-  padding: 2rem;
+  padding: 1rem 1.25rem;
   color: var(--text-primary);
 }
 
@@ -16,7 +16,7 @@
 @media (max-width: 768px) {
   .dashboard-content {
     margin-left: 0;
-    padding: 1rem;
+    padding: 0.75rem 1rem;
   }
 }
 
@@ -59,11 +59,13 @@
 }
 
 .stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1.5rem;
-  margin-bottom: 2rem;
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: nowrap;
 }
+
+.stats-card { flex: 1; min-width: 0; }
 
 .stats-card {
   background-color: #1f2940;

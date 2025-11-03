@@ -15,17 +15,13 @@ interface CalendarProps {
   selectedDate?: Date;
   onDateSelect: (date: Date) => void;
   highlightRange?: { start: Date; end: Date };
-  isSelectingRange?: boolean;
-  rangeStart?: Date;
 }
 
 const Calendar: FC<CalendarProps> = ({
   date,
   selectedDate,
   onDateSelect,
-  highlightRange,
-  isSelectingRange,
-  rangeStart
+  highlightRange
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date(date));
   
@@ -147,7 +143,6 @@ const DateRangePicker: FC<DateRangePickerProps> = ({
   const [selectingMode, setSelectingMode] = useState<'from' | 'to'>('from');
   const [tempFromDate, setTempFromDate] = useState<Date | null>(fromDate || null);
   const [tempToDate, setTempToDate] = useState<Date | null>(toDate || null);
-  const [showTimePicker, setShowTimePicker] = useState(false);
   
   const pickerRef = useRef<HTMLDivElement>(null);
   
@@ -291,7 +286,7 @@ const DateRangePicker: FC<DateRangePickerProps> = ({
         >
           <span className="date-range-icon">📅</span>
           <span className="date-range-text">
-            {formatDateDisplay(fromDate, toDate)}
+            {formatDateDisplay(fromDate ?? null, toDate ?? null)}
           </span>
           <span className={`dropdown-arrow ${isOpen ? 'open' : ''}`}>▼</span>
         </motion.div>
@@ -361,8 +356,6 @@ const DateRangePicker: FC<DateRangePickerProps> = ({
                   date={new Date()}
                   onDateSelect={handleDateSelect}
                   highlightRange={getHighlightRange()}
-                  isSelectingRange={true}
-                  rangeStart={tempFromDate}
                 />
               </div>
               

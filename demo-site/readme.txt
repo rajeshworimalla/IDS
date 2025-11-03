@@ -1,7 +1,7 @@
 run with: 
 
 
-python3 -m http.server 8080 --bind <LAN_IP> --directory demo-site
+python3 -m http.server 8080 --bind 192.168.101.10 --directory demo-site
 
 
 correct credentials: 

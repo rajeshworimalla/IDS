@@ -1,0 +1,1 @@
+// Safe, isolated bridge (add IPC later if needed)
