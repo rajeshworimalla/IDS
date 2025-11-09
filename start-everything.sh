@@ -49,14 +49,137 @@ else
 fi
 echo ""
 
-# Step 4: Navigate to backend
-echo "4. Starting Backend..."
+# Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Step 4: Start Backend (in background)
+echo "4. Starting Backend..."
 cd "$SCRIPT_DIR/backend" || exit 1
 
-# Step 5: Start Backend with sudo (for firewall access)
+# Kill any existing backend process
+pkill -f "node dist/index.js" >/dev/null 2>&1
+sleep 1
+
+# Build if needed
+if [ ! -d "dist" ]; then
+    echo "   Building backend..."
+    npm run build
+fi
+
+# Start backend in background
 echo "   Starting backend server..."
-echo "   (Keep this terminal open!)"
+sudo npm start > /tmp/ids-backend.log 2>&1 &
+BACKEND_PID=$!
+sleep 3
+
+if ps -p $BACKEND_PID > /dev/null; then
+    echo "   ✅ Backend started (PID: $BACKEND_PID)"
+    echo "   Logs: tail -f /tmp/ids-backend.log"
+else
+    echo "   ❌ Backend failed to start. Check logs: cat /tmp/ids-backend.log"
+fi
 echo ""
-sudo npm start
+
+# Step 5: Start Prediction Service (in background, optional)
+echo "5. Starting Prediction Service..."
+cd "$SCRIPT_DIR/backend" || exit 1
+
+if [ -d "venv/bin" ]; then
+    source venv/bin/activate
+    python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
+    PREDICTION_PID=$!
+    sleep 2
+    
+    if ps -p $PREDICTION_PID > /dev/null 2>&1 || ps aux | grep -q "[p]rediction_service.py"; then
+        echo "   ✅ Prediction service started (PID: $PREDICTION_PID)"
+        echo "   Logs: tail -f /tmp/ids-prediction.log"
+    else
+        echo "   ⚠ Prediction service may not have started (check logs)"
+    fi
+else
+    echo "   ⚠ Virtual environment not found, skipping prediction service"
+    echo "   (Run: cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt)"
+fi
+echo ""
+
+# Step 6: Start Frontend (in background)
+echo "6. Starting Frontend..."
+cd "$SCRIPT_DIR/frontend" || exit 1
+
+# Kill any existing frontend process
+pkill -f "vite" >/dev/null 2>&1
+sleep 1
+
+echo "   Starting frontend dev server..."
+npm run dev > /tmp/ids-frontend.log 2>&1 &
+FRONTEND_PID=$!
+sleep 3
+
+if ps -p $FRONTEND_PID > /dev/null; then
+    echo "   ✅ Frontend started (PID: $FRONTEND_PID)"
+    echo "   Logs: tail -f /tmp/ids-frontend.log"
+else
+    echo "   ⚠ Frontend may not have started (check logs)"
+fi
+echo ""
+
+# Step 7: Start Demo Site (in background)
+echo "7. Starting Demo Site..."
+cd "$SCRIPT_DIR/demo-site" || exit 1
+
+# Kill any existing demo site server
+pkill -f "python.*http.server.*8080" >/dev/null 2>&1
+sleep 1
+
+# Get VM IP address
+VM_IP=$(hostname -I | awk '{print $1}')
+DEMO_PORT=8080
+
+echo "   Starting demo site HTTP server on port $DEMO_PORT..."
+python3 -m http.server $DEMO_PORT > /tmp/ids-demo-site.log 2>&1 &
+DEMO_PID=$!
+sleep 2
+
+if ps -p $DEMO_PID > /dev/null; then
+    echo "   ✅ Demo site started (PID: $DEMO_PID)"
+    echo "   Access at: http://$VM_IP:$DEMO_PORT"
+    echo "   Logs: tail -f /tmp/ids-demo-site.log"
+else
+    echo "   ⚠ Demo site may not have started (check logs)"
+fi
+echo ""
+
+# Summary
+echo "=========================================="
+echo "  IDS Project - All Services Started"
+echo "=========================================="
+echo ""
+echo "Services:"
+echo "  ✅ Backend:        http://$VM_IP:5001"
+echo "  ✅ Frontend:       http://$VM_IP:5173 (check logs for actual port)"
+echo "  ✅ Demo Site:      http://$VM_IP:$DEMO_PORT"
+if [ -d "$SCRIPT_DIR/backend/venv/bin" ]; then
+    echo "  ✅ Prediction:    Running (if started successfully)"
+fi
+echo ""
+echo "Process IDs:"
+echo "  Backend:    $BACKEND_PID"
+echo "  Frontend:   $FRONTEND_PID"
+echo "  Demo Site:  $DEMO_PID"
+[ ! -z "$PREDICTION_PID" ] && echo "  Prediction: $PREDICTION_PID"
+echo ""
+echo "View logs:"
+echo "  Backend:    tail -f /tmp/ids-backend.log"
+echo "  Frontend:   tail -f /tmp/ids-frontend.log"
+echo "  Demo Site:  tail -f /tmp/ids-demo-site.log"
+[ ! -z "$PREDICTION_PID" ] && echo "  Prediction: tail -f /tmp/ids-prediction.log"
+echo ""
+echo "To stop all services: ./stop-demo.sh"
+echo "=========================================="
+echo ""
+echo "Press Ctrl+C to exit (services will continue running in background)"
+echo ""
+
+# Keep script running so user can see output
+tail -f /tmp/ids-backend.log /tmp/ids-frontend.log /tmp/ids-demo-site.log 2>/dev/null
 

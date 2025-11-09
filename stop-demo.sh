@@ -11,6 +11,9 @@ pkill -f "vite" >/dev/null 2>&1
 # Stop prediction service
 pkill -f "prediction_service.py" >/dev/null 2>&1
 
+# Stop demo site
+pkill -f "python.*http.server.*8080" >/dev/null 2>&1
+
 # Stop backend
 sudo pkill -f "node dist/index.js" >/dev/null 2>&1
 
