@@ -84,7 +84,7 @@ echo ""
 echo "5. Starting Prediction Service..."
 cd "$SCRIPT_DIR/backend" || exit 1
 
-if [ -d "venv/bin" ]; then
+if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
     python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
     PREDICTION_PID=$!
@@ -96,9 +96,10 @@ if [ -d "venv/bin" ]; then
     else
         echo "   ⚠ Prediction service may not have started (check logs)"
     fi
+    deactivate 2>/dev/null || true
 else
     echo "   ⚠ Virtual environment not found, skipping prediction service"
-    echo "   (Run: cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt)"
+    echo "   (Optional - Run: cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt)"
 fi
 echo ""
 
