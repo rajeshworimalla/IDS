@@ -8,6 +8,9 @@ echo "  IDS Project - Starting Demo Mode"
 echo "=========================================="
 echo ""
 
+# Get script directory (works from anywhere)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -107,7 +110,7 @@ echo ""
 
 # Step 4: Build and Start Backend (in background)
 echo -e "${YELLOW}[4/6]${NC} Building and Starting Backend Server..."
-cd /mnt/c/Users/rajes/OneDrive/Desktop/Academics/Projects/Capstone/IDS/backend
+cd "$SCRIPT_DIR/backend" || exit 1
 
 # Verify MongoDB is accessible before starting backend
 echo "   Verifying MongoDB connection..."
@@ -158,7 +161,7 @@ echo ""
 
 # Step 5: Start Prediction Service (in background, optional)
 echo -e "${YELLOW}[5/6]${NC} Starting Prediction Service..."
-cd /mnt/c/Users/rajes/OneDrive/Desktop/Academics/Projects/Capstone/IDS/backend
+cd "$SCRIPT_DIR/backend" || exit 1
 
 # Activate venv and start in background (if venv exists)
 if [ -d "venv/bin" ]; then
@@ -181,7 +184,7 @@ echo ""
 
 # Step 6: Start Frontend/Electron
 echo -e "${YELLOW}[6/6]${NC} Starting Electron App..."
-cd /mnt/c/Users/rajes/OneDrive/Desktop/Academics/Projects/Capstone/IDS/frontend
+cd "$SCRIPT_DIR/frontend" || exit 1
 
 # Kill any existing Electron/Vite processes
 pkill -f "electron" >/dev/null 2>&1

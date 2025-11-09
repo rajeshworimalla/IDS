@@ -51,7 +51,8 @@ echo ""
 
 # Step 4: Navigate to backend
 echo "4. Starting Backend..."
-cd /mnt/c/Users/rajes/OneDrive/Desktop/Academics/Projects/Capstone/IDS/backend
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/backend" || exit 1
 
 # Step 5: Start Backend with sudo (for firewall access)
 echo "   Starting backend server..."
