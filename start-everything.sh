@@ -103,8 +103,8 @@ else
 fi
 echo ""
 
-# Step 6: Start Frontend (Web Dev Server)
-echo "6. Starting Frontend (Web Server)..."
+# Step 6: Start Frontend (Try Electron, fallback to Web)
+echo "6. Starting Frontend..."
 cd "$SCRIPT_DIR/frontend" || exit 1
 
 # Kill any existing frontend/electron processes
@@ -112,17 +112,50 @@ pkill -f "vite" >/dev/null 2>&1
 pkill -f "electron" >/dev/null 2>&1
 sleep 1
 
-echo "   Starting frontend dev server..."
-npm run dev > /tmp/ids-frontend.log 2>&1 &
-FRONTEND_PID=$!
-sleep 5
+# Check if DISPLAY is set (GUI available)
+if [ -z "$DISPLAY" ]; then
+    # Try to set DISPLAY if X11 is available
+    export DISPLAY=:0
+fi
 
-if ps -p $FRONTEND_PID > /dev/null || ps aux | grep -q "[v]ite"; then
-    echo "   ✅ Frontend started (PID: $FRONTEND_PID)"
-    echo "   Access at: http://$VM_IP:5173 (check logs for actual port)"
-    echo "   Logs: tail -f /tmp/ids-frontend.log"
+# Try Electron first if DISPLAY is available
+if [ ! -z "$DISPLAY" ] && command -v electron >/dev/null 2>&1; then
+    echo "   Attempting to start Electron app..."
+    export VITE_DEV_SERVER_URL=http://localhost:5173
+    npm run electron:dev > /tmp/ids-frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    sleep 8
+    
+    if ps aux | grep -q "[e]lectron" || ps -p $FRONTEND_PID > /dev/null 2>&1; then
+        echo "   ✅ Electron app started (PID: $FRONTEND_PID)"
+        echo "   Electron window should open on VM desktop"
+        echo "   Logs: tail -f /tmp/ids-frontend.log"
+    else
+        echo "   ⚠ Electron failed, falling back to web server..."
+        pkill -f "electron" >/dev/null 2>&1
+        pkill -f "vite" >/dev/null 2>&1
+        sleep 2
+        npm run dev > /tmp/ids-frontend.log 2>&1 &
+        FRONTEND_PID=$!
+        sleep 5
+        if ps -p $FRONTEND_PID > /dev/null || ps aux | grep -q "[v]ite"; then
+            echo "   ✅ Web server started (PID: $FRONTEND_PID)"
+            echo "   Access at: http://$VM_IP:5173"
+        fi
+    fi
 else
-    echo "   ⚠ Frontend may not have started (check logs)"
+    echo "   Starting web dev server (no GUI detected)..."
+    npm run dev > /tmp/ids-frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    sleep 5
+    
+    if ps -p $FRONTEND_PID > /dev/null || ps aux | grep -q "[v]ite"; then
+        echo "   ✅ Web server started (PID: $FRONTEND_PID)"
+        echo "   Access at: http://$VM_IP:5173 (check logs for actual port)"
+        echo "   Logs: tail -f /tmp/ids-frontend.log"
+    else
+        echo "   ⚠ Frontend may not have started (check logs)"
+    fi
 fi
 echo ""
 
