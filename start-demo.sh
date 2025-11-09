@@ -171,8 +171,7 @@ if [ ! -d "venv/bin" ]; then
         if [ $? -eq 0 ]; then
             source venv/bin/activate
             pip install --upgrade pip --quiet
-            if [ -f "requirements.txt" ]; then
-                pip install -r requirements.txt --quiet
+            if [ -f               pip install -r requirements.txt --quiet
             else
                 pip install flask numpy pandas scikit-learn joblib requests --quiet
             fi
@@ -232,7 +231,7 @@ fi
 echo ""
 
 # Step 6: Start Frontend/Electron
-echo -e "${YELLOW}[6/6]${NC} Starting Electron App..."
+echo -e "${YELLOW}[6/6]${NC} Starting Frontend..."
 cd "$SCRIPT_DIR/frontend" || exit 1
 
 # Kill any existing Electron/Vite processes
@@ -240,11 +239,27 @@ pkill -f "electron" >/dev/null 2>&1
 pkill -f "vite" >/dev/null 2>&1
 sleep 1
 
-# Start Electron (this will open the window)
-npm run electron:dev > /tmp/ids-frontend.log 2>&1 &
-FRONTEND_PID=$!
+# Check if frontend dependencies are installed
+if [ ! -d "node_modules" ]; then
+    echo "   Installing frontend dependencies..."
+    npm install
+fi
 
-echo -e "${GREEN}   ✓ Electron starting...${NC}"
+# Start web dev server (more reliable than Electron)
+echo "   Starting Vite dev server..."
+npm run dev > /tmp/ids-frontend.log 2>&1 &
+FRONTEND_PID=$!
+sleep 5
+
+# Check if it started
+if is_running "vite" || ps -p $FRONTEND_PID > /dev/null 2>&1; then
+    echo -e "${GREEN}   ✓ Frontend started (PID: $FRONTEND_PID)${NC}"
+    echo "   Access at: http://localhost:5173 or http://$(hostname -I | awk '{print $1}'):5173"
+    echo "   Logs: tail -f /tmp/ids-frontend.log"
+else
+    echo -e "${YELLOW}   ⚠ Frontend may not have started${NC}"
+    echo "   Check logs: cat /tmp/ids-frontend.log"
+fi
 echo ""
 
 # Wait a moment for everything to initialize
