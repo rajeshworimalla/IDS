@@ -163,18 +163,67 @@ echo ""
 echo -e "${YELLOW}[5/6]${NC} Starting Prediction Service..."
 cd "$SCRIPT_DIR/backend" || exit 1
 
+# Check if venv exists, if not, try to set it up
+if [ ! -d "venv/bin" ]; then
+    echo "   Virtual environment not found, attempting to create..."
+    if command -v python3 &> /dev/null; then
+        python3 -m venv venv
+        if [ $? -eq 0 ]; then
+            source venv/bin/activate
+            pip install --upgrade pip --quiet
+            if [ -f "requirements.txt" ]; then
+                pip install -r requirements.txt --quiet
+            else
+                pip install flask numpy pandas scikit-learn joblib requests --quiet
+            fi
+            deactivate
+            echo -e "${GREEN}   ✓ Virtual environment created and dependencies installed${NC}"
+        else
+            echo -e "${YELLOW}   ⚠ Failed to create virtual environment${NC}"
+            echo "   Run ./setup-prediction-vm.sh manually to set up prediction service"
+            PREDICTION_PID="N/A"
+        fi
+    else
+        echo -e "${YELLOW}   ⚠ Python3 not found, skipping prediction service${NC}"
+        PREDICTION_PID="N/A"
+    fi
+fi
+
 # Activate venv and start in background (if venv exists)
 if [ -d "venv/bin" ]; then
     source venv/bin/activate
-    python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
-    PREDICTION_PID=$!
-    sleep 2
     
-    if is_running "prediction_service.py"; then
-        echo -e "${GREEN}   ✓ Prediction service started (PID: $PREDICTION_PID)${NC}"
-        echo "   Logs: tail -f /tmp/ids-prediction.log"
+    # Check if models exist
+    if [ ! -f "binary_attack_model.pkl" ] || [ ! -f "multiclass_attack_model.pkl" ]; then
+        echo -e "${YELLOW}   ⚠ Model files not found, skipping prediction service${NC}"
+        echo "   Make sure binary_attack_model.pkl and multiclass_attack_model.pkl are in backend/"
+        PREDICTION_PID="N/A"
     else
-        echo -e "${YELLOW}   ⚠ Prediction service not started (optional)${NC}"
+        # Kill any existing prediction service
+        pkill -f "prediction_service.py" >/dev/null 2>&1
+        sleep 1
+        
+        python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
+        PREDICTION_PID=$!
+        sleep 3
+        
+        if is_running "prediction_service.py"; then
+            echo -e "${GREEN}   ✓ Prediction service started (PID: $PREDICTION_PID)${NC}"
+            echo "   Logs: tail -f /tmp/ids-prediction.log"
+            
+            # Test if service is responding
+            sleep 2
+            if curl -s http://localhost:5002/predict >/dev/null 2>&1 || curl -s -X POST http://localhost:5002/predict -H "Content-Type: application/json" -d '{"test":1}' >/dev/null 2>&1; then
+                echo -e "${GREEN}   ✓ Prediction service is responding${NC}"
+            else
+                echo -e "${YELLOW}   ⚠ Service started but may not be fully ready yet${NC}"
+            fi
+        else
+            echo -e "${YELLOW}   ⚠ Prediction service failed to start${NC}"
+            echo "   Check logs: cat /tmp/ids-prediction.log"
+            PREDICTION_PID="N/A"
+        fi
+        deactivate
     fi
 else
     echo -e "${YELLOW}   ⚠ Virtual environment not found, skipping prediction service${NC}"
