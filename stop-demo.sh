@@ -4,9 +4,10 @@
 
 echo "Stopping IDS services..."
 
-# Stop frontend
+# Stop frontend/electron
 pkill -f "electron" >/dev/null 2>&1
 pkill -f "vite" >/dev/null 2>&1
+pkill -f "concurrently" >/dev/null 2>&1
 
 # Stop prediction service
 pkill -f "prediction_service.py" >/dev/null 2>&1
