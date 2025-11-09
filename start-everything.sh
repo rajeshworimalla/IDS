@@ -103,8 +103,8 @@ else
 fi
 echo ""
 
-# Step 6: Start Frontend with Electron (in background)
-echo "6. Starting Frontend (Electron App)..."
+# Step 6: Start Frontend (Web Dev Server)
+echo "6. Starting Frontend (Web Server)..."
 cd "$SCRIPT_DIR/frontend" || exit 1
 
 # Kill any existing frontend/electron processes
@@ -112,18 +112,17 @@ pkill -f "vite" >/dev/null 2>&1
 pkill -f "electron" >/dev/null 2>&1
 sleep 1
 
-echo "   Starting Electron app..."
-npm run electron:dev > /tmp/ids-frontend.log 2>&1 &
+echo "   Starting frontend dev server..."
+npm run dev > /tmp/ids-frontend.log 2>&1 &
 FRONTEND_PID=$!
 sleep 5
 
-if ps -p $FRONTEND_PID > /dev/null || ps aux | grep -q "[e]lectron"; then
-    echo "   ✅ Electron app started (PID: $FRONTEND_PID)"
-    echo "   Electron window should open on the VM desktop"
+if ps -p $FRONTEND_PID > /dev/null || ps aux | grep -q "[v]ite"; then
+    echo "   ✅ Frontend started (PID: $FRONTEND_PID)"
+    echo "   Access at: http://$VM_IP:5173 (check logs for actual port)"
     echo "   Logs: tail -f /tmp/ids-frontend.log"
 else
-    echo "   ⚠ Electron may not have started (check logs)"
-    echo "   Note: Electron requires a GUI/desktop environment on the VM"
+    echo "   ⚠ Frontend may not have started (check logs)"
 fi
 echo ""
 
@@ -160,7 +159,7 @@ echo "=========================================="
 echo ""
 echo "Services:"
 echo "  ✅ Backend:        http://$VM_IP:5001"
-echo "  ✅ Electron App:   Running (check VM desktop for window)"
+echo "  ✅ Frontend:       http://$VM_IP:5173 (check logs for actual port)"
 echo "  ✅ Demo Site:      http://$VM_IP:$DEMO_PORT"
 if [ -d "$SCRIPT_DIR/backend/venv/bin" ]; then
     echo "  ✅ Prediction:    Running (if started successfully)"
