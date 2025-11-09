@@ -20,6 +20,7 @@ function createWindow() {
     win.loadURL(devServerURL)
     win.webContents.openDevTools({ mode: 'detach' })
   } else {
+    // In production, load from built files
     const indexHtml = path.join(__dirname, '../dist/index.html')
     win.loadFile(indexHtml)
   }
