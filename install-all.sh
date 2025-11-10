@@ -28,13 +28,16 @@ command_exists() {
 
 # Step 1: Fix MongoDB repository issues (if any)
 echo -e "${YELLOW}[1/9]${NC} Checking for repository issues..."
-# Remove problematic MongoDB repository if it exists and has GPG issues
-if [ -f "/etc/apt/sources.list.d/mongodb-org-6.0.list" ]; then
-    echo "   Found MongoDB repository, checking if it needs fixing..."
-    # Remove old repository
-    sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list
-    echo "   Removed old MongoDB repository configuration"
+# Remove ALL MongoDB repositories (they cause GPG key issues)
+echo "   Removing any existing MongoDB repositories..."
+sudo rm -f /etc/apt/sources.list.d/mongodb-*.list 2>/dev/null
+sudo rm -f /etc/apt/sources.list.d/*mongodb*.list 2>/dev/null
+# Also check in sources.list file itself
+if grep -q "mongodb" /etc/apt/sources.list 2>/dev/null; then
+    echo "   Found MongoDB in sources.list, commenting it out..."
+    sudo sed -i 's|.*mongodb.*|# &|' /etc/apt/sources.list
 fi
+echo "   ✓ MongoDB repositories removed"
 echo ""
 
 # Step 2: Update system packages
@@ -66,17 +69,16 @@ fi
 # Install MongoDB
 if ! command_exists mongod; then
     echo "   Installing MongoDB..."
-    # Remove problematic MongoDB repository if it exists
-    if [ -f "/etc/apt/sources.list.d/mongodb-org-6.0.list" ]; then
-        echo "   Removing old MongoDB repository configuration..."
-        sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list
-    fi
+    # Ensure MongoDB repository is removed before installation
+    sudo rm -f /etc/apt/sources.list.d/mongodb-*.list 2>/dev/null
+    sudo rm -f /etc/apt/sources.list.d/*mongodb*.list 2>/dev/null
     
-    # Try to install from Ubuntu repositories first
-    sudo apt install -y mongodb || {
+    # Try to install from Ubuntu repositories first (this is the safest option)
+    if sudo apt install -y mongodb 2>/dev/null; then
+        echo -e "${GREEN}   ✓ MongoDB installed from Ubuntu repositories${NC}"
+    else
         echo "   System MongoDB not available, setting up MongoDB repository..."
         # Get Ubuntu version
-        UBUNTU_VERSION=$(lsb_release -rs 2>/dev/null || echo "24.04")
         UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || echo "noble")
         
         # Add MongoDB GPG key
@@ -87,7 +89,7 @@ if ! command_exists mongod; then
         
         sudo apt update
         sudo apt install -y mongodb-org
-    }
+    fi
 else
     echo -e "${GREEN}   ✓ MongoDB already installed${NC}"
 fi
