@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# IDS Project - Demo Mode Startup Script
-# Run this ONE script to start everything automatically!
+# IDS Project - WSL Startup Script
+# Run this ONE script to start everything automatically in WSL!
 
 echo "=========================================="
-echo "  IDS Project - Starting Demo Mode"
+echo "  IDS Project - Starting in WSL"
 echo "=========================================="
 echo ""
 
@@ -22,7 +22,7 @@ is_running() {
 }
 
 # Step 1: Setup Firewall
-echo -e "${YELLOW}[1/6]${NC} Setting up firewall..."
+echo -e "${YELLOW}[1/8]${NC} Setting up firewall..."
 sudo ipset -exist create ids_blocklist hash:ip family inet timeout 0 >/dev/null 2>&1
 sudo ipset -exist create ids6_blocklist hash:ip family inet6 timeout 0 >/dev/null 2>&1
 
@@ -43,7 +43,7 @@ echo -e "${GREEN}   ✓ Firewall ready${NC}"
 echo ""
 
 # Step 2: Start MongoDB
-echo -e "${YELLOW}[2/6]${NC} Starting MongoDB..."
+echo -e "${YELLOW}[2/8]${NC} Starting MongoDB..."
 
 # Check if MongoDB is already running and accessible
 MONGODB_RUNNING=false
@@ -93,7 +93,7 @@ fi
 echo ""
 
 # Step 3: Start Redis
-echo -e "${YELLOW}[3/6]${NC} Starting Redis..."
+echo -e "${YELLOW}[3/8]${NC} Starting Redis..."
 if is_running redis-server; then
     echo -e "${GREEN}   ✓ Redis already running${NC}"
 else
@@ -108,9 +108,20 @@ else
 fi
 echo ""
 
-# Step 4: Build and Start Backend (in background)
-echo -e "${YELLOW}[4/6]${NC} Building and Starting Backend Server..."
+# Step 4: Install dependencies and Build Backend
+echo -e "${YELLOW}[4/8]${NC} Setting up Backend..."
 cd "$SCRIPT_DIR/backend" || exit 1
+
+# Check if node_modules exists, install if not
+if [ ! -d "node_modules" ]; then
+    echo "   Installing backend dependencies..."
+    npm install
+    if [ $? -ne 0 ]; then
+        echo "   ✗ npm install failed"
+        exit 1
+    fi
+    echo -e "${GREEN}   ✓ Dependencies installed${NC}"
+fi
 
 # Verify MongoDB is accessible before starting backend
 echo "   Verifying MongoDB connection..."
@@ -145,13 +156,18 @@ if ps -p $BACKEND_PID > /dev/null 2>&1 || is_running "node dist/index.js"; then
     echo -e "${GREEN}   ✓ Backend started (PID: $BACKEND_PID)${NC}"
     echo "   Logs: tail -f /tmp/ids-backend.log"
     
-    # Wait a bit more and check if backend is responding
-    sleep 3
-    if curl -s http://localhost:5001/api/health >/dev/null 2>&1 || curl -s http://localhost:5001 >/dev/null 2>&1; then
-        echo -e "${GREEN}   ✓ Backend is responding${NC}"
-    else
-        echo "   ⚠ Backend may still be starting..."
-    fi
+    # Wait for backend to fully start (MongoDB connection can take time)
+    echo "   Waiting for backend to be ready..."
+    for i in {1..10}; do
+        sleep 1
+        if curl -s http://localhost:5001 >/dev/null 2>&1; then
+            echo -e "${GREEN}   ✓ Backend is responding${NC}"
+            break
+        fi
+        if [ $i -eq 10 ]; then
+            echo "   ⚠ Backend may still be starting (check logs if issues persist)"
+        fi
+    done
 else
     echo "   ✗ Backend failed to start"
     echo "   Check logs: cat /tmp/ids-backend.log"
@@ -160,7 +176,7 @@ fi
 echo ""
 
 # Step 5: Start Prediction Service (in background, optional)
-echo -e "${YELLOW}[5/6]${NC} Starting Prediction Service..."
+echo -e "${YELLOW}[5/8]${NC} Starting Prediction Service..."
 cd "$SCRIPT_DIR/backend" || exit 1
 
 # Check if venv exists, if not, try to set it up
@@ -231,8 +247,8 @@ else
 fi
 echo ""
 
-# Step 6: Start Frontend/Electron
-echo -e "${YELLOW}[6/6]${NC} Starting Frontend..."
+# Step 7: Start Frontend
+echo -e "${YELLOW}[7/8]${NC} Starting Frontend..."
 cd "$SCRIPT_DIR/frontend" || exit 1
 
 # Kill any existing Electron/Vite processes
@@ -257,20 +273,73 @@ if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
     fi
 fi
 
-# Start web dev server (more reliable than Electron)
-echo "   Starting Vite dev server..."
-npm run dev > /tmp/ids-frontend.log 2>&1 &
-FRONTEND_PID=$!
-sleep 5
-
-# Check if it started
-if is_running "vite" || ps -p $FRONTEND_PID > /dev/null 2>&1; then
-    echo -e "${GREEN}   ✓ Frontend started (PID: $FRONTEND_PID)${NC}"
-    echo "   Access at: http://localhost:5173 or http://$(hostname -I | awk '{print $1}'):5173"
-    echo "   Logs: tail -f /tmp/ids-frontend.log"
+# Try Electron first if DISPLAY is available, otherwise use web server
+if [ ! -z "$DISPLAY" ] && command -v electron >/dev/null 2>&1; then
+    echo "   Attempting to start Electron app..."
+    export VITE_DEV_SERVER_URL=http://localhost:5173
+    npm run electron:dev > /tmp/ids-frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    sleep 8
+    
+    if is_running "electron" || ps -p $FRONTEND_PID > /dev/null 2>&1; then
+        echo -e "${GREEN}   ✓ Electron app started (PID: $FRONTEND_PID)${NC}"
+        echo "   Electron window should open"
+        echo "   Logs: tail -f /tmp/ids-frontend.log"
+    else
+        echo -e "${YELLOW}   ⚠ Electron failed, falling back to web server...${NC}"
+        pkill -f "electron" >/dev/null 2>&1
+        pkill -f "vite" >/dev/null 2>&1
+        sleep 2
+        npm run dev > /tmp/ids-frontend.log 2>&1 &
+        FRONTEND_PID=$!
+        sleep 5
+        if is_running "vite" || ps -p $FRONTEND_PID > /dev/null 2>&1; then
+            echo -e "${GREEN}   ✓ Web server started (PID: $FRONTEND_PID)${NC}"
+            echo "   Access at: http://localhost:5173 or http://$(hostname -I | awk '{print $1}'):5173"
+        fi
+    fi
 else
-    echo -e "${YELLOW}   ⚠ Frontend may not have started${NC}"
-    echo "   Check logs: cat /tmp/ids-frontend.log"
+    # No DISPLAY or Electron not available, use web server
+    echo "   Starting Vite dev server (no GUI available for Electron)..."
+    npm run dev > /tmp/ids-frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    sleep 5
+    
+    if is_running "vite" || ps -p $FRONTEND_PID > /dev/null 2>&1; then
+        echo -e "${GREEN}   ✓ Frontend started (PID: $FRONTEND_PID)${NC}"
+        echo "   Access at: http://localhost:5173 or http://$(hostname -I | awk '{print $1}'):5173"
+        echo "   Logs: tail -f /tmp/ids-frontend.log"
+    else
+        echo -e "${YELLOW}   ⚠ Frontend may not have started${NC}"
+        echo "   Check logs: cat /tmp/ids-frontend.log"
+    fi
+fi
+echo ""
+
+# Step 8: Start Demo Site (in background)
+echo -e "${YELLOW}[8/8]${NC} Starting Demo Site..."
+cd "$SCRIPT_DIR/demo-site" || exit 1
+
+# Kill any existing demo site server
+pkill -f "python.*http.server.*8080" >/dev/null 2>&1
+sleep 1
+
+# Get WSL IP address
+WSL_IP=$(hostname -I | awk '{print $1}')
+DEMO_PORT=8080
+
+echo "   Starting demo site HTTP server on port $DEMO_PORT..."
+python3 -m http.server $DEMO_PORT > /tmp/ids-demo-site.log 2>&1 &
+DEMO_PID=$!
+sleep 2
+
+if ps -p $DEMO_PID > /dev/null; then
+    echo -e "${GREEN}   ✓ Demo site started (PID: $DEMO_PID)${NC}"
+    echo "   Access at: http://localhost:$DEMO_PORT or http://$WSL_IP:$DEMO_PORT"
+    echo "   Logs: tail -f /tmp/ids-demo-site.log"
+else
+    echo -e "${YELLOW}   ⚠ Demo site may not have started${NC}"
+    echo "   Check logs: cat /tmp/ids-demo-site.log"
 fi
 echo ""
 
@@ -285,25 +354,24 @@ echo "Services running:"
 echo "  • MongoDB:     Running"
 echo "  • Redis:       Running"
 echo "  • Backend:     http://localhost:5001 (PID: $BACKEND_PID)"
-echo "  • Prediction:  http://localhost:5002 (PID: $PREDICTION_PID)"
+if [ "$PREDICTION_PID" != "N/A" ]; then
+    echo "  • Prediction:  http://localhost:5002 (PID: $PREDICTION_PID)"
+fi
 echo "  • Frontend:    http://localhost:5173 (PID: $FRONTEND_PID)"
+echo "  • Demo Site:   http://localhost:$DEMO_PORT (PID: $DEMO_PID)"
 echo ""
-echo "Electron window should open automatically!"
-echo ""
-echo -e "${YELLOW}⚠ IMPORTANT: Start Demo Site in Windows PowerShell${NC}"
-echo ""
-echo "Open a NEW Windows PowerShell window and run:"
-echo "  cd C:\\Users\\rajes\\OneDrive\\Desktop\\Academics\\Projects\\Capstone\\IDS"
-echo "  python -m http.server 8080 --bind 172.22.208.1 --directory demo-site"
-echo ""
-echo "Then access demo site at: http://172.22.208.1:8080"
+echo "Access from Windows browser:"
+echo "  • Frontend:    http://$WSL_IP:5173"
+echo "  • Backend:     http://$WSL_IP:5001"
+echo "  • Demo Site:   http://$WSL_IP:$DEMO_PORT"
 echo ""
 echo "To stop everything, press Ctrl+C or run: ./stop-demo.sh"
 echo ""
 echo "View logs:"
 echo "  tail -f /tmp/ids-backend.log"
-echo "  tail -f /tmp/ids-prediction.log"
+[ "$PREDICTION_PID" != "N/A" ] && echo "  tail -f /tmp/ids-prediction.log"
 echo "  tail -f /tmp/ids-frontend.log"
+echo "  tail -f /tmp/ids-demo-site.log"
 echo ""
 
 # Keep script running so processes stay alive
