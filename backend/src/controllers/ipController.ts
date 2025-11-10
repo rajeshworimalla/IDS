@@ -85,38 +85,80 @@ export const blockIP = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid host' });
     }
 
-    // Resolve both A and AAAA records
-    let addrs: { address: string; family: number }[] = [];
+    // Resolve both A and AAAA records - get ALL IPs for the domain
+    let allIPs: string[] = [];
     try {
-      const looked = await dns.lookup(host, { all: true });
-      addrs = looked.filter(a => a && a.address && (a.family === 4 || a.family === 6));
-    } catch (e) {
-      return res.status(400).json({ error: `Could not resolve domain: ${host}` });
+      // Use resolve4 and resolve6 to get ALL IPs (not just one)
+      const [ipv4Addrs, ipv6Addrs] = await Promise.allSettled([
+        dns.resolve4(host),
+        dns.resolve6(host)
+      ]);
+      
+      if (ipv4Addrs.status === 'fulfilled') {
+        allIPs.push(...ipv4Addrs.value);
+      }
+      if (ipv6Addrs.status === 'fulfilled') {
+        allIPs.push(...ipv6Addrs.value);
+      }
+      
+      // Fallback to lookup if resolve fails (for some edge cases)
+      if (allIPs.length === 0) {
+        const looked = await dns.lookup(host, { all: true });
+        allIPs = looked
+          .filter(a => a && a.address)
+          .map(a => a.address);
+      }
+    } catch (e: any) {
+      return res.status(400).json({ error: `Could not resolve domain: ${host} - ${e?.message || String(e)}` });
     }
 
-    const uniq = Array.from(new Set(addrs.map(a => a.address)));
+    const uniq = Array.from(new Set(allIPs));
     if (uniq.length === 0) {
-      return res.status(400).json({ error: `No A/AAAA records for ${host}` });
+      return res.status(400).json({ error: `No A/AAAA records found for ${host}` });
     }
+    
+    console.log(`Resolved ${host} to ${uniq.length} IP address(es): ${uniq.join(', ')}`);
 
     const reasonText = reason && reason.trim().length > 0 ? reason : `domain: ${host}`;
 
     const results: any[] = [];
+    let successCount = 0;
+    let failCount = 0;
+    
+    // Block ALL IPs for the domain
     for (const addr of uniq) {
-      const doc = await BlockedIP.findOneAndUpdate(
-        { user: req.user._id, ip: addr },
-        { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
-        { new: true, upsert: true }
-      );
-      const applied = await firewall.blockIP(addr);
-      results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, ...(applied as any) });
       try {
-        const { notifyEvent } = await import('../services/aggregator');
-        await notifyEvent('manual_ban', { ip: addr, reason: reasonText, user: req.user._id, method: (applied as any).method, domain: host });
-      } catch {}
+        const doc = await BlockedIP.findOneAndUpdate(
+          { user: req.user._id, ip: addr },
+          { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
+          { new: true, upsert: true }
+        );
+        const applied = await firewall.blockIP(addr);
+        if ((applied as any).applied !== false) {
+          successCount++;
+          results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: (applied as any).method });
+        } else {
+          failCount++;
+          results.push({ ip: addr, reason: reasonText, applied: false, error: (applied as any).error });
+        }
+        try {
+          const { notifyEvent } = await import('../services/aggregator');
+          await notifyEvent('manual_ban', { ip: addr, reason: reasonText, user: req.user._id, method: (applied as any).method, domain: host });
+        } catch {}
+      } catch (err: any) {
+        failCount++;
+        console.error(`Failed to block IP ${addr}:`, err);
+        results.push({ ip: addr, reason: reasonText, applied: false, error: err?.message || String(err) });
+      }
     }
 
-    return res.status(201).json({ message: `Blocked ${uniq.length} address(es) for ${host}`, items: results });
+    return res.status(201).json({ 
+      message: `Blocked ${successCount} of ${uniq.length} IP address(es) for ${host}${failCount > 0 ? ` (${failCount} failed)` : ''}`, 
+      total: uniq.length,
+      successful: successCount,
+      failed: failCount,
+      items: results 
+    });
   } catch (e: any) {
     console.error('blockIP error:', e);
     if (e?.code === 11000) {
