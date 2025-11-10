@@ -220,11 +220,30 @@ echo ""
 echo -e "${YELLOW}[9/9]${NC} Checking MongoDB..."
 if pgrep -x "mongod" > /dev/null; then
     echo -e "${GREEN}   ✓ MongoDB is already running${NC}"
-else
+elif command_exists mongod; then
     echo "   Starting MongoDB..."
-    sudo systemctl start mongodb || sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb
-    sudo systemctl enable mongodb 2>/dev/null || true
-    echo -e "${GREEN}   ✓ MongoDB started${NC}"
+    # Create data directory if it doesn't exist
+    sudo mkdir -p /var/lib/mongodb
+    sudo mkdir -p /var/log/mongodb
+    sudo chown -R mongodb:mongodb /var/lib/mongodb /var/log/mongodb 2>/dev/null || \
+        sudo chown -R $USER:$USER /var/lib/mongodb /var/log/mongodb 2>/dev/null || true
+    
+    # Try systemctl first
+    if sudo systemctl start mongodb 2>/dev/null || sudo systemctl start mongod 2>/dev/null; then
+        echo -e "${GREEN}   ✓ MongoDB started via systemctl${NC}"
+        sudo systemctl enable mongodb 2>/dev/null || sudo systemctl enable mongod 2>/dev/null || true
+    else
+        # Try starting manually
+        if sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb 2>/dev/null; then
+            echo -e "${GREEN}   ✓ MongoDB started manually${NC}"
+        else
+            echo -e "${YELLOW}   ⚠ MongoDB installed but couldn't start automatically${NC}"
+            echo "   You may need to start it manually later: sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb"
+        fi
+    fi
+else
+    echo -e "${YELLOW}   ⚠ MongoDB not installed${NC}"
+    echo "   MongoDB installation may have failed. You can install it manually later if needed."
 fi
 echo ""
 
