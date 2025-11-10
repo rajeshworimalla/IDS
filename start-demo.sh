@@ -243,11 +243,17 @@ sleep 1
 # Check if frontend dependencies are installed
 if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
     echo "   Installing frontend dependencies..."
-    npm install --legacy-peer-deps
+    # Clean up if previous install failed
+    if [ -d "node_modules" ]; then
+        echo "   Cleaning up corrupted node_modules..."
+        rm -rf node_modules package-lock.json
+    fi
+    npm cache clean --force
+    npm install --legacy-peer-deps --fetch-timeout=900000 --fetch-retries=50 --maxsockets=1 --progress=false
     if [ $? -ne 0 ]; then
-        echo -e "${YELLOW}   ⚠ npm install failed, trying alternative method...${NC}"
-        npm cache clean --force
-        npm install --legacy-peer-deps --fetch-timeout=900000 --fetch-retries=50 --maxsockets=1 --progress=false
+        echo -e "${YELLOW}   ⚠ npm install failed, trying one more time...${NC}"
+        rm -rf node_modules
+        npm install --legacy-peer-deps
     fi
 fi
 
