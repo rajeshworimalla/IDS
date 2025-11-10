@@ -73,11 +73,20 @@ if ! command_exists mongod; then
     sudo rm -f /etc/apt/sources.list.d/mongodb-*.list 2>/dev/null
     sudo rm -f /etc/apt/sources.list.d/*mongodb*.list 2>/dev/null
     
-    # Try to install from Ubuntu repositories first (this is the safest option)
+    # Try multiple installation methods
+    MONGODB_INSTALLED=false
+    
+    # Method 1: Try Ubuntu repositories (mongodb package)
     if sudo apt install -y mongodb 2>/dev/null; then
         echo -e "${GREEN}   ✓ MongoDB installed from Ubuntu repositories${NC}"
+        MONGODB_INSTALLED=true
+    # Method 2: Try mongodb-server package
+    elif sudo apt install -y mongodb-server 2>/dev/null; then
+        echo -e "${GREEN}   ✓ MongoDB installed (mongodb-server package)${NC}"
+        MONGODB_INSTALLED=true
+    # Method 3: Try official MongoDB repository
     else
-        echo "   System MongoDB not available, setting up MongoDB repository..."
+        echo "   Setting up official MongoDB repository..."
         # Get Ubuntu version
         UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || echo "noble")
         
@@ -88,7 +97,42 @@ if ! command_exists mongod; then
         echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu ${UBUNTU_CODENAME}/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
         
         sudo apt update
-        sudo apt install -y mongodb-org
+        if sudo apt install -y mongodb-org 2>/dev/null; then
+            echo -e "${GREEN}   ✓ MongoDB installed from official repository${NC}"
+            MONGODB_INSTALLED=true
+        fi
+    fi
+    
+    if [ "$MONGODB_INSTALLED" = true ] && command_exists mongod; then
+        # Create necessary directories
+        sudo mkdir -p /var/lib/mongodb
+        sudo mkdir -p /var/log/mongodb
+        sudo chown -R mongodb:mongodb /var/lib/mongodb /var/log/mongodb 2>/dev/null || \
+            sudo chown -R $USER:$USER /var/lib/mongodb /var/log/mongodb 2>/dev/null || true
+        
+        # Create systemd service file if it doesn't exist
+        if [ ! -f "/etc/systemd/system/mongodb.service" ] && [ ! -f "/lib/systemd/system/mongodb.service" ]; then
+            echo "   Creating MongoDB systemd service..."
+            sudo tee /etc/systemd/system/mongodb.service > /dev/null <<EOF
+[Unit]
+Description=MongoDB Database Server
+Documentation=https://docs.mongodb.org/manual
+After=network.target
+
+[Service]
+User=mongodb
+Group=mongodb
+ExecStart=/usr/bin/mongod --config /etc/mongod.conf
+PIDFile=/var/lib/mongodb/mongod.lock
+Type=forking
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            sudo systemctl daemon-reload
+        fi
     fi
 else
     echo -e "${GREEN}   ✓ MongoDB already installed${NC}"
@@ -221,24 +265,43 @@ echo -e "${YELLOW}[9/9]${NC} Checking MongoDB..."
 if pgrep -x "mongod" > /dev/null; then
     echo -e "${GREEN}   ✓ MongoDB is already running${NC}"
 elif command_exists mongod; then
-    echo "   Starting MongoDB..."
-    # Create data directory if it doesn't exist
+    echo "   Starting MongoDB service..."
+    # Ensure directories exist
     sudo mkdir -p /var/lib/mongodb
     sudo mkdir -p /var/log/mongodb
     sudo chown -R mongodb:mongodb /var/lib/mongodb /var/log/mongodb 2>/dev/null || \
         sudo chown -R $USER:$USER /var/lib/mongodb /var/log/mongodb 2>/dev/null || true
     
-    # Try systemctl first
-    if sudo systemctl start mongodb 2>/dev/null || sudo systemctl start mongod 2>/dev/null; then
-        echo -e "${GREEN}   ✓ MongoDB started via systemctl${NC}"
-        sudo systemctl enable mongodb 2>/dev/null || sudo systemctl enable mongod 2>/dev/null || true
-    else
-        # Try starting manually
-        if sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb 2>/dev/null; then
+    # Try different service names
+    MONGODB_STARTED=false
+    
+    # Try systemctl with different service names
+    for service_name in mongodb mongod mongodb-server; do
+        if sudo systemctl start "$service_name" 2>/dev/null; then
+            echo -e "${GREEN}   ✓ MongoDB started via systemctl ($service_name)${NC}"
+            sudo systemctl enable "$service_name" 2>/dev/null || true
+            MONGODB_STARTED=true
+            break
+        fi
+    done
+    
+    # If systemctl didn't work, try starting manually
+    if [ "$MONGODB_STARTED" = false ]; then
+        echo "   Attempting to start MongoDB manually..."
+        # Try with different user options
+        if sudo -u mongodb mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb 2>/dev/null; then
+            echo -e "${GREEN}   ✓ MongoDB started manually (as mongodb user)${NC}"
+            MONGODB_STARTED=true
+        elif mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb 2>/dev/null; then
             echo -e "${GREEN}   ✓ MongoDB started manually${NC}"
+            MONGODB_STARTED=true
         else
             echo -e "${YELLOW}   ⚠ MongoDB installed but couldn't start automatically${NC}"
-            echo "   You may need to start it manually later: sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb"
+            echo "   Troubleshooting steps:"
+            echo "   1. Check MongoDB binary: which mongod"
+            echo "   2. Check CPU compatibility: lscpu"
+            echo "   3. Try manual start: sudo mongod --dbpath /var/lib/mongodb"
+            echo "   4. Check logs: cat /var/log/mongodb/mongod.log"
         fi
     fi
 else
