@@ -26,14 +26,25 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Step 1: Update system packages
-echo -e "${YELLOW}[1/8]${NC} Updating system packages..."
+# Step 1: Fix MongoDB repository issues (if any)
+echo -e "${YELLOW}[1/9]${NC} Checking for repository issues..."
+# Remove problematic MongoDB repository if it exists and has GPG issues
+if [ -f "/etc/apt/sources.list.d/mongodb-org-6.0.list" ]; then
+    echo "   Found MongoDB repository, checking if it needs fixing..."
+    # Remove old repository
+    sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list
+    echo "   Removed old MongoDB repository configuration"
+fi
+echo ""
+
+# Step 2: Update system packages
+echo -e "${YELLOW}[2/9]${NC} Updating system packages..."
 sudo apt update
 echo -e "${GREEN}   ✓ System updated${NC}"
 echo ""
 
-# Step 2: Install system dependencies
-echo -e "${YELLOW}[2/8]${NC} Installing system dependencies..."
+# Step 3: Install system dependencies
+echo -e "${YELLOW}[3/9]${NC} Installing system dependencies..."
 
 # Install Python and pip
 if ! command_exists python3; then
@@ -55,7 +66,28 @@ fi
 # Install MongoDB
 if ! command_exists mongod; then
     echo "   Installing MongoDB..."
-    sudo apt install -y mongodb
+    # Remove problematic MongoDB repository if it exists
+    if [ -f "/etc/apt/sources.list.d/mongodb-org-6.0.list" ]; then
+        echo "   Removing old MongoDB repository configuration..."
+        sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list
+    fi
+    
+    # Try to install from Ubuntu repositories first
+    sudo apt install -y mongodb || {
+        echo "   System MongoDB not available, setting up MongoDB repository..."
+        # Get Ubuntu version
+        UBUNTU_VERSION=$(lsb_release -rs 2>/dev/null || echo "24.04")
+        UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || echo "noble")
+        
+        # Add MongoDB GPG key
+        curl -fsSL https://pgp.mongodb.com/server-6.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-6.0.gpg --dearmor
+        
+        # Add MongoDB repository for correct Ubuntu version
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu ${UBUNTU_CODENAME}/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+        
+        sudo apt update
+        sudo apt install -y mongodb-org
+    }
 else
     echo -e "${GREEN}   ✓ MongoDB already installed${NC}"
 fi
@@ -93,8 +125,8 @@ sudo apt install -y build-essential python3-dev git curl
 echo -e "${GREEN}   ✓ Build tools installed${NC}"
 echo ""
 
-# Step 3: Verify Redis is working
-echo -e "${YELLOW}[3/8]${NC} Verifying Redis..."
+# Step 4: Verify Redis is working
+echo -e "${YELLOW}[4/9]${NC} Verifying Redis..."
 if redis-cli ping > /dev/null 2>&1; then
     echo -e "${GREEN}   ✓ Redis is responding${NC}"
 else
@@ -110,8 +142,8 @@ else
 fi
 echo ""
 
-# Step 4: Set up Python prediction service
-echo -e "${YELLOW}[4/8]${NC} Setting up Python prediction service..."
+# Step 5: Set up Python prediction service
+echo -e "${YELLOW}[5/9]${NC} Setting up Python prediction service..."
 if [ -f "setup-prediction-vm.sh" ]; then
     chmod +x setup-prediction-vm.sh
     ./setup-prediction-vm.sh
@@ -135,8 +167,8 @@ else
 fi
 echo ""
 
-# Step 5: Install backend Node.js dependencies
-echo -e "${YELLOW}[5/8]${NC} Installing backend dependencies..."
+# Step 6: Install backend Node.js dependencies
+echo -e "${YELLOW}[6/9]${NC} Installing backend dependencies..."
 cd backend
 if [ ! -d "node_modules" ]; then
     echo "   Running npm install..."
@@ -153,8 +185,8 @@ echo -e "${GREEN}   ✓ Backend dependencies installed and built${NC}"
 cd ..
 echo ""
 
-# Step 6: Install frontend Node.js dependencies
-echo -e "${YELLOW}[6/8]${NC} Installing frontend dependencies..."
+# Step 7: Install frontend Node.js dependencies
+echo -e "${YELLOW}[7/9]${NC} Installing frontend dependencies..."
 cd frontend
 if [ ! -d "node_modules" ]; then
     echo "   Running npm install..."
@@ -167,8 +199,8 @@ echo -e "${GREEN}   ✓ Frontend dependencies installed${NC}"
 cd ..
 echo ""
 
-# Step 7: Set up firewall rules
-echo -e "${YELLOW}[7/8]${NC} Setting up firewall rules..."
+# Step 8: Set up firewall rules
+echo -e "${YELLOW}[8/9]${NC} Setting up firewall rules..."
 sudo ipset -exist create ids_blocklist hash:ip family inet timeout 0
 sudo ipset -exist create ids6_blocklist hash:ip family inet6 timeout 0
 
@@ -182,8 +214,8 @@ sudo iptables -C OUTPUT -m set --match-set ids_blocklist dst -j DROP 2>/dev/null
 echo -e "${GREEN}   ✓ Firewall rules configured${NC}"
 echo ""
 
-# Step 8: Start MongoDB if not running
-echo -e "${YELLOW}[8/8]${NC} Checking MongoDB..."
+# Step 9: Start MongoDB if not running
+echo -e "${YELLOW}[9/9]${NC} Checking MongoDB..."
 if pgrep -x "mongod" > /dev/null; then
     echo -e "${GREEN}   ✓ MongoDB is already running${NC}"
 else
