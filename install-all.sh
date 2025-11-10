@@ -1,0 +1,269 @@
+#!/bin/bash
+
+# IDS Project - Complete Installation Script
+# This script installs all dependencies and sets up the entire project
+
+set -e  # Exit on error
+
+echo "=========================================="
+echo "  IDS Project - Complete Installation"
+echo "=========================================="
+echo ""
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Step 1: Update system packages
+echo -e "${YELLOW}[1/8]${NC} Updating system packages..."
+sudo apt update
+echo -e "${GREEN}   ✓ System updated${NC}"
+echo ""
+
+# Step 2: Install system dependencies
+echo -e "${YELLOW}[2/8]${NC} Installing system dependencies..."
+
+# Install Python and pip
+if ! command_exists python3; then
+    echo "   Installing Python3..."
+    sudo apt install -y python3 python3-pip python3-venv
+else
+    echo -e "${GREEN}   ✓ Python3 already installed: $(python3 --version)${NC}"
+fi
+
+# Install Node.js (if not installed)
+if ! command_exists node; then
+    echo "   Installing Node.js..."
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt install -y nodejs
+else
+    echo -e "${GREEN}   ✓ Node.js already installed: $(node --version)${NC}"
+fi
+
+# Install MongoDB
+if ! command_exists mongod; then
+    echo "   Installing MongoDB..."
+    sudo apt install -y mongodb
+else
+    echo -e "${GREEN}   ✓ MongoDB already installed${NC}"
+fi
+
+# Install Redis (this is what you need!)
+echo "   Installing Redis..."
+if ! command_exists redis-server; then
+    sudo apt install -y redis-server
+    # Configure Redis to start on boot
+    sudo systemctl enable redis-server
+    sudo systemctl start redis-server
+    echo -e "${GREEN}   ✓ Redis installed and started${NC}"
+else
+    echo -e "${GREEN}   ✓ Redis already installed${NC}"
+    # Make sure Redis is running
+    if ! pgrep -x "redis-server" > /dev/null; then
+        echo "   Starting Redis server..."
+        sudo systemctl start redis-server
+        sudo systemctl enable redis-server
+    fi
+    echo -e "${GREEN}   ✓ Redis is running${NC}"
+fi
+
+# Install ipset (for firewall)
+if ! command_exists ipset; then
+    echo "   Installing ipset..."
+    sudo apt install -y ipset
+else
+    echo -e "${GREEN}   ✓ ipset already installed${NC}"
+fi
+
+# Install build tools
+echo "   Installing build tools..."
+sudo apt install -y build-essential python3-dev git curl
+echo -e "${GREEN}   ✓ Build tools installed${NC}"
+echo ""
+
+# Step 3: Verify Redis is working
+echo -e "${YELLOW}[3/8]${NC} Verifying Redis..."
+if redis-cli ping > /dev/null 2>&1; then
+    echo -e "${GREEN}   ✓ Redis is responding${NC}"
+else
+    echo -e "${RED}   ✗ Redis is not responding. Starting it...${NC}"
+    sudo systemctl restart redis-server
+    sleep 2
+    if redis-cli ping > /dev/null 2>&1; then
+        echo -e "${GREEN}   ✓ Redis is now responding${NC}"
+    else
+        echo -e "${RED}   ✗ Redis failed to start. Please check manually.${NC}"
+        echo "   Try: sudo systemctl status redis-server"
+    fi
+fi
+echo ""
+
+# Step 4: Set up Python prediction service
+echo -e "${YELLOW}[4/8]${NC} Setting up Python prediction service..."
+if [ -f "setup-prediction-vm.sh" ]; then
+    chmod +x setup-prediction-vm.sh
+    ./setup-prediction-vm.sh
+else
+    echo "   Running manual Python setup..."
+    cd backend
+    
+    # Create virtual environment if it doesn't exist
+    if [ ! -d "venv" ]; then
+        python3 -m venv venv
+    fi
+    
+    # Activate and install dependencies
+    source venv/bin/activate
+    pip install --upgrade pip --quiet
+    pip install -r requirements.txt
+    deactivate
+    
+    cd ..
+    echo -e "${GREEN}   ✓ Python environment set up${NC}"
+fi
+echo ""
+
+# Step 5: Install backend Node.js dependencies
+echo -e "${YELLOW}[5/8]${NC} Installing backend dependencies..."
+cd backend
+if [ ! -d "node_modules" ]; then
+    echo "   Running npm install..."
+    npm install
+else
+    echo "   node_modules exists, running npm install to update..."
+    npm install
+fi
+
+# Build backend
+echo "   Building backend..."
+npm run build
+echo -e "${GREEN}   ✓ Backend dependencies installed and built${NC}"
+cd ..
+echo ""
+
+# Step 6: Install frontend Node.js dependencies
+echo -e "${YELLOW}[6/8]${NC} Installing frontend dependencies..."
+cd frontend
+if [ ! -d "node_modules" ]; then
+    echo "   Running npm install..."
+    npm install
+else
+    echo "   node_modules exists, running npm install to update..."
+    npm install
+fi
+echo -e "${GREEN}   ✓ Frontend dependencies installed${NC}"
+cd ..
+echo ""
+
+# Step 7: Set up firewall rules
+echo -e "${YELLOW}[7/8]${NC} Setting up firewall rules..."
+sudo ipset -exist create ids_blocklist hash:ip family inet timeout 0
+sudo ipset -exist create ids6_blocklist hash:ip family inet6 timeout 0
+
+# Add iptables rules if they don't exist
+sudo iptables -C INPUT -m set --match-set ids_blocklist src -j DROP 2>/dev/null || \
+  sudo iptables -I INPUT -m set --match-set ids_blocklist src -j DROP
+
+sudo iptables -C OUTPUT -m set --match-set ids_blocklist dst -j DROP 2>/dev/null || \
+  sudo iptables -I OUTPUT -m set --match-set ids_blocklist dst -j DROP
+
+echo -e "${GREEN}   ✓ Firewall rules configured${NC}"
+echo ""
+
+# Step 8: Start MongoDB if not running
+echo -e "${YELLOW}[8/8]${NC} Checking MongoDB..."
+if pgrep -x "mongod" > /dev/null; then
+    echo -e "${GREEN}   ✓ MongoDB is already running${NC}"
+else
+    echo "   Starting MongoDB..."
+    sudo systemctl start mongodb || sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb
+    sudo systemctl enable mongodb 2>/dev/null || true
+    echo -e "${GREEN}   ✓ MongoDB started${NC}"
+fi
+echo ""
+
+# Final verification
+echo "=========================================="
+echo -e "${GREEN}  Installation Complete!${NC}"
+echo "=========================================="
+echo ""
+echo "Verification:"
+echo ""
+
+# Check all services
+echo -e "${BLUE}Checking services...${NC}"
+
+# Redis
+if redis-cli ping > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ Redis: Running${NC}"
+else
+    echo -e "${RED}  ✗ Redis: Not running${NC}"
+fi
+
+# MongoDB
+if pgrep -x "mongod" > /dev/null; then
+    echo -e "${GREEN}  ✓ MongoDB: Running${NC}"
+else
+    echo -e "${RED}  ✗ MongoDB: Not running${NC}"
+fi
+
+# Python venv
+if [ -d "backend/venv" ]; then
+    echo -e "${GREEN}  ✓ Python venv: Created${NC}"
+else
+    echo -e "${RED}  ✗ Python venv: Missing${NC}"
+fi
+
+# Node modules
+if [ -d "backend/node_modules" ]; then
+    echo -e "${GREEN}  ✓ Backend dependencies: Installed${NC}"
+else
+    echo -e "${RED}  ✗ Backend dependencies: Missing${NC}"
+fi
+
+if [ -d "frontend/node_modules" ]; then
+    echo -e "${GREEN}  ✓ Frontend dependencies: Installed${NC}"
+else
+    echo -e "${RED}  ✗ Frontend dependencies: Missing${NC}"
+fi
+
+# Model files
+if [ -f "backend/binary_attack_model.pkl" ] && [ -f "backend/multiclass_attack_model.pkl" ]; then
+    echo -e "${GREEN}  ✓ ML Models: Found${NC}"
+else
+    echo -e "${YELLOW}  ⚠ ML Models: Not found (may need to add manually)${NC}"
+fi
+
+echo ""
+echo "=========================================="
+echo "Next Steps:"
+echo "=========================================="
+echo ""
+echo "1. Start all services:"
+echo "   ./start-everything.sh"
+echo ""
+echo "2. Or start manually:"
+echo "   cd backend && npm start"
+echo "   cd backend && source venv/bin/activate && python3 prediction_service.py"
+echo "   cd frontend && npm run dev"
+echo ""
+echo "3. Test Redis connection:"
+echo "   redis-cli ping"
+echo ""
+echo "4. View logs:"
+echo "   tail -f /tmp/ids-*.log"
+echo ""
+echo "=========================================="
+
