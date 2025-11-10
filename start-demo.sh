@@ -171,7 +171,8 @@ if [ ! -d "venv/bin" ]; then
         if [ $? -eq 0 ]; then
             source venv/bin/activate
             pip install --upgrade pip --quiet
-            if [ -f               pip install -r requirements.txt --quiet
+            if [ -f "requirements.txt" ]; then
+                pip install -r requirements.txt --quiet
             else
                 pip install flask numpy pandas scikit-learn joblib requests --quiet
             fi
