@@ -241,9 +241,14 @@ pkill -f "vite" >/dev/null 2>&1
 sleep 1
 
 # Check if frontend dependencies are installed
-if [ ! -d "node_modules" ]; then
+if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
     echo "   Installing frontend dependencies..."
-    npm install
+    npm install --legacy-peer-deps
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}   ⚠ npm install failed, trying alternative method...${NC}"
+        npm cache clean --force
+        npm install --legacy-peer-deps --fetch-timeout=900000 --fetch-retries=50 --maxsockets=1 --progress=false
+    fi
 fi
 
 # Start web dev server (more reliable than Electron)
