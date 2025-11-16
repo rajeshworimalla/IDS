@@ -79,10 +79,17 @@
       const until = getBanUntil();
       if (until > Date.now()) {
         const left = secondsLeft(until);
-        showMessage(`Temporarily banned. Try again in ${left}s.`, false);
+        const message = `Temporarily banned. Try again in ${left}s.`;
+        showMessage(message, false);
         form.querySelector('button[type="submit"]').disabled = true;
+        console.log('[BAN UI] Showing ban message:', message);
       } else {
         form.querySelector('button[type="submit"]').disabled = false;
+        // Clear any existing ban message if ban expired
+        if (messageEl.textContent.includes('Temporarily banned')) {
+          messageEl.className = 'msg';
+          messageEl.textContent = '';
+        }
       }
     }
     let banTimer = null;
@@ -120,16 +127,22 @@
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        console.log('[LOGIN-FAILED] Backend response:', data);
         if (data && data.banned) {
+          console.log('[LOGIN-FAILED] User is banned! TTL:', data.ttlSeconds);
           const until = setBanFor(data.ttlSeconds || 30);
           updateBanUI();
           scheduleBanTick();
+        } else if (data) {
+          console.log(`[LOGIN-FAILED] Count: ${data.count}/${data.threshold}, Not banned yet`);
         }
         return data;
       } catch (e) {
+        console.error('[LOGIN-FAILED] Error:', e);
         // Fallback: locally ban after 3 fails within 60s even if server unreachable
         const count = bumpLocalFailCount();
         if (count >= 3) {
+          console.log('[LOGIN-FAILED] Local fallback: banning after 3 failures');
           setBanFor(30);
           updateBanUI();
           scheduleBanTick();
@@ -197,11 +210,21 @@
         const banData = await reportFailedLogin();
         // If banned, show ban message instead of error
         if (banData && banData.banned) {
+          console.log('[LOGIN] User is banned, showing ban message');
           // updateBanUI() is already called inside reportFailedLogin(), but ensure it's shown
           updateBanUI();
+          // Force show the message in case updateBanUI didn't trigger
+          const until = getBanUntil();
+          if (until > Date.now()) {
+            const left = secondsLeft(until);
+            showMessage(`Temporarily banned. Try again in ${left}s.`, false);
+          }
         } else {
           // Only show error message if not banned
           showMessage('Invalid username or password.', false);
+          if (banData && banData.count !== undefined) {
+            console.log(`[LOGIN] Failed attempt ${banData.count}/${banData.threshold || 3}`);
+          }
         }
       }
 
