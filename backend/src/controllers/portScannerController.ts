@@ -161,26 +161,14 @@ export const scanHost = async (req: Request, res: Response) => {
 
     console.log(`[PORT SCAN] Starting scan of ${host} - ${portList.length} ports`);
 
-    // Start scanning (non-blocking)
-    const scanPromise = scanPorts(host, portList, timeout, concurrency);
+    // Adjust timeout and concurrency for large scans
+    const actualTimeout = portList.length > 10000 ? 300 : timeout; // Shorter timeout for large scans
+    const actualConcurrency = portList.length > 10000 ? 500 : concurrency; // Higher concurrency for large scans
 
-    // For large scans, return immediately and let client poll or use websocket
-    if (portList.length > 1000) {
-      // Return job ID for large scans (future enhancement)
-      res.json({
-        jobId: `scan_${Date.now()}`,
-        host,
-        totalPorts: portList.length,
-        status: 'scanning',
-        message: 'Large scan started. Use websocket or polling to get results.'
-      });
-      return;
-    }
+    // Start scanning - wait for results
+    const openPorts = await scanPorts(host, portList, actualTimeout, actualConcurrency);
 
-    // For smaller scans, wait for results
-    const openPorts = await scanPromise;
-
-    console.log(`[PORT SCAN] Completed scan of ${host} - Found ${openPorts.length} open ports`);
+    console.log(`[PORT SCAN] Completed scan of ${host} - Found ${openPorts.length} open ports: ${openPorts.slice(0, 20).join(', ')}${openPorts.length > 20 ? '...' : ''}`);
 
     res.json({
       host,
