@@ -219,8 +219,9 @@ sleep 1
 
 if [ -f "venv/bin/activate" ] && [ -f "binary_attack_model.pkl" ] && [ -f "multiclass_attack_model.pkl" ]; then
     source venv/bin/activate
-    python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
+    nohup python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 </dev/null &
     PREDICTION_PID=$!
+    disown $PREDICTION_PID 2>/dev/null || true
     deactivate 2>/dev/null || true
     sleep 3
     
