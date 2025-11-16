@@ -51,7 +51,8 @@ check_process() {
     local pattern=$1
     local name=$2
     
-    if ps aux | grep -v grep | grep -q "$pattern"; then
+    # More flexible pattern matching - handle both with and without sudo
+    if ps aux | grep -v grep | grep -E "$pattern" > /dev/null 2>&1; then
         echo -e "${GREEN}✅ $name process is running${NC}"
         return 0
     else
@@ -185,7 +186,9 @@ sleep 4
 
 # Verify backend
 echo "   Verifying backend..."
-if check_process "node dist/index.js" "Backend"; then
+# Check by pattern (more flexible) and also by port
+if ps aux | grep -v grep | grep -E "node.*dist/index.js|node.*dist/index" > /dev/null 2>&1 || check_port 5001 "Backend"; then
+    if check_port 5001 "Backend"; then
     if check_port 5001 "Backend"; then
         if check_service "http://localhost:5001" "Backend API"; then
             echo -e "${GREEN}   ✅ Backend fully operational${NC}"
