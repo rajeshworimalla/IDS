@@ -24,10 +24,7 @@ const EventsLog: FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [scanningState, setScanningState] = useState<'idle' | 'starting' | 'scanning' | 'stopping'>('idle');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [dateRange, setDateRange] = useState({
-    from: '10.03.2024',
-    to: '20.03.2024'
-  });
+  // Removed unused dateRange state
 
   // Fetch packets on component mount
   useEffect(() => {
@@ -96,12 +93,12 @@ const EventsLog: FC = () => {
       }
     });
 
-    socket.on('connect_error', (error) => {
+    socket.on('connect_error', (error: any) => {
       console.error('Socket connection error:', error);
       setScanningState('idle');
     });
 
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', (reason: any) => {
       console.log('Socket disconnected:', reason);
       setScanningState('idle');
     });
@@ -116,12 +113,12 @@ const EventsLog: FC = () => {
     });
 
     // Throttle packet updates to prevent lag
-    const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingPacketsRef = useRef<Packet[]>([]);
     
     socket.on('new-packet', (packet: any) => {
-      setPackets(prev => {
-        const exists = prev.some(p => p._id === packet._id);
+      setPackets((prev: Packet[]) => {
+        const exists = prev.some((p: Packet) => p._id === packet._id);
         if (exists) return prev;
         
         pendingPacketsRef.current.push(packet);
@@ -131,7 +128,7 @@ const EventsLog: FC = () => {
         }
         
         updateTimeoutRef.current = setTimeout(() => {
-          setPackets(prev => {
+          setPackets((prev: Packet[]) => {
             const newPackets = [...pendingPacketsRef.current, ...prev];
             pendingPacketsRef.current = [];
             return newPackets.slice(0, 50);
@@ -183,25 +180,7 @@ const EventsLog: FC = () => {
     }
   };
 
-  const handleDateFilter = async () => {
-    try {
-      const token = authService.getToken();
-      if (!token) {
-        console.error('No authentication token found');
-        return;
-      }
-
-      const response = await fetch(`http://localhost:5001/api/packets/filter?from=${dateRange.from}&to=${dateRange.to}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      const data = await response.json();
-      setPackets(data);
-    } catch (error) {
-      console.error('Error filtering packets:', error);
-    }
-  };
+  // Removed unused handleDateFilter function
 
   const handleSearch = async () => {
     try {
@@ -223,7 +202,7 @@ const EventsLog: FC = () => {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       if (e.currentTarget.id === 'search-input') {
         handleSearch();
@@ -232,9 +211,9 @@ const EventsLog: FC = () => {
   };
 
   const toggleRowSelection = (id: string) => {
-    setSelectedRows(prev => 
+    setSelectedRows((prev: string[]) => 
       prev.includes(id)
-        ? prev.filter(rowId => rowId !== id)
+        ? prev.filter((rowId: string) => rowId !== id)
         : [...prev, id]
     );
   };
@@ -243,7 +222,7 @@ const EventsLog: FC = () => {
     if (selectedRows.length === packets.length) {
       setSelectedRows([]);
     } else {
-      setSelectedRows(packets.map(packet => packet._id));
+      setSelectedRows(packets.map((packet: Packet) => packet._id));
     }
   };
 
@@ -256,14 +235,7 @@ const EventsLog: FC = () => {
     }
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'critical': return 'Critical Threat';
-      case 'medium': return 'Medium Threat';
-      case 'normal': return 'Normal Traffic';
-      default: return 'Unknown';
-    }
-  };
+  // Removed unused getStatusText function
 
   const handleStartScanning = () => {
     if (scanningState !== 'idle') return;
@@ -428,7 +400,7 @@ const EventsLog: FC = () => {
                   </td>
                 </tr>
               ) : (
-                packets.map((packet) => {
+                packets.map((packet: Packet) => {
                   const statusColor = getStatusColor(packet.status);
                   const statusBg = statusColor === 'error' ? '#ff4d4f' : statusColor === 'warning' ? '#faad14' : '#52c41a';
                   return (
@@ -496,7 +468,7 @@ const EventsLog: FC = () => {
                 maxWidth: '400px',
                 border: '1px solid #333'
               }}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
               <h3 style={{ color: '#fff', marginBottom: '1rem' }}>Confirm Reset</h3>
               <p style={{ color: '#999', marginBottom: '1.5rem' }}>Are you sure you want to clear all packets? This action cannot be undone.</p>
