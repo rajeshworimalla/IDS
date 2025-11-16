@@ -238,43 +238,39 @@ const EventsLog: FC = () => {
     socket.emit('stop-scanning', { token });
   };
 
-  if (isLoading) {
-    return (
-      <div className="events-log-page">
-        <Navbar />
-        <main className="events-log-content">
-          <div className="loading-container">
-            <p>Loading packets...</p>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="events-log-page">
-        <Navbar />
-        <main className="events-log-content">
-          <h1>Traffic Collector</h1>
-          <div className="error-message">
-            <strong>Error:</strong> {error}
-          </div>
-          <button onClick={() => window.location.reload()} className="btn-primary">
-            Reload Page
-          </button>
-        </main>
-      </div>
-    );
-  }
-
+  // Always render something visible
   return (
     <div className="events-log-page">
       <Navbar />
       <main className="events-log-content">
         <div className="events-header">
           <h1>Traffic Collector</h1>
+          <div style={{ 
+            background: '#3699ff', 
+            color: '#fff', 
+            padding: '0.5rem 1rem', 
+            borderRadius: '4px',
+            fontSize: '0.9rem',
+            marginTop: '1rem'
+          }}>
+            Status: {isLoading ? 'Loading...' : error ? `Error: ${error}` : `Loaded ${packets.length} packets`}
+          </div>
         </div>
+        
+        {isLoading && (
+          <div className="loading-container">
+            <p>Loading packets...</p>
+          </div>
+        )}
+        
+        {error && (
+          <div className="error-message">
+            <strong>Error:</strong> {error}
+            <button onClick={() => window.location.reload()} className="btn-primary" style={{ marginLeft: '1rem' }}>
+              Reload Page
+            </button>
+          </div>
+        )}
         
         <div className="events-controls">
           <input
@@ -299,28 +295,53 @@ const EventsLog: FC = () => {
           )}
         </div>
 
-        <div className="events-table-container">
-          <table className="events-table">
-            <thead>
-              <tr>
-                <th>
-                  <input 
-                    type="checkbox" 
-                    checked={selectedRows.length === packets.length && packets.length > 0}
-                    onChange={handleSelectAll}
-                  />
-                </th>
-                <th>Status</th>
-                <th>Date</th>
-                <th>Source IP</th>
-                <th>Dest IP</th>
-                <th>Protocol</th>
-                <th>Description</th>
-                <th>Frequency</th>
-              </tr>
-            </thead>
-            <tbody>
-              {packets.length === 0 ? (
+        {!isLoading && !error && (
+          <>
+            <div className="events-controls">
+              <input
+                type="text"
+                id="search-input"
+                placeholder="Search packets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={handleKeyPress}
+                className="search-input"
+              />
+              <button onClick={handleSearch} className="btn-primary">Search</button>
+              <button onClick={() => setShowResetConfirm(true)} className="btn-danger">Reset</button>
+              {scanningState === 'idle' ? (
+                <button onClick={handleStartScanning} className="btn-success">Start Scanning</button>
+              ) : scanningState === 'starting' ? (
+                <button disabled className="btn-disabled">Starting...</button>
+              ) : scanningState === 'scanning' ? (
+                <button onClick={handleStopScanning} className="btn-danger">Stop Scanning</button>
+              ) : (
+                <button disabled className="btn-disabled">Stopping...</button>
+              )}
+            </div>
+
+            <div className="events-table-container">
+              <table className="events-table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedRows.length === packets.length && packets.length > 0}
+                        onChange={handleSelectAll}
+                      />
+                    </th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Source IP</th>
+                    <th>Dest IP</th>
+                    <th>Protocol</th>
+                    <th>Description</th>
+                    <th>Frequency</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {packets.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="empty-state">
                     {scanningState === 'scanning' ? (
@@ -368,9 +389,11 @@ const EventsLog: FC = () => {
                   );
                 })
               )}
-            </tbody>
-          </table>
-        </div>
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
 
         {showResetConfirm && (
           <div className="modal-overlay" onClick={() => setShowResetConfirm(false)}>
