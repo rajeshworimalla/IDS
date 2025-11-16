@@ -439,25 +439,23 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                       >
                         <td className="site-host">{site.host}</td>
                         <td className="site-ports">
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                            {site.ports.map((p: number, idx: number) => {
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', lineHeight: '1.4' }}>
+                            {site.ports.map((p: number) => {
                               const desc = getPortDescription(p);
                               return (
                                 <span key={p} style={{ 
                                   fontFamily: 'monospace', 
                                   fontSize: '0.85em',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
+                                  display: 'block'
                                 }}>
                                   <strong style={{ color: 'var(--accent-color, #3699ff)' }}>{p}</strong>
                                   {desc !== 'Unknown' && (
                                     <span style={{ 
                                       color: 'var(--text-secondary, #999)', 
-                                      fontSize: '0.9em'
+                                      marginLeft: '8px',
+                                      fontSize: '0.95em'
                                     }}>({desc})</span>
                                   )}
-                                  {idx < site.ports.length - 1 && <span style={{ color: 'var(--text-tertiary, #666)' }}>•</span>}
                                 </span>
                               );
                             })}
