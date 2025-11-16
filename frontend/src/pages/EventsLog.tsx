@@ -28,13 +28,6 @@ const EventsLog: FC = () => {
     from: '10.03.2024',
     to: '20.03.2024'
   });
-  
-  // Filter options
-  const filterOptions = [
-    { id: 'all', label: 'All', active: true },
-    { id: 'open', label: 'Open', active: false },
-    { id: 'closed', label: 'Closed', active: false },
-  ];
 
   // Fetch packets on component mount
   useEffect(() => {
@@ -58,15 +51,11 @@ const EventsLog: FC = () => {
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
-          // Limit to last 50 packets to prevent lag (aggressive limit for presentation)
           const limitedData = Array.isArray(data) ? data.slice(0, 50) : data;
           setPackets(limitedData);
         } else {
           const error = await response.text();
           console.error('Failed to fetch packets:', error);
-          if (response.status === 401) {
-            console.error('Authentication failed');
-          }
         }
       } catch (error) {
         console.error('Error fetching packets:', error);
@@ -85,9 +74,7 @@ const EventsLog: FC = () => {
     }
 
     const socket = io('http://localhost:5001', {
-      auth: {
-        token: token
-      },
+      auth: { token },
       withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -119,7 +106,7 @@ const EventsLog: FC = () => {
       setScanningState('idle');
     });
 
-    socket.on('scanning-status', (status) => {
+    socket.on('scanning-status', (status: any) => {
       console.log('Scanning status:', status);
       setScanningState(status.isScanning ? 'scanning' : 'idle');
       if (status.error) {
@@ -132,28 +119,24 @@ const EventsLog: FC = () => {
     const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const pendingPacketsRef = useRef<Packet[]>([]);
     
-    socket.on('new-packet', (packet) => {
-      // Check if packet already exists
+    socket.on('new-packet', (packet: any) => {
       setPackets(prev => {
         const exists = prev.some(p => p._id === packet._id);
         if (exists) return prev;
         
-        // Add to pending queue
         pendingPacketsRef.current.push(packet);
         
-        // Throttle updates: batch every 500ms instead of updating on every packet
         if (updateTimeoutRef.current) {
           clearTimeout(updateTimeoutRef.current);
         }
         
         updateTimeoutRef.current = setTimeout(() => {
           setPackets(prev => {
-            // Add pending packets and limit to last 50 packets to prevent lag (aggressive for presentation)
             const newPackets = [...pendingPacketsRef.current, ...prev];
             pendingPacketsRef.current = [];
-            return newPackets.slice(0, 50); // Keep only last 50 packets
+            return newPackets.slice(0, 50);
           });
-        }, 1000); // Batch updates every 1 second (less frequent for better performance)
+        }, 1000);
         
         return prev;
       });
@@ -317,214 +300,230 @@ const EventsLog: FC = () => {
   };
 
   return (
-    <div className="events-log-page">
+    <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh' }}>
       <Navbar />
-      <main className="events-log-content">
-        <h1 style={{ color: '#fff', marginBottom: '1rem' }}>Traffic Collector</h1>
-        <div className="events-header">
-          <div className="filter-container">
-            <div className="filter-group">
-              {filterOptions.map(option => (
-                <button
-                  key={option.id}
-                  className={`filter-btn ${option.active ? 'active' : ''}`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            
-            <div className="date-filters">
-              <div className="date-field">
-                <label>From</label>
-                <input 
-                  type="text" 
-                  value={dateRange.from}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-                  onKeyPress={(e) => e.key === 'Enter' && handleDateFilter()}
-                />
-              </div>
-              <div className="date-field">
-                <label>To</label>
-                <input 
-                  type="text" 
-                  value={dateRange.to}
-                  onChange={(e) => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-                  onKeyPress={(e) => e.key === 'Enter' && handleDateFilter()}
-                />
-              </div>
-            </div>
-            
-            <div className="search-filter">
-              <input
-                type="text" 
-                id="search-input"
-                placeholder="0.0.0.0/0 Search"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={handleKeyPress}
-              />
-            </div>
-          </div>
-          
-          <button 
-            className="filter-action-btn"
-            onClick={handleDateFilter}
-          >
-            Filter
-          </button>
-        </div>
+      <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px' }}>
+        <h1 style={{ color: '#fff', marginBottom: '1.5rem', fontSize: '2rem' }}>Traffic Collector</h1>
         
-        <div className="table-container">
-          <table 
-            className="events-table"
+        <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            id="search-input"
+            placeholder="Search packets..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyPress={handleKeyPress}
+            style={{
+              padding: '0.5rem 1rem',
+              borderRadius: '6px',
+              border: '1px solid #333',
+              background: '#1a1a1a',
+              color: '#fff',
+              flex: '1',
+              minWidth: '200px'
+            }}
+          />
+          <button
+            onClick={handleSearch}
+            style={{
+              padding: '0.5rem 1.5rem',
+              borderRadius: '6px',
+              border: 'none',
+              background: '#3699ff',
+              color: '#fff',
+              cursor: 'pointer'
+            }}
           >
+            Search
+          </button>
+          <button
+            onClick={() => setShowResetConfirm(true)}
+            style={{
+              padding: '0.5rem 1.5rem',
+              borderRadius: '6px',
+              border: 'none',
+              background: '#ff4d4f',
+              color: '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            Reset
+          </button>
+          {scanningState === 'idle' ? (
+            <button
+              onClick={handleStartScanning}
+              style={{
+                padding: '0.5rem 1.5rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#238636',
+                color: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              Start Scanning
+            </button>
+          ) : scanningState === 'starting' ? (
+            <button disabled style={{ padding: '0.5rem 1.5rem', opacity: 0.6 }}>
+              Starting...
+            </button>
+          ) : scanningState === 'scanning' ? (
+            <button
+              onClick={handleStopScanning}
+              style={{
+                padding: '0.5rem 1.5rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: '#ff4d4f',
+                color: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              Stop Scanning
+            </button>
+          ) : (
+            <button disabled style={{ padding: '0.5rem 1.5rem', opacity: 0.6 }}>
+              Stopping...
+            </button>
+          )}
+        </div>
+
+        <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>
-                <th>
+              <tr style={{ background: '#0d1117', borderBottom: '1px solid #333' }}>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>
                   <input 
                     type="checkbox" 
-                    checked={selectedRows.length === packets.length}
+                    checked={selectedRows.length === packets.length && packets.length > 0}
                     onChange={handleSelectAll}
                   />
                 </th>
-                <th>Packet Traff</th>
-                <th>Date</th>
-                <th>End</th>
-                <th>Start IP</th>
-                <th>End IP</th>
-                <th>Protocol</th>
-                <th>Description</th>
-                <th>Frequency</th>
-                <th>Start Bytes</th>
-                <th>End Bytes</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Status</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Date</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Source IP</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Dest IP</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Protocol</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Description</th>
+                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Frequency</th>
               </tr>
             </thead>
             <tbody>
               {packets.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: '#999' }}>
                     {scanningState === 'scanning' ? (
                       <div>
-                        <p style={{ fontSize: '1.1rem', marginBottom: '10px' }}>📡 Scanning for packets...</p>
+                        <p style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#fff' }}>📡 Scanning for packets...</p>
                         <p style={{ fontSize: '0.9rem' }}>Waiting for network traffic. Try browsing the site or running an attack from Kali Linux.</p>
                       </div>
                     ) : scanningState === 'starting' ? (
-                      <div>
-                        <p style={{ fontSize: '1.1rem' }}>🚀 Starting packet capture...</p>
-                      </div>
+                      <p style={{ fontSize: '1.1rem', color: '#fff' }}>🚀 Starting packet capture...</p>
                     ) : (
                       <div>
-                        <p style={{ fontSize: '1.1rem', marginBottom: '10px' }}>No packets captured yet</p>
+                        <p style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#fff' }}>No packets captured yet</p>
                         <p style={{ fontSize: '0.9rem' }}>Click "Start Scanning" to begin capturing network traffic.</p>
                       </div>
                     )}
                   </td>
                 </tr>
               ) : (
-                packets.map((packet) => (
-                  <tr
-                    key={packet._id}
-                    className={selectedRows.includes(packet._id) ? 'selected' : ''}
-                  >
-                    <td>
-                      <input 
-                        type="checkbox" 
-                        checked={selectedRows.includes(packet._id)}
-                        onChange={() => toggleRowSelection(packet._id)}
-                      />
-                    </td>
-                    <td>
-                      <div className="status-container" title={getStatusText(packet.status)}>
-                        <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
-                        <span className="status-text">{packet.status}</span>
-                      </div>
-                    </td>
-                    <td>{new Date(packet.date).toLocaleDateString()}</td>
-                    <td>{new Date(packet.date).toLocaleDateString()}</td>
-                    <td>{packet.start_ip}</td>
-                    <td>{packet.end_ip}</td>
-                    <td>{packet.protocol}</td>
-                    <td className="description-cell">{packet.description}</td>
-                    <td>{packet.frequency}</td>
-                    <td>{packet.start_bytes}</td>
-                    <td>{packet.end_bytes}</td>
-                  </tr>
-                ))
+                packets.map((packet) => {
+                  const statusColor = getStatusColor(packet.status);
+                  const statusBg = statusColor === 'error' ? '#ff4d4f' : statusColor === 'warning' ? '#faad14' : '#52c41a';
+                  return (
+                    <tr
+                      key={packet._id}
+                      style={{
+                        borderBottom: '1px solid #333',
+                        background: selectedRows.includes(packet._id) ? '#1f2940' : 'transparent'
+                      }}
+                    >
+                      <td style={{ padding: '0.75rem' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedRows.includes(packet._id)}
+                          onChange={() => toggleRowSelection(packet._id)}
+                        />
+                      </td>
+                      <td style={{ padding: '0.75rem' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          background: statusBg,
+                          color: '#fff',
+                          fontSize: '0.85rem'
+                        }}>
+                          {packet.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{new Date(packet.date).toLocaleString()}</td>
+                      <td style={{ padding: '0.75rem', color: '#e6edf3', fontFamily: 'monospace' }}>{packet.start_ip}</td>
+                      <td style={{ padding: '0.75rem', color: '#e6edf3', fontFamily: 'monospace' }}>{packet.end_ip}</td>
+                      <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{packet.protocol}</td>
+                      <td style={{ padding: '0.75rem', color: '#e6edf3', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{packet.description}</td>
+                      <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{packet.frequency}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
-        
-        <div className="pagination-controls">
-          <div className="records-info">
-            {packets.length > 0 ? (
-              <>Showing {packets.length} packet{packets.length !== 1 ? 's' : ''}</>
-            ) : scanningState === 'scanning' ? (
-              <>Waiting for packets... (Scanning active)</>
-            ) : scanningState === 'starting' ? (
-              <>Starting packet capture...</>
-            ) : (
-              <>No packets yet. Click "Start Scanning" to begin.</>
-            )}
-          </div>
-          <div className="pagination-buttons">
-            <button
-              className="pagination-btn"
-              onClick={() => setShowResetConfirm(true)}
-            >
-              Reset
-            </button>
-            {scanningState === 'idle' ? (
-              <button
-                className="pagination-btn primary"
-                onClick={handleStartScanning}
-              >
-                Start Scanning
-              </button>
-            ) : scanningState === 'starting' ? (
-              <button
-                className="pagination-btn primary"
-                disabled
-                style={{ opacity: 0.6 }}
-              >
-                Starting...
-              </button>
-            ) : scanningState === 'scanning' ? (
-              <button
-                className="pagination-btn danger"
-                onClick={handleStopScanning}
-              >
-                Stop Scanning
-              </button>
-            ) : (
-              <button
-                className="pagination-btn danger"
-                disabled
-                style={{ opacity: 0.6 }}
-              >
-                Stopping...
-              </button>
-            )}
-          </div>
-        </div>
 
-        {/* Reset Confirmation Dialog */}
         {showResetConfirm && (
-          <div className="confirmation-dialog">
-            <div className="dialog-content">
-              <h3>Confirm Reset</h3>
-              <p>Are you sure you want to clear all packets? This action cannot be undone.</p>
-              <div className="dialog-buttons">
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.7)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000
+            }}
+            onClick={() => setShowResetConfirm(false)}
+          >
+            <div 
+              style={{
+                background: '#1a1a1a',
+                padding: '2rem',
+                borderRadius: '8px',
+                maxWidth: '400px',
+                border: '1px solid #333'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ color: '#fff', marginBottom: '1rem' }}>Confirm Reset</h3>
+              <p style={{ color: '#999', marginBottom: '1.5rem' }}>Are you sure you want to clear all packets? This action cannot be undone.</p>
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
                 <button
-                  className="dialog-btn cancel"
                   onClick={() => setShowResetConfirm(false)}
+                  style={{
+                    padding: '0.5rem 1.5rem',
+                    borderRadius: '6px',
+                    border: '1px solid #333',
+                    background: 'transparent',
+                    color: '#fff',
+                    cursor: 'pointer'
+                  }}
                 >
                   Cancel
                 </button>
                 <button
-                  className="dialog-btn confirm"
                   onClick={handleReset}
+                  style={{
+                    padding: '0.5rem 1.5rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#ff4d4f',
+                    color: '#fff',
+                    cursor: 'pointer'
+                  }}
                 >
                   Confirm Reset
                 </button>
@@ -537,4 +536,4 @@ const EventsLog: FC = () => {
   );
 };
 
-export default EventsLog; 
+export default EventsLog;
