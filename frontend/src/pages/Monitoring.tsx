@@ -284,19 +284,17 @@ const Monitoring: FC = () => {
               >
                 🚫 View blocked IPs
               </motion.button>
-              <motion.button
-                className="refresh-button"
-                onClick={() => fetchData()}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="loading-spinner" />
-                ) : (
-                  <span>🔄 Refresh</span>
-                )}
-              </motion.button>
+                <button
+                  className="refresh-button"
+                  onClick={() => fetchData()}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <span className="loading-spinner" />
+                  ) : (
+                    <span>🔄 Refresh</span>
+                  )}
+                </button>
             </div>
           </div>
           <div className="monitoring-stats">
@@ -402,17 +400,12 @@ const Monitoring: FC = () => {
           </div>
         </div>
 
-        <AnimatePresence>
-          <div className="alerts-list">
+        <div className="alerts-list">
             {filteredAlerts.length > 0 ? (
-              filteredAlerts.map((alert) => (
-                <motion.div
+              filteredAlerts.slice(0, 50).map((alert) => (
+                <div
                   key={alert._id}
                   className={`alert-card ${alert.severity} ${expandedAlertId === alert._id ? 'expanded' : ''}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  layout
                 >
                   <div className="alert-header" onClick={() => handleToggleExpand(alert._id)}>
                     <div className="alert-icon-container">
@@ -428,23 +421,18 @@ const Monitoring: FC = () => {
                       </div>
                     </div>
                     <div className="alert-actions">
-                      <motion.button
+                      <button
                         className="expand-btn"
-                        animate={{ rotate: expandedAlertId === alert._id ? 180 : 0 }}
+                        style={{ transform: expandedAlertId === alert._id ? 'rotate(180deg)' : 'rotate(0deg)' }}
                       >
                         ▼
-                      </motion.button>
+                      </button>
                     </div>
                   </div>
                   
-                  <AnimatePresence>
                     {expandedAlertId === alert._id && (
-                      <motion.div 
+                      <div 
                         className="alert-details"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.3 }}
                       >
                         <div className="detail-group">
                           <div className="detail-item">
@@ -469,34 +457,28 @@ const Monitoring: FC = () => {
                         </div>
                         <div className="detail-actions">
                           {alert.status !== 'investigating' && (
-                            <motion.button 
+                            <button 
                               className="action-btn investigate"
                               onClick={() => handleUpdateStatus(alert._id, 'investigating')}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Investigate
-                            </motion.button>
+                            </button>
                           )}
                           {alert.status !== 'mitigated' && (
-                            <motion.button 
+                            <button 
                               className="action-btn mitigate"
                               onClick={() => handleUpdateStatus(alert._id, 'mitigated')}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Mitigate
-                            </motion.button>
+                            </button>
                           )}
                           {alert.status !== 'resolved' && (
-                            <motion.button 
+                            <button 
                               className="action-btn resolve"
                               onClick={() => handleUpdateStatus(alert._id, 'resolved')}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Resolve
-                            </motion.button>
+                            </button>
                           )}
                           {isBlocked(alert.source) ? (
                             <div className="blocked-indicator">
@@ -504,46 +486,36 @@ const Monitoring: FC = () => {
                               <button className="inline-unblock" onClick={(e) => { e.stopPropagation(); handleUnblockIP(alert.source); }}>Unblock</button>
                             </div>
                           ) : (
-                            <motion.button 
+                            <button 
                               className="action-btn block"
                               onClick={(e) => { e.stopPropagation(); handleBlockIP(alert.source); }}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Block IP
-                            </motion.button>
+                            </button>
                           )}
                         </div>
-                      </motion.div>
+                      </div>
                     )}
-                  </AnimatePresence>
-                </motion.div>
+                </div>
               ))
             ) : (
-              <motion.div 
+              <div 
                 className="no-results"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
               >
                 <p>No alerts match your current filters</p>
-                <motion.button 
+                <button 
                   className="reset-btn"
                   onClick={() => {
                     setFilters({ 
                       severity: [], 
                       status: [], 
-                      dateRange: {
-                        from: new Date(Date.now() - 24 * 60 * 60 * 1000),
-                        to: new Date()
-                      }
+                      dateRange: undefined
                     });
                     setSearchTerm('');
                   }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
                 >
                   Reset Filters
-                </motion.button>
+                </button>
               </motion.div>
             )}
           </div>

@@ -59,8 +59,8 @@ const EventsLog: FC = () => {
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
-          // Limit to last 200 packets to prevent lag
-          const limitedData = Array.isArray(data) ? data.slice(0, 200) : data;
+          // Limit to last 50 packets to prevent lag (aggressive limit for presentation)
+          const limitedData = Array.isArray(data) ? data.slice(0, 50) : data;
           setPackets(limitedData);
         } else {
           const error = await response.text();
@@ -143,12 +143,12 @@ const EventsLog: FC = () => {
         
         updateTimeoutRef.current = setTimeout(() => {
           setPackets(prev => {
-            // Add pending packets and limit to last 200 packets to prevent lag
+            // Add pending packets and limit to last 50 packets to prevent lag (aggressive for presentation)
             const newPackets = [...pendingPacketsRef.current, ...prev];
             pendingPacketsRef.current = [];
-            return newPackets.slice(0, 200); // Keep only last 200 packets
+            return newPackets.slice(0, 50); // Keep only last 50 packets
           });
-        }, 500); // Batch updates every 500ms
+        }, 1000); // Batch updates every 1 second (less frequent for better performance)
         
         return prev;
       });
@@ -407,12 +407,9 @@ const EventsLog: FC = () => {
               </tr>
             </thead>
             <tbody>
-              {packets.map((packet, index) => (
-                <motion.tr
+              {packets.map((packet) => (
+                <tr
                   key={packet._id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.05 * index }}
                   className={selectedRows.includes(packet._id) ? 'selected' : ''}
                 >
                   <td>
@@ -437,7 +434,7 @@ const EventsLog: FC = () => {
                   <td>{packet.frequency}</td>
                   <td>{packet.start_bytes}</td>
                   <td>{packet.end_bytes}</td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </motion.table>
