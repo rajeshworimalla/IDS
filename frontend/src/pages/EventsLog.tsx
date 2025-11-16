@@ -24,15 +24,20 @@ const EventsLog: FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [scanningState, setScanningState] = useState<'idle' | 'starting' | 'scanning' | 'stopping'>('idle');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  // Removed unused dateRange state
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Fetch packets on component mount
   useEffect(() => {
     const fetchPackets = async () => {
       try {
+        setIsLoading(true);
+        setError(null);
         const token = authService.getToken();
         if (!token) {
           console.error('No authentication token found');
+          setError('Not authenticated. Please login.');
+          setIsLoading(false);
           return;
         }
 
@@ -48,14 +53,18 @@ const EventsLog: FC = () => {
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
-          const limitedData = Array.isArray(data) ? data.slice(0, 50) : data;
+          const limitedData = Array.isArray(data) ? data.slice(0, 50) : [];
           setPackets(limitedData);
         } else {
-          const error = await response.text();
-          console.error('Failed to fetch packets:', error);
+          const errorText = await response.text();
+          console.error('Failed to fetch packets:', errorText);
+          setError(`Failed to load packets: ${response.status}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error fetching packets:', error);
+        setError(`Network error: ${error.message || 'Failed to connect to backend'}`);
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -271,11 +280,56 @@ const EventsLog: FC = () => {
     }
   };
 
+  // Show error state
+  if (error && !isLoading) {
+    return (
+      <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh', display: 'flex' }}>
+        <Navbar />
+        <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px', flex: 1 }}>
+          <h1 style={{ color: '#fff', marginBottom: '1.5rem', fontSize: '2rem' }}>Traffic Collector</h1>
+          <div style={{ 
+            background: '#ff4d4f', 
+            color: '#fff', 
+            padding: '1rem', 
+            borderRadius: '8px',
+            marginBottom: '1rem'
+          }}>
+            <strong>Error:</strong> {error}
+          </div>
+          <button 
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '0.5rem 1.5rem',
+              borderRadius: '6px',
+              border: 'none',
+              background: '#3699ff',
+              color: '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            Reload Page
+          </button>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh' }}>
+    <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh', display: 'flex' }}>
       <Navbar />
-      <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px' }}>
+      <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px', flex: 1 }}>
         <h1 style={{ color: '#fff', marginBottom: '1.5rem', fontSize: '2rem' }}>Traffic Collector</h1>
+        
+        {isLoading && (
+          <div style={{ 
+            textAlign: 'center', 
+            padding: '3rem', 
+            color: '#999',
+            fontSize: '1.1rem'
+          }}>
+            Loading packets...
+          </div>
+        )}
         
         <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
@@ -360,28 +414,29 @@ const EventsLog: FC = () => {
           )}
         </div>
 
-        <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#0d1117', borderBottom: '1px solid #333' }}>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={selectedRows.length === packets.length && packets.length > 0}
-                    onChange={handleSelectAll}
-                  />
-                </th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Status</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Date</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Source IP</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Dest IP</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Protocol</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Description</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Frequency</th>
-              </tr>
-            </thead>
-            <tbody>
-              {packets.length === 0 ? (
+        {!isLoading && (
+          <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#0d1117', borderBottom: '1px solid #333' }}>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedRows.length === packets.length && packets.length > 0}
+                      onChange={handleSelectAll}
+                    />
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Status</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Date</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Source IP</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Dest IP</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Protocol</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Description</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Frequency</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packets.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: '#999' }}>
                     {scanningState === 'scanning' ? (
@@ -440,9 +495,10 @@ const EventsLog: FC = () => {
                   );
                 })
               )}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {showResetConfirm && (
           <div 
