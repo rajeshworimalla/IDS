@@ -5,6 +5,7 @@ import pandas as pd
 from typing import List, Dict, Any
 from sklearn.base import BaseEstimator
 import joblib
+from attack_detectors import comprehensive_detector
 
 app = Flask(__name__)
 
@@ -172,12 +173,39 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
     
     # Port and flow features
     description = packet.get('description', '')
+    dest_port = None
     if '->' in description:
         try:
             dest_port = int(description.split('->')[1].strip())
             features['Destination Port'] = dest_port
         except:
             pass
+    
+    # Comprehensive attack detection features
+    source_ip = packet.get('start_ip', '')
+    dest_ip = packet.get('end_ip', '')
+    protocol = packet.get('protocol', 'TCP')
+    
+    # Get comprehensive attack detection results
+    attack_detection = None
+    if source_ip and dest_ip:
+        attack_detection = comprehensive_detector.analyze_packet(packet)
+        
+        # Enhance ML features based on attack detection
+        if attack_detection:
+            # Port scan features
+            if attack_detection['port_scan_features']['is_port_scan']:
+                features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
+                                                attack_detection['port_scan_features']['packets_per_second'])
+                features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                  attack_detection['port_scan_features']['unique_ports'])
+            
+            # DoS features
+            if attack_detection['dos_features']['is_dos']:
+                features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
+                                                attack_detection['dos_features']['packets_per_second'])
+                features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                    attack_detection['dos_features']['packet_count'])
     
     # Calculate bulk features
     if start_bytes > 0:
@@ -266,15 +294,73 @@ def predict():
                 multiclass_pred = multiclass_model.predict(features)[0]
                 print(f"Multiclass prediction: {multiclass_pred}")
                 
-                # Map predictions to labels
+                # Map predictions to labels (6 attack types: normal, dos, probe, r2l, u2r, brute_force)
                 binary_label = 'malicious' if binary_pred == 1 else 'benign'
                 attack_type = {
                     0: 'normal',
                     1: 'dos',
                     2: 'probe',
                     3: 'r2l',
-                    4: 'u2r'
+                    4: 'u2r',
+                    5: 'brute_force'  # 6th attack type
                 }.get(multiclass_pred, 'unknown')
+                
+                # CRITICAL: Comprehensive attack detection override
+                # ALWAYS mark as malicious if ANY detector says it's an attack
+                # Even if ML model can't determine the type, we still know it's an attack
+                if attack_detection:
+                    if attack_detection['is_malicious']:
+                        # Override ML prediction with detector results
+                        detected_attack_type = attack_detection['attack_type']
+                        detected_confidence = attack_detection['confidence']
+                        
+                        print(f"🚨 ATTACK DETECTED for {source_ip}: {detected_attack_type} "
+                              f"(confidence: {detected_confidence:.2f})")
+                        
+                        # ALWAYS mark as malicious if detector says so
+                        binary_label = 'malicious'
+                        attack_type = detected_attack_type
+                        
+                        # Use detector confidence if higher than ML
+                        if detected_confidence > binary_confidence:
+                            binary_confidence = detected_confidence
+                        if detected_confidence > multiclass_confidence:
+                            multiclass_confidence = detected_confidence
+                        
+                        # Log specific attack details
+                        if detected_attack_type == 'probe':
+                            ps_features = attack_detection['port_scan_features']
+                            print(f"  Port Scan: {ps_features['unique_ports']} ports, "
+                                  f"{ps_features['packets_per_second']:.2f} pps")
+                        elif detected_attack_type == 'dos':
+                            dos_features = attack_detection['dos_features']
+                            print(f"  DoS: {dos_features['packets_per_second']:.2f} pps, "
+                                  f"{dos_features['packet_count']} packets")
+                        elif detected_attack_type == 'r2l':
+                            r2l_features = attack_detection['r2l_features']
+                            print(f"  R2L: {r2l_features['failed_logins']} failed logins, "
+                                  f"{r2l_features['privilege_attempts']} privilege attempts")
+                        elif detected_attack_type == 'u2r':
+                            u2r_features = attack_detection['u2r_features']
+                            print(f"  U2R: {u2r_features['root_commands']} root commands, "
+                                  f"{u2r_features['setuid_attempts']} setuid attempts")
+                        elif detected_attack_type == 'brute_force':
+                            bf_features = attack_detection['brute_force_features']
+                            print(f"  Brute Force: {bf_features['failed_attempts']} failed logins, "
+                                  f"{bf_features['login_attempts']} total attempts")
+                        elif detected_attack_type == 'unknown_attack':
+                            print(f"  Unknown Attack Type - but definitely malicious!")
+                            # Boost confidence for unknown attacks
+                            binary_confidence = max(binary_confidence, 0.7)
+                            multiclass_confidence = max(multiclass_confidence, 0.65)
+                    
+                    # Even if ML says benign but detector says attack, trust the detector
+                    elif binary_label == 'benign' and attack_detection['is_malicious']:
+                        print(f"⚠️ ML said benign but detector found attack - trusting detector!")
+                        binary_label = 'malicious'
+                        attack_type = attack_detection['attack_type']
+                        binary_confidence = max(binary_confidence, attack_detection['confidence'])
+                        multiclass_confidence = max(multiclass_confidence, attack_detection['confidence'])
                 
                 # Get confidence scores safely
                 try:
@@ -287,20 +373,38 @@ def predict():
                 except:
                     multiclass_confidence = 0.5
 
-                # Get probabilities for all attack types
+                # Get probabilities for all attack types (6 types: normal, dos, probe, r2l, u2r, brute_force)
                 attack_type_probs = {}
                 try:
                     multiclass_probs = multiclass_model.predict_proba(features)[0]
-                    attack_type_names = ['normal', 'dos', 'probe', 'r2l', 'u2r']
+                    attack_type_names = ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']
                     for i, prob in enumerate(multiclass_probs):
                         if i < len(attack_type_names):
                             attack_type_probs[attack_type_names[i]] = float(prob)
+                    # If model only has 5 classes, add brute_force with 0
+                    if len(multiclass_probs) < 6:
+                        attack_type_probs['brute_force'] = 0.0
                 except:
                     # Fallback: set probability for predicted type only
                     attack_type_probs = {attack_type: multiclass_confidence}
-                    for at in ['normal', 'dos', 'probe', 'r2l', 'u2r']:
+                    for at in ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']:
                         if at not in attack_type_probs:
                             attack_type_probs[at] = 0.0
+                
+                # If detector found an attack, boost its probability
+                if attack_detection and attack_detection['is_malicious']:
+                    detected_type = attack_detection['attack_type']
+                    if detected_type in attack_type_probs:
+                        # Boost the detected attack type probability
+                        attack_type_probs[detected_type] = max(
+                            attack_type_probs[detected_type],
+                            attack_detection['confidence']
+                        )
+                    elif detected_type == 'unknown_attack':
+                        # For unknown attacks, distribute probability across all attack types
+                        attack_prob = attack_detection['confidence'] / 5  # Divide among 5 known types
+                        for at in ['dos', 'probe', 'r2l', 'u2r', 'brute_force']:
+                            attack_type_probs[at] = max(attack_type_probs.get(at, 0), attack_prob)
 
                 results.append({
                     'packet_id': packet.get('_id', ''),
