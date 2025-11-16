@@ -143,28 +143,6 @@ const Blocker: FC = () => {
     if (single) return [pattern];
     return [];
   }
-  function guessScheme(port: number): 'http'|'https' { return port === 443 ? 'https' : 'http'; }
-  async function isReachable(url: string, timeoutMs = 1500): Promise<boolean> {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
-      return true;
-    } catch {
-      return false;
-    } finally { clearTimeout(t); }
-  }
-  function limit(concurrency: number) {
-    const queue: { fn: () => Promise<any>; resolve: (v:any)=>void; reject: (e:any)=>void }[] = [];
-    let active = 0;
-    const next = () => {
-      if (active >= concurrency || queue.length === 0) return;
-      active++;
-      const { fn, resolve, reject } = queue.shift()!;
-      fn().then(resolve, reject).finally(() => { active--; next(); });
-    };
-    return (fn: () => Promise<any>) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
-  }
   async function handleScan() {
     const hosts = expandSubnet(subnet || guessSubnet());
     if (hosts.length === 0) { setScanStatus('Enter a /24 like 192.168.1.0/24 or 192.168.1.*'); return; }
@@ -436,7 +414,7 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                         <td className="site-ports">{site.ports.join(', ')}</td>
                         <td>
                           <div className="site-actions">
-                            {site.ports.map(p => {
+                            {site.ports.map((p: number) => {
                               const scheme = p === 443 ? 'https' : 'http';
                               const url = `${scheme}://${site.host}:${p}/`;
                               return (
