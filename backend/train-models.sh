@@ -14,12 +14,44 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+# Check for virtual environment (venv)
+if [ -d "venv" ]; then
+    echo "✅ Found virtual environment, activating it..."
+    source venv/bin/activate
+    PYTHON_CMD="python"
+    PIP_CMD="pip"
+elif [ -d "../venv" ]; then
+    echo "✅ Found virtual environment in parent directory, activating it..."
+    source ../venv/bin/activate
+    PYTHON_CMD="python"
+    PIP_CMD="pip"
+else
+    echo "⚠️  No virtual environment found. Using system Python..."
+    PYTHON_CMD="python3"
+    PIP_CMD="pip3"
+fi
+
 # Check if required packages are installed
 echo "📦 Checking dependencies..."
-python3 -c "import sklearn, numpy, pandas, joblib" 2>/dev/null
+$PYTHON_CMD -c "import sklearn, numpy, pandas, joblib" 2>/dev/null
 if [ $? -ne 0 ]; then
     echo "⚠️  Missing dependencies. Installing..."
-    pip3 install scikit-learn numpy pandas joblib
+    
+    # Try installing with --user first (safer)
+    $PIP_CMD install --user scikit-learn numpy pandas joblib 2>/dev/null
+    
+    # If that fails, try with --break-system-packages (Ubuntu 22.04+)
+    if [ $? -ne 0 ]; then
+        echo "   Trying with --break-system-packages flag..."
+        $PIP_CMD install --break-system-packages scikit-learn numpy pandas joblib
+    fi
+    
+    # If still fails, try apt packages
+    if [ $? -ne 0 ]; then
+        echo "   Trying system packages via apt..."
+        sudo apt update
+        sudo apt install -y python3-sklearn python3-numpy python3-pandas python3-joblib
+    fi
 fi
 
 # Backup existing models
@@ -33,7 +65,7 @@ fi
 # Run training
 echo ""
 echo "🎯 Starting training..."
-python3 train_models.py
+$PYTHON_CMD train_models.py
 
 if [ $? -eq 0 ]; then
     echo ""
