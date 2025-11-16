@@ -30,10 +30,7 @@ const Monitoring: FC = () => {
   const [filters, setFilters] = useState<FilterState>({
     severity: [],
     status: [],
-    dateRange: {
-      from: new Date(Date.now() - 24 * 60 * 60 * 1000), // 24 hours ago
-      to: new Date() // now
-    }
+    dateRange: undefined // No date range by default - show all alerts
   });
   const [showBlockedIPs, setShowBlockedIPs] = useState(false);
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
@@ -66,15 +63,14 @@ const Monitoring: FC = () => {
       
       // Prepare filter parameters for API
       const apiFilters: any = {
-        // Backend defaults to only critical+medium when severity is omitted.
-        // To show results by default, include all severities when none are selected.
+        // By default, show all severities (critical, medium, low) to see all alerts
         severity: (currentFilters.severity && currentFilters.severity.length > 0)
           ? currentFilters.severity
-          : ['critical', 'medium', 'low'],
+          : ['critical', 'high', 'medium', 'low'], // Include all severities by default
         status: currentFilters.status
       };
       
-      // Add date range if specified
+      // Add date range if specified (no date range by default = show all)
       if (currentFilters.dateRange?.from && currentFilters.dateRange?.to) {
         apiFilters.from = currentFilters.dateRange.from;
         apiFilters.to = currentFilters.dateRange.to;
