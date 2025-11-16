@@ -79,14 +79,14 @@
       const until = getBanUntil();
       if (until > Date.now()) {
         const left = secondsLeft(until);
-        const message = `Temporarily banned. Try again in ${left}s.`;
+        const message = `Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`;
         showMessage(message, false);
         form.querySelector('button[type="submit"]').disabled = true;
-        console.log('[BAN UI] Showing ban message:', message);
+        console.log('[BAN UI] Showing ban message:', message, 'seconds left:', left);
       } else {
         form.querySelector('button[type="submit"]').disabled = false;
         // Clear any existing ban message if ban expired
-        if (messageEl.textContent.includes('Temporarily banned')) {
+        if (messageEl.textContent.includes('Temporarily blocked') || messageEl.textContent.includes('Temporarily banned')) {
           messageEl.className = 'msg';
           messageEl.textContent = '';
         }
@@ -129,12 +129,17 @@
         const data = await res.json();
         console.log('[LOGIN-FAILED] Backend response:', data);
         if (data && data.banned) {
-          console.log('[LOGIN-FAILED] User is banned! TTL:', data.ttlSeconds);
-          const until = setBanFor(data.ttlSeconds || 30);
+          console.log('[LOGIN-FAILED] ✅ User is banned! TTL:', data.ttlSeconds, 'seconds');
+          const ttl = data.ttlSeconds || 30;
+          const until = setBanFor(ttl);
+          console.log('[LOGIN-FAILED] Ban set until:', new Date(until).toLocaleTimeString());
           updateBanUI();
           scheduleBanTick();
+          // Immediately show the ban message
+          const left = secondsLeft(until);
+          showMessage(`Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`, false);
         } else if (data) {
-          console.log(`[LOGIN-FAILED] Count: ${data.count}/${data.threshold}, Not banned yet`);
+          console.log(`[LOGIN-FAILED] Count: ${data.count}/${data.threshold}, Not banned yet (need ${data.threshold - data.count} more failures)`);
         }
         return data;
       } catch (e) {
@@ -143,9 +148,12 @@
         const count = bumpLocalFailCount();
         if (count >= 3) {
           console.log('[LOGIN-FAILED] Local fallback: banning after 3 failures');
-          setBanFor(30);
+          const until = setBanFor(30);
           updateBanUI();
           scheduleBanTick();
+          // Immediately show the ban message
+          const left = secondsLeft(until);
+          showMessage(`Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`, false);
         }
         return null;
       }
@@ -162,11 +170,17 @@
         if (res.ok) {
           const data = await res.json();
           if (data.banned && data.secondsLeft > 0) {
+            console.log('[CHECK-BAN] User is banned, syncing with backend. Seconds left:', data.secondsLeft);
             // Sync with backend ban status
             const until = Date.now() + data.secondsLeft * 1000;
             localStorage.setItem('ids.loginBanUntil', String(until));
             updateBanUI();
             scheduleBanTick();
+            // Immediately show the ban message
+            const left = secondsLeft(until);
+            showMessage(`Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`, false);
+          } else if (!data.banned) {
+            console.log('[CHECK-BAN] User is not banned');
           }
         }
       } catch (e) {
@@ -176,8 +190,12 @@
     }
 
     // Initialize ban state on load
-    updateBanUI();
-    if (getBanUntil() > Date.now()) scheduleBanTick();
+    const initialBanUntil = getBanUntil();
+    if (initialBanUntil > Date.now()) {
+      console.log('[INIT] User is already banned, showing ban message');
+      updateBanUI();
+      scheduleBanTick();
+    }
     // Also check backend for current ban status
     checkBanStatus();
 
@@ -208,22 +226,35 @@
         console.warn(`[${ts}] login failed: user="${username}"`);
         // Notify IDS backend for rate-limiting/ban FIRST
         const banData = await reportFailedLogin();
-        // If banned, show ban message instead of error
-        if (banData && banData.banned) {
+        console.log('[LOGIN] Ban data received:', banData);
+        
+        // Check if banned (either from backend or local storage)
+        const until = getBanUntil();
+        const isBanned = (banData && banData.banned) || (until > Date.now());
+        
+        if (isBanned) {
           console.log('[LOGIN] User is banned, showing ban message');
-          // updateBanUI() is already called inside reportFailedLogin(), but ensure it's shown
+          // Ensure ban is set in localStorage if backend says banned
+          if (banData && banData.banned && banData.ttlSeconds) {
+            setBanFor(banData.ttlSeconds);
+          }
+          // Update UI and show message
           updateBanUI();
-          // Force show the message in case updateBanUI didn't trigger
-          const until = getBanUntil();
-          if (until > Date.now()) {
-            const left = secondsLeft(until);
-            showMessage(`Temporarily banned. Try again in ${left}s.`, false);
+          scheduleBanTick();
+          // Force show the message with current time remaining
+          const currentUntil = getBanUntil();
+          if (currentUntil > Date.now()) {
+            const left = secondsLeft(currentUntil);
+            const banMessage = `Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`;
+            showMessage(banMessage, false);
+            console.log('[LOGIN] Showing ban message:', banMessage);
           }
         } else {
           // Only show error message if not banned
           showMessage('Invalid username or password.', false);
           if (banData && banData.count !== undefined) {
-            console.log(`[LOGIN] Failed attempt ${banData.count}/${banData.threshold || 3}`);
+            const remaining = (banData.threshold || 3) - banData.count;
+            console.log(`[LOGIN] Failed attempt ${banData.count}/${banData.threshold || 3} (${remaining} remaining before ban)`);
           }
         }
       }
