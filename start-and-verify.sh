@@ -145,6 +145,7 @@ sudo pkill -9 -f "node dist/index.js" >/dev/null 2>&1 || true
 # Also kill anything using port 5001
 sudo lsof -ti:5001 2>/dev/null | xargs sudo kill -9 2>/dev/null || true
 sleep 2
+echo ""  # Add blank line for cleaner output
 
 # Build if needed
 if [ ! -d "dist" ] || [ ! -f "dist/index.js" ]; then
@@ -163,9 +164,9 @@ echo "   Starting backend server..."
 > /tmp/ids-backend.log
 if command -v sudo >/dev/null 2>&1; then
     # Use nohup to ensure process survives and redirect properly
-    nohup sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
+    nohup sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 </dev/null &
 else
-    nohup node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
+    nohup node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 </dev/null &
 fi
 # Note: $! might be sudo's PID, so we'll check by process pattern instead
 sleep 4
@@ -291,7 +292,7 @@ sleep 1
 
 # Start demo site
 echo "   Starting demo site..."
-python3 -m http.server 8080 > /tmp/ids-demo-site.log 2>&1 &
+nohup python3 -m http.server 8080 > /tmp/ids-demo-site.log 2>&1 </dev/null &
 DEMO_PID=$!
 sleep 2
 
