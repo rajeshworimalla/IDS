@@ -45,7 +45,9 @@ export async function rateLimitMiddleware(req: Request, res: Response, next: Nex
     console.log(`[RATE LIMIT] Client IP: ${ip}`);
     
     // Skip rate limiting for localhost/127.0.0.1 (frontend on same machine)
-    if (ip === '127.0.0.1' || ip === 'localhost' || ip === '::1' || ip === '::ffff:127.0.0.1') {
+    // EXCEPT for login-failed endpoint (for demo site testing)
+    if ((ip === '127.0.0.1' || ip === 'localhost' || ip === '::1' || ip === '::ffff:127.0.0.1') && 
+        !path.startsWith('/api/events/login-failed')) {
       console.log('[RATE LIMIT] Skipping rate limit for localhost');
       return next();
     }

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { incrWithTTL, redis } from '../services/redis';
 import { enforceTempBan } from '../services/blocker';
+import { getPolicy } from '../services/policy';
 
 const router = express.Router();
 // Allow calls from any LAN site (CORS is scoped to this router)
@@ -36,8 +37,14 @@ router.post('/login-failed', async (req, res) => {
     const hostRaw = String(req.body?.host || req.hostname || 'unknown');
     const host = hostRaw.replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 120) || 'unknown';
 
-    // Bucketed counter in Redis: per host+ip
-    const windowSeconds = 60; // 1 minute window
+    // Get policy settings for rate limiting
+    const policy = await getPolicy();
+    const windowSeconds = policy.windowSeconds || 60;
+    
+    // Use a lower threshold for login failures (more sensitive)
+    // Default to 3 failed attempts, but can be adjusted via policy
+    const threshold = Math.min(3, Math.max(1, Math.floor(policy.threshold / 10))); // 10% of main threshold, min 1, max 3
+    
     const bucket = Math.floor(Date.now() / 1000 / windowSeconds);
     const key = `ids:loginfail:${host}:${ip}:${bucket}`;
 
@@ -48,23 +55,26 @@ router.post('/login-failed', async (req, res) => {
       count = incrMem(key, windowSeconds + 1);
     }
 
-    // Threshold for auto-ban on login failures
-    const threshold = 3;
+    console.log(`[LOGIN-FAILED] IP: ${ip}, Host: ${host}, Count: ${count}/${threshold}, Window: ${windowSeconds}s`);
+
     let banned = false;
+    const banSeconds = policy.banMinutes ? policy.banMinutes * 60 : 30; // Use policy ban duration or default 30s
 
     if (count >= threshold) {
       try {
-        // Temp ban for exactly 30 seconds for this IP
-        await enforceTempBan(ip, 'login-fail', { ttlSeconds: 30 });
+        // Temp ban using policy settings
+        await enforceTempBan(ip, 'login-fail', { ttlSeconds: banSeconds });
         banned = true;
-        try { await redis.setex(`ids:loginfail:cooldown:${ip}`, 30, '1'); } catch {}
+        try { await redis.setex(`ids:loginfail:cooldown:${ip}`, banSeconds, '1'); } catch {}
+        console.log(`[LOGIN-FAILED] ✅ Auto-banned IP ${ip} for ${banSeconds}s (${count} failed attempts)`);
       } catch (e) {
         // Even if enforcement storage fails, still return banned so clients can honor
         banned = true;
+        console.error(`[LOGIN-FAILED] ❌ Failed to enforce ban for ${ip}:`, e);
       }
     }
 
-    return res.json({ ok: true, ip, host, count, banned, ttlSeconds: banned ? 30 : 0 });
+    return res.json({ ok: true, ip, host, count, threshold, banned, ttlSeconds: banned ? banSeconds : 0 });
   } catch (e: any) {
     console.error('login-failed handler error:', e);
     // Best-effort response rather than a hard failure for demo integration
