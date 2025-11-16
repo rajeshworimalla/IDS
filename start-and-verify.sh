@@ -140,10 +140,10 @@ cd "$SCRIPT_DIR/backend" || exit 1
 
 # Kill any existing backend more aggressively
 echo "   Stopping any existing backend processes..."
-pkill -9 -f "node dist/index.js" >/dev/null 2>&1 || true
-sudo pkill -9 -f "node dist/index.js" >/dev/null 2>&1 || true
+{ pkill -9 -f "node dist/index.js" 2>&1 || true; } >/dev/null 2>&1
+{ sudo pkill -9 -f "node dist/index.js" 2>&1 || true; } >/dev/null 2>&1
 # Also kill anything using port 5001
-sudo lsof -ti:5001 2>/dev/null | xargs sudo kill -9 2>/dev/null || true
+{ sudo lsof -ti:5001 2>/dev/null | xargs sudo kill -9 2>/dev/null || true; } >/dev/null 2>&1
 sleep 2
 echo ""  # Add blank line for cleaner output
 
@@ -165,10 +165,13 @@ echo "   Starting backend server..."
 if command -v sudo >/dev/null 2>&1; then
     # Use nohup to ensure process survives and redirect properly
     nohup sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 </dev/null &
+    BACKEND_PID=$!
 else
     nohup node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 </dev/null &
+    BACKEND_PID=$!
 fi
-# Note: $! might be sudo's PID, so we'll check by process pattern instead
+# Disown the process to prevent shell from reporting job status
+disown $BACKEND_PID 2>/dev/null || true
 sleep 4
 
 # Check if process is running by pattern (more reliable than PID with sudo)
@@ -269,6 +272,7 @@ fi
 echo "   Starting web dev server..."
 nohup npm run dev > /tmp/ids-frontend.log 2>&1 </dev/null &
 FRONTEND_PID=$!
+disown $FRONTEND_PID 2>/dev/null || true
 sleep 8
 
 # Verify frontend
@@ -320,6 +324,7 @@ sleep 1
 echo "   Starting demo site..."
 nohup python3 -m http.server 8080 > /tmp/ids-demo-site.log 2>&1 </dev/null &
 DEMO_PID=$!
+disown $DEMO_PID 2>/dev/null || true
 sleep 2
 
 # Verify demo site
