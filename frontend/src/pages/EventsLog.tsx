@@ -272,29 +272,6 @@ const EventsLog: FC = () => {
           </div>
         )}
         
-        <div className="events-controls">
-          <input
-            type="text"
-            id="search-input"
-            placeholder="Search packets..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyPress={handleKeyPress}
-            className="search-input"
-          />
-          <button onClick={handleSearch} className="btn-primary">Search</button>
-          <button onClick={() => setShowResetConfirm(true)} className="btn-danger">Reset</button>
-          {scanningState === 'idle' ? (
-            <button onClick={handleStartScanning} className="btn-success">Start Scanning</button>
-          ) : scanningState === 'starting' ? (
-            <button disabled className="btn-disabled">Starting...</button>
-          ) : scanningState === 'scanning' ? (
-            <button onClick={handleStopScanning} className="btn-danger">Stop Scanning</button>
-          ) : (
-            <button disabled className="btn-disabled">Stopping...</button>
-          )}
-        </div>
-
         {!isLoading && !error && (
           <>
             <div className="events-controls">
