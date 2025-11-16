@@ -18,6 +18,8 @@ interface Packet {
 }
 
 const EventsLog: FC = () => {
+  console.log('[EventsLog] Component rendering...');
+  
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [packets, setPackets] = useState<Packet[]>([]);
@@ -29,11 +31,13 @@ const EventsLog: FC = () => {
 
   // Fetch packets on component mount
   useEffect(() => {
+    console.log('[EventsLog] useEffect - fetching packets');
     const fetchPackets = async () => {
       try {
         setIsLoading(true);
         setError(null);
         const token = authService.getToken();
+        console.log('[EventsLog] Token exists:', !!token);
         if (!token) {
           console.error('No authentication token found');
           setError('Not authenticated. Please login.');
@@ -50,6 +54,7 @@ const EventsLog: FC = () => {
           credentials: 'include'
         });
 
+        console.log('[EventsLog] Response status:', response.status);
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
@@ -65,6 +70,7 @@ const EventsLog: FC = () => {
         setError(`Network error: ${error.message || 'Failed to connect to backend'}`);
       } finally {
         setIsLoading(false);
+        console.log('[EventsLog] Loading complete');
       }
     };
 
@@ -73,9 +79,10 @@ const EventsLog: FC = () => {
 
   // Initialize socket connection
   useEffect(() => {
+    console.log('[EventsLog] useEffect - initializing socket');
     const token = authService.getToken();
     if (!token) {
-      console.error('No authentication token found');
+      console.error('No authentication token found for socket');
       return;
     }
 
@@ -189,8 +196,6 @@ const EventsLog: FC = () => {
     }
   };
 
-  // Removed unused handleDateFilter function
-
   const handleSearch = async () => {
     try {
       const token = authService.getToken();
@@ -244,8 +249,6 @@ const EventsLog: FC = () => {
     }
   };
 
-  // Removed unused getStatusText function
-
   const handleStartScanning = () => {
     if (scanningState !== 'idle') return;
 
@@ -280,12 +283,14 @@ const EventsLog: FC = () => {
     }
   };
 
+  console.log('[EventsLog] Rendering with state:', { isLoading, error, packetsCount: packets.length });
+
   // Show error state
   if (error && !isLoading) {
     return (
-      <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh', display: 'flex' }}>
+      <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh', display: 'flex', position: 'relative', zIndex: 1 }}>
         <Navbar />
-        <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px', flex: 1 }}>
+        <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px', flex: 1, position: 'relative', zIndex: 1 }}>
           <h1 style={{ color: '#fff', marginBottom: '1.5rem', fontSize: '2rem' }}>Traffic Collector</h1>
           <div style={{ 
             background: '#ff4d4f', 
@@ -315,10 +320,24 @@ const EventsLog: FC = () => {
   }
 
   return (
-    <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh', display: 'flex' }}>
+    <div className="events-log-page" style={{ background: '#0e1116', minHeight: '100vh', display: 'flex', position: 'relative', zIndex: 1 }}>
       <Navbar />
-      <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px', flex: 1 }}>
-        <h1 style={{ color: '#fff', marginBottom: '1.5rem', fontSize: '2rem' }}>Traffic Collector</h1>
+      <main className="events-log-content" style={{ background: '#0e1116', color: '#e6edf3', padding: '2rem', marginLeft: '240px', flex: 1, position: 'relative', zIndex: 1 }}>
+        <h1 style={{ color: '#fff', marginBottom: '1.5rem', fontSize: '2rem', fontWeight: 'bold' }}>Traffic Collector</h1>
+        
+        {/* DEBUG: Always visible test box */}
+        <div style={{
+          background: '#ff0000',
+          color: '#fff',
+          padding: '1rem',
+          marginBottom: '1rem',
+          borderRadius: '8px',
+          border: '3px solid #fff',
+          fontSize: '1.2rem',
+          fontWeight: 'bold'
+        }}>
+          DEBUG: Page is rendering! Loading: {isLoading ? 'YES' : 'NO'}, Packets: {packets.length}, Error: {error || 'none'}
+        </div>
         
         {isLoading && (
           <div style={{ 
@@ -331,173 +350,175 @@ const EventsLog: FC = () => {
           </div>
         )}
         
-        <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
-            type="text"
-            id="search-input"
-            placeholder="Search packets..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyPress={handleKeyPress}
-            style={{
-              padding: '0.5rem 1rem',
-              borderRadius: '6px',
-              border: '1px solid #333',
-              background: '#1a1a1a',
-              color: '#fff',
-              flex: '1',
-              minWidth: '200px'
-            }}
-          />
-          <button
-            onClick={handleSearch}
-            style={{
-              padding: '0.5rem 1.5rem',
-              borderRadius: '6px',
-              border: 'none',
-              background: '#3699ff',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            Search
-          </button>
-          <button
-            onClick={() => setShowResetConfirm(true)}
-            style={{
-              padding: '0.5rem 1.5rem',
-              borderRadius: '6px',
-              border: 'none',
-              background: '#ff4d4f',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            Reset
-          </button>
-          {scanningState === 'idle' ? (
-            <button
-              onClick={handleStartScanning}
-              style={{
-                padding: '0.5rem 1.5rem',
-                borderRadius: '6px',
-                border: 'none',
-                background: '#238636',
-                color: '#fff',
-                cursor: 'pointer'
-              }}
-            >
-              Start Scanning
-            </button>
-          ) : scanningState === 'starting' ? (
-            <button disabled style={{ padding: '0.5rem 1.5rem', opacity: 0.6 }}>
-              Starting...
-            </button>
-          ) : scanningState === 'scanning' ? (
-            <button
-              onClick={handleStopScanning}
-              style={{
-                padding: '0.5rem 1.5rem',
-                borderRadius: '6px',
-                border: 'none',
-                background: '#ff4d4f',
-                color: '#fff',
-                cursor: 'pointer'
-              }}
-            >
-              Stop Scanning
-            </button>
-          ) : (
-            <button disabled style={{ padding: '0.5rem 1.5rem', opacity: 0.6 }}>
-              Stopping...
-            </button>
-          )}
-        </div>
-
         {!isLoading && (
-          <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#0d1117', borderBottom: '1px solid #333' }}>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedRows.length === packets.length && packets.length > 0}
-                      onChange={handleSelectAll}
-                    />
-                  </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Status</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Date</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Source IP</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Dest IP</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Protocol</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Description</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Frequency</th>
-                </tr>
-              </thead>
-              <tbody>
-                {packets.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: '#999' }}>
-                    {scanningState === 'scanning' ? (
-                      <div>
-                        <p style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#fff' }}>📡 Scanning for packets...</p>
-                        <p style={{ fontSize: '0.9rem' }}>Waiting for network traffic. Try browsing the site or running an attack from Kali Linux.</p>
-                      </div>
-                    ) : scanningState === 'starting' ? (
-                      <p style={{ fontSize: '1.1rem', color: '#fff' }}>🚀 Starting packet capture...</p>
-                    ) : (
-                      <div>
-                        <p style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#fff' }}>No packets captured yet</p>
-                        <p style={{ fontSize: '0.9rem' }}>Click "Start Scanning" to begin capturing network traffic.</p>
-                      </div>
-                    )}
-                  </td>
-                </tr>
+          <>
+            <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                id="search-input"
+                placeholder="Search packets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={handleKeyPress}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  border: '1px solid #333',
+                  background: '#1a1a1a',
+                  color: '#fff',
+                  flex: '1',
+                  minWidth: '200px'
+                }}
+              />
+              <button
+                onClick={handleSearch}
+                style={{
+                  padding: '0.5rem 1.5rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#3699ff',
+                  color: '#fff',
+                  cursor: 'pointer'
+                }}
+              >
+                Search
+              </button>
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                style={{
+                  padding: '0.5rem 1.5rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#ff4d4f',
+                  color: '#fff',
+                  cursor: 'pointer'
+                }}
+              >
+                Reset
+              </button>
+              {scanningState === 'idle' ? (
+                <button
+                  onClick={handleStartScanning}
+                  style={{
+                    padding: '0.5rem 1.5rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#238636',
+                    color: '#fff',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Start Scanning
+                </button>
+              ) : scanningState === 'starting' ? (
+                <button disabled style={{ padding: '0.5rem 1.5rem', opacity: 0.6 }}>
+                  Starting...
+                </button>
+              ) : scanningState === 'scanning' ? (
+                <button
+                  onClick={handleStopScanning}
+                  style={{
+                    padding: '0.5rem 1.5rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#ff4d4f',
+                    color: '#fff',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Stop Scanning
+                </button>
               ) : (
-                packets.map((packet: Packet) => {
-                  const statusColor = getStatusColor(packet.status);
-                  const statusBg = statusColor === 'error' ? '#ff4d4f' : statusColor === 'warning' ? '#faad14' : '#52c41a';
-                  return (
-                    <tr
-                      key={packet._id}
-                      style={{
-                        borderBottom: '1px solid #333',
-                        background: selectedRows.includes(packet._id) ? '#1f2940' : 'transparent'
-                      }}
-                    >
-                      <td style={{ padding: '0.75rem' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedRows.includes(packet._id)}
-                          onChange={() => toggleRowSelection(packet._id)}
-                        />
-                      </td>
-                      <td style={{ padding: '0.75rem' }}>
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '0.25rem 0.5rem',
-                          borderRadius: '4px',
-                          background: statusBg,
-                          color: '#fff',
-                          fontSize: '0.85rem'
-                        }}>
-                          {packet.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{new Date(packet.date).toLocaleString()}</td>
-                      <td style={{ padding: '0.75rem', color: '#e6edf3', fontFamily: 'monospace' }}>{packet.start_ip}</td>
-                      <td style={{ padding: '0.75rem', color: '#e6edf3', fontFamily: 'monospace' }}>{packet.end_ip}</td>
-                      <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{packet.protocol}</td>
-                      <td style={{ padding: '0.75rem', color: '#e6edf3', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{packet.description}</td>
-                      <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{packet.frequency}</td>
-                    </tr>
-                  );
-                })
+                <button disabled style={{ padding: '0.5rem 1.5rem', opacity: 0.6 }}>
+                  Stopping...
+                </button>
               )}
-              </tbody>
-            </table>
-          </div>
+            </div>
+
+            <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#0d1117', borderBottom: '1px solid #333' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedRows.length === packets.length && packets.length > 0}
+                        onChange={handleSelectAll}
+                      />
+                    </th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Status</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Date</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Source IP</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Dest IP</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Protocol</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Description</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#fff', fontSize: '0.9rem' }}>Frequency</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {packets.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: '#999' }}>
+                        {scanningState === 'scanning' ? (
+                          <div>
+                            <p style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#fff' }}>📡 Scanning for packets...</p>
+                            <p style={{ fontSize: '0.9rem' }}>Waiting for network traffic. Try browsing the site or running an attack from Kali Linux.</p>
+                          </div>
+                        ) : scanningState === 'starting' ? (
+                          <p style={{ fontSize: '1.1rem', color: '#fff' }}>🚀 Starting packet capture...</p>
+                        ) : (
+                          <div>
+                            <p style={{ fontSize: '1.1rem', marginBottom: '10px', color: '#fff' }}>No packets captured yet</p>
+                            <p style={{ fontSize: '0.9rem' }}>Click "Start Scanning" to begin capturing network traffic.</p>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    packets.map((packet: Packet) => {
+                      const statusColor = getStatusColor(packet.status);
+                      const statusBg = statusColor === 'error' ? '#ff4d4f' : statusColor === 'warning' ? '#faad14' : '#52c41a';
+                      return (
+                        <tr
+                          key={packet._id}
+                          style={{
+                            borderBottom: '1px solid #333',
+                            background: selectedRows.includes(packet._id) ? '#1f2940' : 'transparent'
+                          }}
+                        >
+                          <td style={{ padding: '0.75rem' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={selectedRows.includes(packet._id)}
+                              onChange={() => toggleRowSelection(packet._id)}
+                            />
+                          </td>
+                          <td style={{ padding: '0.75rem' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '4px',
+                              background: statusBg,
+                              color: '#fff',
+                              fontSize: '0.85rem'
+                            }}>
+                              {packet.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{new Date(packet.date).toLocaleString()}</td>
+                          <td style={{ padding: '0.75rem', color: '#e6edf3', fontFamily: 'monospace' }}>{packet.start_ip}</td>
+                          <td style={{ padding: '0.75rem', color: '#e6edf3', fontFamily: 'monospace' }}>{packet.end_ip}</td>
+                          <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{packet.protocol}</td>
+                          <td style={{ padding: '0.75rem', color: '#e6edf3', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{packet.description}</td>
+                          <td style={{ padding: '0.75rem', color: '#e6edf3' }}>{packet.frequency}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {showResetConfirm && (
