@@ -1,14 +1,15 @@
 .events-log-page {
   display: flex;
   min-height: 100vh;
-  background-color: var(--primary-bg);
+  background-color: var(--primary-bg, #0e1116);
 }
 
 .events-log-content {
   flex: 1;
   margin-left: 240px;
   padding: 1rem;
-  color: var(--text-primary);
+  color: var(--text-primary, #e6edf3);
+  background-color: var(--primary-bg, #0e1116);
 }
 
 .events-header {

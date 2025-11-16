@@ -320,6 +320,7 @@ const EventsLog: FC = () => {
     <div className="events-log-page">
       <Navbar />
       <main className="events-log-content">
+        <h1 style={{ color: '#fff', marginBottom: '1rem' }}>Traffic Collector</h1>
         <div className="events-header">
           <div className="filter-container">
             <div className="filter-group">
