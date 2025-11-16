@@ -256,9 +256,17 @@ pkill -f "vite" >/dev/null 2>&1 || true
 pkill -f "electron" >/dev/null 2>&1 || true
 sleep 1
 
+# Check if dependencies are installed
+if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
+    echo "   Installing frontend dependencies..."
+    npm install > /tmp/ids-frontend-install.log 2>&1
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}   ⚠ npm install had issues, but continuing...${NC}"
+    fi
+fi
+
 # Start frontend
 echo "   Starting web dev server..."
-cd "$SCRIPT_DIR/frontend" || exit 1
 nohup npm run dev > /tmp/ids-frontend.log 2>&1 </dev/null &
 FRONTEND_PID=$!
 sleep 8
@@ -279,7 +287,15 @@ if check_process "vite\|electron" "Frontend"; then
     fi
 else
     echo -e "${RED}   ❌ Frontend failed to start${NC}"
-    echo "   Check logs: tail -f /tmp/ids-frontend.log"
+    echo "   Checking logs..."
+    if [ -f /tmp/ids-frontend.log ]; then
+        echo "   Last 20 lines of log:"
+        tail -20 /tmp/ids-frontend.log
+    else
+        echo "   Log file not found. Check if npm run dev is working."
+    fi
+    echo ""
+    echo "   Try manually: cd frontend && npm run dev"
 fi
 echo ""
 
