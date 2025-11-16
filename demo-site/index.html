@@ -256,11 +256,17 @@
             scheduleBanTick();
           }
         } else {
-          // Only show error message if not banned
-          showMessage('Invalid username or password.', false);
-          if (banData && banData.count !== undefined) {
-            const remaining = (banData.threshold || 3) - banData.count;
-            console.log(`[LOGIN] Failed attempt ${banData.count}/${banData.threshold || 3} (${remaining} remaining before ban)`);
+          // Show error message and warn if approaching limit
+          if (banData && banData.count !== undefined && banData.threshold) {
+            const remaining = banData.threshold - banData.count;
+            if (remaining <= 1 && remaining > 0) {
+              showMessage(`Invalid username or password. Warning: ${remaining} attempt remaining before temporary ban.`, false);
+            } else {
+              showMessage(`Invalid username or password. ${remaining} attempts remaining before ban.`, false);
+            }
+            console.log(`[LOGIN] Failed attempt ${banData.count}/${banData.threshold} (${remaining} remaining before ban)`);
+          } else {
+            showMessage('Invalid username or password.', false);
           }
         }
       }
