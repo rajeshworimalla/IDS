@@ -186,21 +186,16 @@ sleep 4
 
 # Verify backend
 echo "   Verifying backend..."
-# Check by pattern (more flexible) and also by port
-if ps aux | grep -v grep | grep -E "node.*dist/index.js|node.*dist/index" > /dev/null 2>&1 || check_port 5001 "Backend"; then
-    if check_port 5001 "Backend"; then
-    if check_port 5001 "Backend"; then
-        if check_service "http://localhost:5001" "Backend API"; then
-            echo -e "${GREEN}   ✅ Backend fully operational${NC}"
-        else
-            echo -e "${RED}   ❌ Backend not responding to HTTP requests${NC}"
-            echo "   Check logs: tail -f /tmp/ids-backend.log"
-        fi
+# Check by port first (most reliable indicator)
+if check_port 5001 "Backend"; then
+    if check_service "http://localhost:5001" "Backend API"; then
+        echo -e "${GREEN}   ✅ Backend fully operational${NC}"
     else
-        echo -e "${RED}   ❌ Backend process running but port not listening${NC}"
+        echo -e "${RED}   ❌ Backend not responding to HTTP requests${NC}"
+        echo "   Check logs: tail -f /tmp/ids-backend.log"
     fi
 else
-    echo -e "${RED}   ❌ Backend failed to start${NC}"
+    echo -e "${RED}   ❌ Backend failed to start (port 5001 not listening)${NC}"
     echo "   Last 30 lines of log:"
     tail -30 /tmp/ids-backend.log
     echo ""
@@ -326,7 +321,12 @@ echo ""
 echo "Service Status:"
 check_process "mongod" "MongoDB"
 check_process "redis-server" "Redis"
-check_process "node dist/index.js" "Backend"
+# Check backend by port (more reliable than process name with sudo)
+if check_port 5001 "Backend"; then
+    echo -e "${GREEN}✅ Backend process is running (port 5001 listening)${NC}"
+else
+    echo -e "${RED}❌ Backend process is NOT running (port 5001 not listening)${NC}"
+fi
 [ ! -z "$PREDICTION_PID" ] && check_process "prediction_service.py" "Prediction Service"
 check_process "vite\|electron" "Frontend"
 check_process "python.*http.server.*8080" "Demo Site"
