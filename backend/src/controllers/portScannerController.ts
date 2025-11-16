@@ -26,30 +26,54 @@ function scanPort(host: string, port: number, timeout: number): Promise<boolean>
   return new Promise((resolve) => {
     const socket = new Socket();
     let resolved = false;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      try {
+        socket.destroy();
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    };
 
     const onConnect = () => {
       if (!resolved) {
         resolved = true;
-        socket.destroy();
+        cleanup();
         resolve(true);
       }
     };
 
-    const onError = () => {
+    const onError = (err?: Error) => {
       if (!resolved) {
         resolved = true;
-        socket.destroy();
+        cleanup();
+        resolve(false);
+      }
+    };
+
+    const onTimeout = () => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
         resolve(false);
       }
     };
 
     socket.setTimeout(timeout);
     socket.once('connect', onConnect);
-    socket.once('timeout', onError);
+    socket.once('timeout', onTimeout);
     socket.once('error', onError);
 
     try {
       socket.connect(port, host);
+      // Also set a manual timeout as backup
+      timeoutId = setTimeout(() => {
+        if (!resolved) {
+          onTimeout();
+        }
+      }, timeout + 100);
     } catch (e) {
       onError();
     }
@@ -162,8 +186,11 @@ export const scanHost = async (req: Request, res: Response) => {
     console.log(`[PORT SCAN] Starting scan of ${host} - ${portList.length} ports`);
 
     // Adjust timeout and concurrency for large scans
-    const actualTimeout = portList.length > 10000 ? 300 : timeout; // Shorter timeout for large scans
-    const actualConcurrency = portList.length > 10000 ? 500 : concurrency; // Higher concurrency for large scans
+    // Use shorter timeout but higher concurrency for large scans to speed things up
+    const actualTimeout = portList.length > 10000 ? Math.min(timeout, 500) : timeout;
+    const actualConcurrency = portList.length > 10000 ? Math.max(concurrency, 500) : concurrency;
+
+    console.log(`[PORT SCAN] Using timeout: ${actualTimeout}ms, concurrency: ${actualConcurrency}`);
 
     // Start scanning - wait for results
     const openPorts = await scanPorts(host, portList, actualTimeout, actualConcurrency);
