@@ -412,7 +412,25 @@ const Monitoring: FC = () => {
                       <span className="alert-icon">{getSeverityIcon(alert.severity)}</span>
                     </div>
                     <div className="alert-basic-info">
-                      <h3>{alert.type}</h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+                        <h3 style={{ margin: 0 }}>{alert.type}</h3>
+                        <span 
+                          className="severity-badge"
+                          style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            textTransform: 'uppercase',
+                            backgroundColor: alert.severity === 'critical' ? '#ff4d4f' : 
+                                           alert.severity === 'high' ? '#fa8c16' :
+                                           alert.severity === 'medium' ? '#faad14' : '#52c41a',
+                            color: '#fff'
+                          }}
+                        >
+                          {alert.severity}
+                        </span>
+                      </div>
                       <div className="alert-meta">
                         <span className="timestamp">
                           {new Date(alert.timestamp).toLocaleString()}
