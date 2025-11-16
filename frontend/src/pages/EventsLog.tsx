@@ -366,22 +366,17 @@ const EventsLog: FC = () => {
             </div>
           </div>
           
-          <motion.button 
+          <button 
             className="filter-action-btn"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
             onClick={handleDateFilter}
           >
             Filter
-          </motion.button>
+          </button>
         </div>
         
         <div className="table-container">
-          <motion.table 
+          <table 
             className="events-table"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
           >
             <thead>
               <tr>
