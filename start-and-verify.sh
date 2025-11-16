@@ -267,6 +267,8 @@ if check_process "vite\|electron" "Frontend"; then
     if check_port 5173 "Frontend"; then
         if check_service "http://localhost:5173" "Frontend"; then
             echo -e "${GREEN}   ✅ Frontend fully operational${NC}"
+            VM_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
+            echo -e "   🌐 Access at: http://$VM_IP:5173"
         else
             echo -e "${YELLOW}   ⚠ Frontend port listening but not responding${NC}"
         fi
