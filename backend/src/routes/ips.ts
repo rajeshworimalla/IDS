@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
 import { getBlockedIPs, blockIP, unblockIP } from '../controllers/ipController';
+import { scanHost } from '../controllers/portScannerController';
 
 const router = express.Router();
 
@@ -9,6 +10,7 @@ router.use(authenticate);
 router.get('/blocked', getBlockedIPs);
 router.post('/block', blockIP);
 router.delete('/block/:ip', unblockIP);
+router.post('/scan', scanHost);
 
 // Policy endpoints for automatic blocking
 router.get('/policy', async (req, res) => {

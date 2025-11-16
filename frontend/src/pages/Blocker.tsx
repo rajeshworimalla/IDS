@@ -25,9 +25,13 @@ const Blocker: FC = () => {
   const [policySaved, setPolicySaved] = useState(false);
 
   // Websites Control Panel state
-  const defaultPorts = [80, 443, 8080, 3000, 5173, 8000, 5000];
+  const defaultPorts = [80, 443, 8080, 3000, 5173, 8000, 5000, 5001, 5002];
+  // Common service ports for comprehensive scan
+  const commonServicePorts = [20, 21, 22, 23, 25, 53, 80, 135, 139, 443, 445, 3306, 3389, 5000, 5001, 5002, 5432, 8000, 8080, 8443, 3000, 5173];
   const [subnet, setSubnet] = useState('');
   const [selectedPorts, setSelectedPorts] = useState<number[]>(defaultPorts);
+  const [useCommonPorts, setUseCommonPorts] = useState(false);
+  const [scanAllPorts, setScanAllPorts] = useState(false);
   const [sites, setSites] = useState<{ host: string; ports: number[] }[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
@@ -170,11 +174,67 @@ const Blocker: FC = () => {
   async function handleScan() {
     const hosts = expandSubnet(subnet || guessSubnet());
     if (hosts.length === 0) { setScanStatus('Enter a /24 like 192.168.1.0/24 or 192.168.1.*'); return; }
-    const ports = selectedPorts;
-    const total = Math.min(hosts.length * ports.length, 4000);
-    const limiter = limit(30);
+    
     setSites([]);
     setScanning(true);
+    
+    // If scanning all ports, use backend API
+    if (scanAllPorts) {
+      setScanStatus(`Scanning all ports (1-65535) on ${hosts.length} host(s)... This may take a while.`);
+      setProgress({ done: 0, total: hosts.length });
+      
+      const results: { host: string; ports: number[] }[] = [];
+      
+      for (let i = 0; i < hosts.length; i++) {
+        const host = hosts[i];
+        setScanStatus(`Scanning all ports on ${host}... (${i + 1}/${hosts.length})`);
+        setProgress({ done: i, total: hosts.length });
+        
+        try {
+          const token = localStorage.getItem('token');
+          const response = await fetch('http://localhost:5001/api/ips/scan', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              host,
+              ports: 'all',
+              timeout: 500,
+              concurrency: 200
+            })
+          });
+          
+          if (!response.ok) {
+            console.error(`Failed to scan ${host}:`, await response.text());
+            continue;
+          }
+          
+          const data = await response.json();
+          if (data.openPorts && data.openPorts.length > 0) {
+            results.push({ host, ports: data.openPorts });
+          }
+        } catch (e) {
+          console.error(`Error scanning ${host}:`, e);
+        }
+      }
+      
+      setProgress({ done: hosts.length, total: hosts.length });
+      if (results.length === 0) {
+        setScanStatus('No open ports found on scanned hosts.');
+      } else {
+        setScanStatus(`Found ${results.length} host(s) with open ports.`);
+      }
+      setSites(results);
+      setScanning(false);
+      return;
+    }
+    
+    // Otherwise, use browser-based scanning for selected ports
+    const ports = useCommonPorts ? commonServicePorts : selectedPorts;
+    const total = Math.min(hosts.length * ports.length, 10000);
+    const limiter = limit(30);
     setScanStatus(`Scanning ${hosts.length} hosts × ${ports.length} ports...`);
     setProgress({ done: 0, total });
 
@@ -387,6 +447,38 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                       :{p}
                     </motion.label>
                   ))}
+                </div>
+                <div className="field" style={{ marginTop: '12px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={useCommonPorts}
+                      onChange={(e) => {
+                        setUseCommonPorts(e.target.checked);
+                        setScanAllPorts(false); // Disable scan all when enabling common ports
+                        if (e.target.checked) {
+                          setScanStatus(`Will scan ${commonServicePorts.length} common service ports`);
+                        }
+                      }}
+                    />
+                    <span>Scan Common Service Ports ({commonServicePorts.length} ports: FTP, SSH, HTTP, HTTPS, MySQL, PostgreSQL, etc.)</span>
+                  </label>
+                </div>
+                <div className="field" style={{ marginTop: '12px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={scanAllPorts}
+                      onChange={(e) => {
+                        setScanAllPorts(e.target.checked);
+                        setUseCommonPorts(false); // Disable common ports when enabling scan all
+                        if (e.target.checked) {
+                          setScanStatus('Will scan ALL ports (1-65535) on each host. This may take several minutes.');
+                        }
+                      }}
+                    />
+                    <span><strong>Scan ALL Ports</strong> (1-65535) - Comprehensive scan using backend API</span>
+                  </label>
                 </div>
               </div>
 
