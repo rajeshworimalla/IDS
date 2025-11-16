@@ -24,9 +24,18 @@ interface TableData {
 interface DataTableProps {
   data: TableData[];
   isLoading: boolean;
+  currentPage?: number;
+  itemsPerPage?: number;
+  onPageChange?: (page: number) => void;
 }
 
-const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
+const DataTable: React.FC<DataTableProps> = ({ 
+  data, 
+  isLoading, 
+  currentPage = 1, 
+  itemsPerPage = 50,
+  onPageChange 
+}) => {
   const [searchTerm, setSearchTerm] = React.useState('');
   const [selectedStatus, setSelectedStatus] = React.useState<string[]>([]);
 
@@ -43,7 +52,7 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
     }
   };
 
-  // Show all data (filtering happens here)
+  // Filter data
   const filteredData = data.filter(item => {
     const matchesSearch = Object.values(item).some(
       value => value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
@@ -51,6 +60,12 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
     const matchesStatus = selectedStatus.length === 0 || selectedStatus.includes(item.status);
     return matchesSearch && matchesStatus;
   });
+
+  // Pagination
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedData = filteredData.slice(startIndex, endIndex);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
@@ -114,7 +129,7 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
             </tr>
           </thead>
           <tbody>
-            {filteredData.map((row) => (
+            {paginatedData.map((row) => (
               <tr key={row._id}>
                 <td>{getStatusIcon(row.status)}</td>
                 <td>{formatDate(row.date)}</td>
@@ -133,6 +148,58 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
           </div>
         )}
       </div>
+      
+      {/* Pagination */}
+      {filteredData.length > itemsPerPage && (
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginTop: '1rem',
+          padding: '1rem',
+          background: 'var(--secondary-bg, #1a1a1a)',
+          borderRadius: '8px'
+        }}>
+          <div style={{ color: 'var(--text-secondary, #999)', fontSize: '0.9rem' }}>
+            Showing {startIndex + 1}-{Math.min(endIndex, filteredData.length)} of {filteredData.length} items
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button
+              onClick={() => onPageChange?.(currentPage - 1)}
+              disabled={currentPage === 1}
+              style={{
+                padding: '0.5rem 1rem',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: currentPage === 1 ? 'rgba(255,255,255,0.1)' : 'var(--accent-color, #3699ff)',
+                color: '#fff',
+                borderRadius: '4px',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                opacity: currentPage === 1 ? 0.5 : 1
+              }}
+            >
+              Previous
+            </button>
+            <span style={{ color: 'var(--text-primary, #fff)', padding: '0 1rem' }}>
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => onPageChange?.(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              style={{
+                padding: '0.5rem 1rem',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: currentPage === totalPages ? 'rgba(255,255,255,0.1)' : 'var(--accent-color, #3699ff)',
+                color: '#fff',
+                borderRadius: '4px',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                opacity: currentPage === totalPages ? 0.5 : 1
+              }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

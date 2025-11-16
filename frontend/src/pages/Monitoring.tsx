@@ -36,6 +36,8 @@ const Monitoring: FC = () => {
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blockedError, setBlockedError] = useState<string | null>(null);
   const [blockSuccess, setBlockSuccess] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
 
 
   const filterOptions = {
@@ -103,6 +105,7 @@ const Monitoring: FC = () => {
   // Re-fetch data when filters change
   useEffect(() => {
     fetchData();
+    setCurrentPage(1); // Reset to first page when filters change
   }, [filters]);
 
   const handleToggleExpand = (id: string) => {
@@ -208,6 +211,12 @@ const Monitoring: FC = () => {
     
     return matchesSearch;
   });
+
+  // Pagination for alerts
+  const totalPages = Math.ceil(filteredAlerts.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedAlerts = filteredAlerts.slice(startIndex, endIndex);
 
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
@@ -360,7 +369,7 @@ const Monitoring: FC = () => {
 
         <div className="alerts-list">
             {filteredAlerts.length > 0 ? (
-              filteredAlerts.map((alert) => (
+              paginatedAlerts.map((alert) => (
                 <div
                   key={alert._id}
                   className={`alert-card ${alert.severity} ${expandedAlertId === alert._id ? 'expanded' : ''}`}
@@ -495,6 +504,58 @@ const Monitoring: FC = () => {
               </div>
             )}
           </div>
+          
+          {/* Pagination */}
+          {filteredAlerts.length > itemsPerPage && (
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              marginTop: '1.5rem',
+              padding: '1rem',
+              background: 'var(--secondary-bg, #1a1a1a)',
+              borderRadius: '8px'
+            }}>
+              <div style={{ color: 'var(--text-secondary, #999)', fontSize: '0.9rem' }}>
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredAlerts.length)} of {filteredAlerts.length} alerts
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: currentPage === 1 ? 'rgba(255,255,255,0.1)' : 'var(--accent-color, #3699ff)',
+                    color: '#fff',
+                    borderRadius: '4px',
+                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                    opacity: currentPage === 1 ? 0.5 : 1
+                  }}
+                >
+                  Previous
+                </button>
+                <span style={{ color: 'var(--text-primary, #fff)', padding: '0 1rem' }}>
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: currentPage === totalPages ? 'rgba(255,255,255,0.1)' : 'var(--accent-color, #3699ff)',
+                    color: '#fff',
+                    borderRadius: '4px',
+                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                    opacity: currentPage === totalPages ? 0.5 : 1
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         {/* Blocked IPs Modal */}
         {showBlockedIPs && (
