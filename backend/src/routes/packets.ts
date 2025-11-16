@@ -224,6 +224,33 @@ router.get('/alerts', async (req, res) => {
       // Set default alert status (packets don't have investigation status)
       alertStatus = 'active'; // Default status for new alerts
       
+      // Determine alert type - use attack_type if meaningful, otherwise infer from severity/protocol
+      let alertType = packet.attack_type || 'Network Anomaly';
+      
+      // If attack_type is "normal" but severity is high, provide a more descriptive type
+      if (alertType === 'normal' && (severity === 'critical' || severity === 'medium')) {
+        // Try to infer from description or protocol
+        const desc = (packet.description || '').toLowerCase();
+        const proto = (packet.protocol || '').toUpperCase();
+        
+        if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+          alertType = 'DoS Attack';
+        } else if (desc.includes('scan') || desc.includes('probe') || desc.includes('reconnaissance')) {
+          alertType = 'Port Scan / Reconnaissance';
+        } else if (desc.includes('suspicious') || desc.includes('anomaly')) {
+          alertType = 'Suspicious Network Activity';
+        } else if (severity === 'critical') {
+          alertType = 'Critical Network Threat';
+        } else {
+          alertType = 'Network Anomaly';
+        }
+      }
+      
+      // Capitalize first letter of attack types for better display (if not already capitalized)
+      if (alertType && alertType !== 'normal' && alertType.charAt(0) === alertType.charAt(0).toLowerCase()) {
+        alertType = alertType.charAt(0).toUpperCase() + alertType.slice(1);
+      }
+      
       return {
         _id: packet._id,
         id: packet._id,
@@ -236,7 +263,7 @@ router.get('/alerts', async (req, res) => {
         description: packet.description,
         confidence: packet.confidence,
         attack_type: packet.attack_type,
-        type: packet.attack_type || 'Network Anomaly',
+        type: alertType,
         timestamp: packet.date
       };
     });
