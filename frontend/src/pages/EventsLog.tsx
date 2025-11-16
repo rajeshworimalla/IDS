@@ -1,4 +1,4 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
@@ -59,7 +59,9 @@ const EventsLog: FC = () => {
         if (response.ok) {
           const data = await response.json();
           console.log(`Received ${data.length} packets from backend`);
-          setPackets(data);
+          // Limit to last 200 packets to prevent lag
+          const limitedData = Array.isArray(data) ? data.slice(0, 200) : data;
+          setPackets(limitedData);
         } else {
           const error = await response.text();
           console.error('Failed to fetch packets:', error);
@@ -121,21 +123,41 @@ const EventsLog: FC = () => {
       }
     });
 
+    // Throttle packet updates to prevent lag
+    const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const pendingPacketsRef = useRef<Packet[]>([]);
+    
     socket.on('new-packet', (packet) => {
-      console.log('Received new packet via WebSocket:', packet);
+      // Check if packet already exists
       setPackets(prev => {
-        // Check if packet already exists to avoid duplicates
         const exists = prev.some(p => p._id === packet._id);
-        if (exists) {
-          console.log('Packet already exists, skipping duplicate');
-          return prev;
+        if (exists) return prev;
+        
+        // Add to pending queue
+        pendingPacketsRef.current.push(packet);
+        
+        // Throttle updates: batch every 500ms instead of updating on every packet
+        if (updateTimeoutRef.current) {
+          clearTimeout(updateTimeoutRef.current);
         }
-        console.log('Adding new packet to list');
-        return [packet, ...prev];
+        
+        updateTimeoutRef.current = setTimeout(() => {
+          setPackets(prev => {
+            // Add pending packets and limit to last 200 packets to prevent lag
+            const newPackets = [...pendingPacketsRef.current, ...prev];
+            pendingPacketsRef.current = [];
+            return newPackets.slice(0, 200); // Keep only last 200 packets
+          });
+        }, 500); // Batch updates every 500ms
+        
+        return prev;
       });
     });
 
     return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
       if (socket) {
         socket.disconnect();
       }
