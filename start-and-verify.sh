@@ -161,23 +161,27 @@ echo "   Starting backend server..."
 # Clear old log
 > /tmp/ids-backend.log
 if command -v sudo >/dev/null 2>&1; then
-    sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
+    # Use nohup to ensure process survives and redirect properly
+    nohup sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
 else
-    node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
+    nohup node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
 fi
-BACKEND_PID=$!
-sleep 3
+# Note: $! might be sudo's PID, so we'll check by process pattern instead
+sleep 4
 
-# Check if process is still running after initial start
-if ! ps -p $BACKEND_PID > /dev/null 2>&1; then
-    echo -e "${RED}   ❌ Backend process died immediately after startup${NC}"
+# Check if process is running by pattern (more reliable than PID with sudo)
+if ! ps aux | grep -v grep | grep -q "node.*dist/index.js"; then
+    echo -e "${RED}   ❌ Backend process not found after startup${NC}"
     echo "   Last 20 lines of log:"
     tail -20 /tmp/ids-backend.log
     echo ""
+    echo "   Checking if port 5001 is in use:"
+    sudo lsof -i:5001 2>/dev/null || echo "   Port 5001 is free"
+    echo ""
 fi
 
-# Wait a bit more for startup
-sleep 5
+# Wait a bit more for startup and check again
+sleep 4
 
 # Verify backend
 echo "   Verifying backend..."
