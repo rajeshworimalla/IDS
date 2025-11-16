@@ -29,6 +29,10 @@ const EventsLog: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Refs for throttling packet updates (must be at top level, not inside useEffect)
+  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPacketsRef = useRef<Packet[]>([]);
+
   // Check authentication immediately
   useEffect(() => {
     const token = authService.getToken();
@@ -143,10 +147,7 @@ const EventsLog: FC = () => {
       }
     });
 
-    // Throttle packet updates
-    const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pendingPacketsRef = useRef<Packet[]>([]);
-    
+    // Throttle packet updates (using refs defined at component top level)
     socket.on('new-packet', (packet: any) => {
       if (!mounted) return;
       setPackets((prev: Packet[]) => {
