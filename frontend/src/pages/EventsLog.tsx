@@ -1,6 +1,5 @@
 import { FC, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import '../styles/EventsLog.css';
 import { authService } from '../services/auth';
@@ -320,24 +319,17 @@ const EventsLog: FC = () => {
   return (
     <div className="events-log-page">
       <Navbar />
-      <motion.main
-        className="events-log-content"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
+      <main className="events-log-content">
         <div className="events-header">
           <div className="filter-container">
             <div className="filter-group">
               {filterOptions.map(option => (
-                <motion.button
+                <button
                   key={option.id}
                   className={`filter-btn ${option.active ? 'active' : ''}`}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
                 >
                   {option.label}
-                </motion.button>
+                </button>
               ))}
             </div>
             
@@ -441,9 +433,10 @@ const EventsLog: FC = () => {
                   <td>{packet.start_bytes}</td>
                   <td>{packet.end_bytes}</td>
                 </tr>
-              ))}
+                ))
+              )}
             </tbody>
-          </motion.table>
+          </table>
         </div>
         
         <div className="pagination-controls">
@@ -459,84 +452,70 @@ const EventsLog: FC = () => {
             )}
           </div>
           <div className="pagination-buttons">
-            <motion.button
+            <button
               className="pagination-btn"
               onClick={() => setShowResetConfirm(true)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
             >
               Reset
-            </motion.button>
+            </button>
             {scanningState === 'idle' ? (
-              <motion.button
+              <button
                 className="pagination-btn primary"
                 onClick={handleStartScanning}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
               >
                 Start Scanning
-              </motion.button>
+              </button>
             ) : scanningState === 'starting' ? (
-              <motion.button
+              <button
                 className="pagination-btn primary"
                 disabled
                 style={{ opacity: 0.6 }}
               >
                 Starting...
-              </motion.button>
+              </button>
             ) : scanningState === 'scanning' ? (
-              <motion.button
+              <button
                 className="pagination-btn danger"
                 onClick={handleStopScanning}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
               >
                 Stop Scanning
-              </motion.button>
+              </button>
             ) : (
-              <motion.button
+              <button
                 className="pagination-btn danger"
                 disabled
                 style={{ opacity: 0.6 }}
               >
                 Stopping...
-              </motion.button>
+              </button>
             )}
           </div>
         </div>
 
         {/* Reset Confirmation Dialog */}
         {showResetConfirm && (
-          <motion.div 
-            className="confirmation-dialog"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
+          <div className="confirmation-dialog">
             <div className="dialog-content">
               <h3>Confirm Reset</h3>
               <p>Are you sure you want to clear all packets? This action cannot be undone.</p>
               <div className="dialog-buttons">
-                <motion.button
+                <button
                   className="dialog-btn cancel"
                   onClick={() => setShowResetConfirm(false)}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
                 >
                   Cancel
-                </motion.button>
-                <motion.button
+                </button>
+                <button
                   className="dialog-btn confirm"
                   onClick={handleReset}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
                 >
                   Confirm Reset
-                </motion.button>
+                </button>
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </motion.main>
+      </main>
     </div>
   );
 };
