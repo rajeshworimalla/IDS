@@ -204,6 +204,33 @@ const Blocker: FC = () => {
     setScanning(false);
   }
 
+  // Get port description
+  const getPortDescription = (port: number): string => {
+    const portMap: { [key: number]: string } = {
+      22: 'SSH',
+      53: 'DNS',
+      80: 'HTTP',
+      443: 'HTTPS',
+      5001: 'Backend API',
+      5002: 'ML Prediction Service',
+      5173: 'Frontend (Vite)',
+      8080: 'Demo Site',
+      27017: 'MongoDB',
+      6379: 'Redis',
+      3306: 'MySQL',
+      5432: 'PostgreSQL',
+      3389: 'RDP',
+      5900: 'VNC',
+      21: 'FTP',
+      25: 'SMTP',
+      110: 'POP3',
+      143: 'IMAP',
+      993: 'IMAPS',
+      995: 'POP3S',
+    };
+    return portMap[port] || 'Unknown';
+  };
+
   const springy = { type: 'spring', stiffness: 120, damping: 20, mass: 0.8 } as const;
 
   return (
@@ -411,14 +438,29 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                         transition={{ ...springy, delay: 0.02 * idx }}
                       >
                         <td className="site-host">{site.host}</td>
-                        <td className="site-ports">{site.ports.join(', ')}</td>
+                        <td className="site-ports">
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {site.ports.map((p: number) => {
+                              const desc = getPortDescription(p);
+                              return (
+                                <span key={p} style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>
+                                  <strong>{p}</strong> {desc !== 'Unknown' && <span style={{ color: 'var(--text-secondary, #999)', marginLeft: '6px' }}>({desc})</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
                         <td>
                           <div className="site-actions">
                             {site.ports.map((p: number) => {
                               const scheme = p === 443 ? 'https' : 'http';
                               const url = `${scheme}://${site.host}:${p}/`;
+                              const desc = getPortDescription(p);
+                              const label = desc !== 'Unknown' ? `${p} (${desc})` : `${p}`;
                               return (
-                                <a key={p} href={url} target="_blank" rel="noopener noreferrer" className="btn small">Open :{p}</a>
+                                <a key={p} href={url} target="_blank" rel="noopener noreferrer" className="btn small" title={label}>
+                                  Open :{p}
+                                </a>
                               );
                             })}
                           </div>
