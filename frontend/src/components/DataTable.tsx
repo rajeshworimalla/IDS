@@ -43,10 +43,8 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
     }
   };
 
-  // Limit data to last 50 items for performance
-  const limitedData = data.slice(0, 50);
-  
-  const filteredData = limitedData.filter(item => {
+  // Show all data (filtering happens here)
+  const filteredData = data.filter(item => {
     const matchesSearch = Object.values(item).some(
       value => value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
     );

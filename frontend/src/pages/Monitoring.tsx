@@ -81,9 +81,9 @@ const Monitoring: FC = () => {
         packetService.getAlertStats(apiFilters)
       ]);
 
-      // Limit to last 50 alerts for performance
-      const limitedAlerts = Array.isArray(alertsData) ? alertsData.slice(0, 50) : [];
-      setAlerts(limitedAlerts);
+      // Show all alerts
+      const allAlerts = Array.isArray(alertsData) ? alertsData : [];
+      setAlerts(allAlerts);
       setAlertStats(statsData);
     } catch (err) {
       console.error('Error fetching monitoring data:', err);
@@ -360,7 +360,7 @@ const Monitoring: FC = () => {
 
         <div className="alerts-list">
             {filteredAlerts.length > 0 ? (
-              filteredAlerts.slice(0, 50).map((alert) => (
+              filteredAlerts.map((alert) => (
                 <div
                   key={alert._id}
                   className={`alert-card ${alert.severity} ${expandedAlertId === alert._id ? 'expanded' : ''}`}

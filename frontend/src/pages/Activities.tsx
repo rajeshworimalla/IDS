@@ -34,9 +34,9 @@ const Activities: FC = () => {
           activeAlerts: packetStats.criticalCount + packetStats.mediumCount,
           systemHealth: calculateSystemHealth(packetStats)
         });
-        // Limit to last 50 packets for performance
-        const limitedPackets = Array.isArray(packetData) ? packetData.slice(0, 50) : [];
-        setPackets(limitedPackets);
+        // Show all packets
+        const allPackets = Array.isArray(packetData) ? packetData : [];
+        setPackets(allPackets);
       } catch (error) {
         console.error('Error fetching data:', error);
         setError('Failed to fetch data. Please try again later.');
