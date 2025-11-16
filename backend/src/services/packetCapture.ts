@@ -282,6 +282,11 @@ export class PacketCaptureService {
         savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
         savedPacket.attack_type = predictions.attack_type;
         savedPacket.confidence = predictions.confidence.binary;
+        
+        // Store attack type probabilities if available
+        if (predictions.attack_type_probabilities) {
+          savedPacket.attack_type_probabilities = predictions.attack_type_probabilities;
+        }
 
         // Update in MongoDB
         await savedPacket.save();

@@ -263,6 +263,7 @@ router.get('/alerts', async (req, res) => {
         description: packet.description,
         confidence: packet.confidence,
         attack_type: packet.attack_type,
+        attack_type_probabilities: packet.attack_type_probabilities,
         type: alertType,
         timestamp: packet.date
       };

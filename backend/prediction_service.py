@@ -287,6 +287,21 @@ def predict():
                 except:
                     multiclass_confidence = 0.5
 
+                # Get probabilities for all attack types
+                attack_type_probs = {}
+                try:
+                    multiclass_probs = multiclass_model.predict_proba(features)[0]
+                    attack_type_names = ['normal', 'dos', 'probe', 'r2l', 'u2r']
+                    for i, prob in enumerate(multiclass_probs):
+                        if i < len(attack_type_names):
+                            attack_type_probs[attack_type_names[i]] = float(prob)
+                except:
+                    # Fallback: set probability for predicted type only
+                    attack_type_probs = {attack_type: multiclass_confidence}
+                    for at in ['normal', 'dos', 'probe', 'r2l', 'u2r']:
+                        if at not in attack_type_probs:
+                            attack_type_probs[at] = 0.0
+
                 results.append({
                     'packet_id': packet.get('_id', ''),
                     'binary_prediction': binary_label,
@@ -294,7 +309,8 @@ def predict():
                     'confidence': {
                         'binary': binary_confidence,
                         'multiclass': multiclass_confidence
-                    }
+                    },
+                    'attack_type_probabilities': attack_type_probs
                 })
             except Exception as e:
                 return jsonify({'error': f'Error making predictions: {str(e)}'}), 500

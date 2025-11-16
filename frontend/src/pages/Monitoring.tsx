@@ -430,13 +430,71 @@ const Monitoring: FC = () => {
                           </div>
                           <div className="detail-item">
                             <span className="detail-label">Attack Type</span>
-                            <span className="detail-value">{alert.attack_type}</span>
+                            <span className="detail-value">{alert.attack_type || 'Unknown'}</span>
                           </div>
                           <div className="detail-item">
                             <span className="detail-label">Confidence</span>
-                            <span className="detail-value">{alert.confidence}%</span>
+                            <span className="detail-value">{alert.confidence ? `${Math.round(alert.confidence * 100)}%` : 'N/A'}</span>
                           </div>
                         </div>
+                        {/* Attack Type Probabilities */}
+                        {alert.attack_type_probabilities && (
+                          <div className="detail-group" style={{ marginTop: '1rem' }}>
+                            <div className="detail-item full-width">
+                              <span className="detail-label" style={{ marginBottom: '0.5rem', display: 'block' }}>
+                                ML Model Predictions (All Attack Types):
+                              </span>
+                              <div style={{ 
+                                display: 'grid', 
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', 
+                                gap: '0.5rem',
+                                marginTop: '0.5rem'
+                              }}>
+                                {Object.entries(alert.attack_type_probabilities)
+                                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                                  .map(([type, prob]) => {
+                                    const probability = typeof prob === 'number' ? prob : 0;
+                                    const percentage = Math.round(probability * 100);
+                                    const isTopPrediction = type === alert.attack_type;
+                                    return (
+                                      <div 
+                                        key={type}
+                                        style={{
+                                          padding: '0.5rem',
+                                          background: isTopPrediction 
+                                            ? 'rgba(54, 153, 255, 0.2)' 
+                                            : 'rgba(255, 255, 255, 0.05)',
+                                          border: isTopPrediction 
+                                            ? '1px solid rgba(54, 153, 255, 0.5)' 
+                                            : '1px solid rgba(255, 255, 255, 0.1)',
+                                          borderRadius: '4px',
+                                          textAlign: 'center'
+                                        }}
+                                      >
+                                        <div style={{ 
+                                          fontSize: '0.75rem', 
+                                          color: 'var(--text-secondary, #999)',
+                                          textTransform: 'uppercase',
+                                          marginBottom: '0.25rem'
+                                        }}>
+                                          {type === 'dos' ? 'DoS' : type === 'r2l' ? 'R2L' : type === 'u2r' ? 'U2R' : type}
+                                        </div>
+                                        <div style={{ 
+                                          fontSize: '1.1rem', 
+                                          fontWeight: 'bold',
+                                          color: isTopPrediction 
+                                            ? 'var(--accent-color, #3699ff)' 
+                                            : 'var(--text-primary, #fff)'
+                                        }}>
+                                          {percentage}%
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         <div className="detail-description">
                           <p>{alert.description}</p>
                         </div>

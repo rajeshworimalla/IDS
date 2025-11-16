@@ -44,6 +44,13 @@ export interface ThreatAlert {
   description: string;
   confidence: number;
   attack_type: string;
+  attack_type_probabilities?: {
+    normal?: number;
+    dos?: number;
+    probe?: number;
+    r2l?: number;
+    u2r?: number;
+  };
   type: string;
   timestamp: Date;
 }
