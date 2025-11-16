@@ -251,8 +251,19 @@ router.get('/alerts', async (req, res) => {
       // Set default alert status (packets don't have investigation status)
       alertStatus = 'active'; // Default status for new alerts
       
-      // Determine alert type - use attack_type if meaningful, otherwise infer from severity/protocol
+      // Determine alert type - prioritize actual attack_type from ML/detector
       let alertType = packet.attack_type || 'Network Anomaly';
+      
+      // Map attack types to display-friendly names
+      const attackTypeMap: { [key: string]: string } = {
+        'dos': 'DoS Attack',
+        'probe': 'Port Scan / Reconnaissance',
+        'r2l': 'Remote to Local Attack',
+        'u2r': 'User to Root Attack',
+        'brute_force': 'Brute Force Attack',
+        'unknown_attack': 'Unknown Attack Type',
+        'normal': 'Normal Traffic'
+      };
       
       // If ML says benign, don't call it a "threat" - use more neutral language
       if (packet.is_malicious === false) {
@@ -262,26 +273,37 @@ router.get('/alerts', async (req, res) => {
           // Even if attack_type exists, if ML says benign, it's likely a false positive
           alertType = 'Normal Traffic (ML Verified)';
         }
-      } else if (alertType === 'normal' && (severity === 'critical' || severity === 'medium')) {
-        // If attack_type is "normal" but severity is high, provide a more descriptive type
-        // Try to infer from description or protocol
-        const desc = (packet.description || '').toLowerCase();
-        const proto = (packet.protocol || '').toUpperCase();
-        
-        if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
-          alertType = 'DoS Attack';
-        } else if (desc.includes('scan') || desc.includes('probe') || desc.includes('reconnaissance')) {
-          alertType = 'Port Scan / Reconnaissance';
-        } else if (desc.includes('suspicious') || desc.includes('anomaly')) {
-          alertType = 'Suspicious Network Activity';
-        } else if (severity === 'critical') {
-          alertType = 'Critical Network Threat';
+      } else {
+        // ML says malicious OR severity is critical/medium - show attack type
+        // First, check if attack_type is in our map
+        if (attackTypeMap[alertType?.toLowerCase()]) {
+          alertType = attackTypeMap[alertType.toLowerCase()];
+        } else if (alertType === 'normal' || !alertType || alertType === 'Network Anomaly') {
+          // If attack_type is "normal" or missing but severity is high, infer from description
+          const desc = (packet.description || '').toLowerCase();
+          const proto = (packet.protocol || '').toUpperCase();
+          
+          if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+            alertType = 'DoS Attack';
+          } else if (desc.includes('scan') || desc.includes('probe') || desc.includes('reconnaissance')) {
+            alertType = 'Port Scan / Reconnaissance';
+          } else if (desc.includes('brute') || desc.includes('login') || desc.includes('failed')) {
+            alertType = 'Brute Force Attack';
+          } else if (desc.includes('suspicious') || desc.includes('anomaly')) {
+            alertType = 'Suspicious Network Activity';
+          } else if (severity === 'critical' || severity === 'medium') {
+            // If severity is high but we can't determine type, use generic threat
+            alertType = severity === 'critical' ? 'Critical Network Threat' : 'Network Threat';
+          } else {
+            alertType = 'Network Anomaly';
+          }
         } else {
-          alertType = 'Network Anomaly';
+          // attack_type exists but not in map - capitalize it properly
+          alertType = alertType.charAt(0).toUpperCase() + alertType.slice(1).replace(/_/g, ' ');
         }
       }
       
-      // Capitalize first letter of attack types for better display (if not already capitalized)
+      // Final capitalization check (if not already properly formatted)
       if (alertType && alertType !== 'normal' && alertType.charAt(0) === alertType.charAt(0).toLowerCase()) {
         alertType = alertType.charAt(0).toUpperCase() + alertType.slice(1);
       }

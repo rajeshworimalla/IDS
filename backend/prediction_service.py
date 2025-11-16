@@ -186,116 +186,165 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
     dest_ip = packet.get('end_ip', '')
     protocol = packet.get('protocol', 'TCP')
     
-    # Get comprehensive attack detection results
+    # Get comprehensive attack detection results with error handling
     attack_detection = None
     if source_ip and dest_ip:
-        attack_detection = comprehensive_detector.analyze_packet(packet)
+        try:
+            attack_detection = comprehensive_detector.analyze_packet(packet)
+        except Exception as e:
+            print(f"⚠️ Error in attack detector: {e}")
+            attack_detection = None  # Continue without detector features
         
         # ULTRA SHARP: Use ALL attack detector features to enhance ML input
-        if attack_detection:
-            ps_features = attack_detection['port_scan_features']
-            dos_features = attack_detection['dos_features']
-            r2l_features = attack_detection['r2l_features']
-            u2r_features = attack_detection['u2r_features']
-            bf_features = attack_detection['brute_force_features']
+        if attack_detection and isinstance(attack_detection, dict):
+            try:
+                ps_features = attack_detection.get('port_scan_features', {})
+                dos_features = attack_detection.get('dos_features', {})
+                r2l_features = attack_detection.get('r2l_features', {})
+                u2r_features = attack_detection.get('u2r_features', {})
+                bf_features = attack_detection.get('brute_force_features', {})
+            except Exception as e:
+                print(f"⚠️ Error extracting detector features: {e}")
+                ps_features = dos_features = r2l_features = u2r_features = bf_features = {}
             
-            # PORT SCAN FEATURES - Map all port scan indicators
-            if ps_features['is_port_scan'] or ps_features['port_scan_score'] > 0.1:
-                # High unique ports = port scan signature
-                features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                    ps_features['unique_ports'] * 10)  # Amplify signal
-                features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
-                                                ps_features['packets_per_second'] * 2)  # Amplify signal
-                features['Destination Port'] = 0  # Many ports = scan pattern
-                # Sequential ports = strong scan indicator
-                if ps_features['sequential_score'] > 0.3:
-                    features['Total Fwd Packets'] = max(features['Total Fwd Packets'], 
-                                                       ps_features['unique_ports'] * 20)
-                # Port scan rate feature
-                features['Fwd Packets/s'] = max(features.get('Fwd Packets/s', 0),
-                                              ps_features['port_scan_rate'] * 5)
-            
-            # DOS FEATURES - Map all DoS attack indicators
-            if dos_features['is_dos'] or dos_features['dos_score'] > 0.1:
-                # Extremely high packet rate = DoS
-                features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
-                                                dos_features['packets_per_second'] * 3)  # Amplify
-                features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                   dos_features['packet_count'] * 2)  # Amplify
-                features['Fwd Packets/s'] = max(features.get('Fwd Packets/s', 0),
-                                               dos_features['packets_per_second'] * 3)
-                # Small packets at high rate = flood
-                if dos_features['avg_packet_size'] < 200:
-                    features['Min Packet Length'] = dos_features['avg_packet_size']
-                    features['Packet Length Mean'] = dos_features['avg_packet_size']
-                # SYN flood indicator
-                if dos_features['syn_packets'] > 20:
-                    features['SYN Flag Count'] = min(100, dos_features['syn_packets'])  # Cap at 100
-                    features['Total Fwd Packets'] = max(features['Total Fwd Packets'],
-                                                       dos_features['syn_packets'] * 5)
-                # Bytes per second = bandwidth attack
-                features['Total Length of Fwd Packets'] = max(
-                    features.get('Total Length of Fwd Packets', 0),
-                    dos_features['bytes_per_second'] / 10  # Normalize
-                )
-            
-            # R2L FEATURES - Remote to Local attack indicators
-            if r2l_features['is_r2l'] or r2l_features['r2l_score'] > 0.1:
-                # Failed logins = brute force attempt
-                features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                   r2l_features['failed_logins'] * 5)
-                # Privilege escalation attempts
-                if r2l_features['privilege_attempts'] > 0:
-                    features['Total Backward Packets'] = max(
-                        features.get('Total Backward Packets', 0),
-                        r2l_features['privilege_attempts'] * 3
-                    )
-                # Suspicious commands
-                if r2l_features['suspicious_commands'] > 0:
-                    features['Fwd Header Length'] = max(features.get('Fwd Header Length', 0),
-                                                      r2l_features['suspicious_commands'] * 10)
-            
-            # U2R FEATURES - User to Root attack indicators
-            if u2r_features['is_u2r'] or u2r_features['u2r_score'] > 0.1:
-                # Root command attempts
-                if u2r_features['root_commands'] > 0:
+            # PORT SCAN FEATURES - Map all port scan indicators (with safety checks)
+            try:
+                if ps_features and (ps_features.get('is_port_scan', False) or ps_features.get('port_scan_score', 0) > 0.1):
+                    unique_ports = ps_features.get('unique_ports', 0) or 0
+                    packets_per_sec = ps_features.get('packets_per_second', 0) or 0
+                    port_scan_rate = ps_features.get('port_scan_rate', 0) or 0
+                    sequential_score = ps_features.get('sequential_score', 0) or 0
+                    
+                    # High unique ports = port scan signature
                     features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                      u2r_features['root_commands'] * 10)
-                # Setuid attempts
-                if u2r_features['setuid_attempts'] > 0:
-                    features['Total Backward Packets'] = max(
-                        features.get('Total Backward Packets', 0),
-                        u2r_features['setuid_attempts'] * 8
-                    )
-            
-            # BRUTE FORCE FEATURES - Login brute force indicators
-            if bf_features['is_brute_force'] or bf_features['brute_force_score'] > 0.1:
-                # High failed login attempts
-                features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                   bf_features['failed_attempts'] * 8)
-                # Login attempt rate
-                if bf_features['login_attempts'] > 0:
+                                                        unique_ports * 10)  # Amplify signal
                     features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
-                                                    bf_features['login_attempts'] * 2)
-                # Multiple destinations = distributed brute force
-                if bf_features['unique_dest_ips'] > 1:
-                    features['Total Backward Packets'] = max(
-                        features.get('Total Backward Packets', 0),
-                        bf_features['unique_dest_ips'] * 5
-                    )
+                                                    packets_per_sec * 2)  # Amplify signal
+                    features['Destination Port'] = 0  # Many ports = scan pattern
+                    # Sequential ports = strong scan indicator
+                    if sequential_score > 0.3:
+                        features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0), 
+                                                           unique_ports * 20)
+                    # Port scan rate feature
+                    features['Fwd Packets/s'] = max(features.get('Fwd Packets/s', 0),
+                                                  port_scan_rate * 5)
+            except Exception as e:
+                print(f"⚠️ Error processing port scan features: {e}")
             
-            # OVERALL ATTACK SCORE - Boost all features if ANY attack detected
-            if attack_detection['is_malicious']:
-                overall_confidence = attack_detection['confidence']
-                # If detector is very confident, significantly boost ML features
-                if overall_confidence > 0.7:
-                    features['Flow Packets/s'] = features.get('Flow Packets/s', 0) * 2
-                    features['Total Fwd Packets'] = features.get('Total Fwd Packets', 0) * 2
-                    features['Fwd Packets/s'] = features.get('Fwd Packets/s', 0) * 2
-                # If detector is moderately confident, moderate boost
-                elif overall_confidence > 0.5:
-                    features['Flow Packets/s'] = features.get('Flow Packets/s', 0) * 1.5
-                    features['Total Fwd Packets'] = features.get('Total Fwd Packets', 0) * 1.5
+            # DOS FEATURES - Map all DoS attack indicators (with safety checks)
+            try:
+                if dos_features and (dos_features.get('is_dos', False) or dos_features.get('dos_score', 0) > 0.1):
+                    packets_per_sec = dos_features.get('packets_per_second', 0) or 0
+                    packet_count = dos_features.get('packet_count', 0) or 0
+                    avg_packet_size = dos_features.get('avg_packet_size', 0) or 0
+                    syn_packets = dos_features.get('syn_packets', 0) or 0
+                    bytes_per_sec = dos_features.get('bytes_per_second', 0) or 0
+                    
+                    # Extremely high packet rate = DoS
+                    features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
+                                                    packets_per_sec * 3)  # Amplify
+                    features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                       packet_count * 2)  # Amplify
+                    features['Fwd Packets/s'] = max(features.get('Fwd Packets/s', 0),
+                                                   packets_per_sec * 3)
+                    # Small packets at high rate = flood
+                    if avg_packet_size > 0 and avg_packet_size < 200:
+                        features['Min Packet Length'] = avg_packet_size
+                        features['Packet Length Mean'] = avg_packet_size
+                    # SYN flood indicator
+                    if syn_packets > 20:
+                        features['SYN Flag Count'] = min(100, syn_packets)  # Cap at 100
+                        features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                           syn_packets * 5)
+                    # Bytes per second = bandwidth attack
+                    if bytes_per_sec > 0:
+                        features['Total Length of Fwd Packets'] = max(
+                        features.get('Total Length of Fwd Packets', 0),
+                        bytes_per_sec / 10  # Normalize
+                    )
+            except Exception as e:
+                print(f"⚠️ Error processing DoS features: {e}")
+            
+            # R2L FEATURES - Remote to Local attack indicators (with safety checks)
+            try:
+                if r2l_features and (r2l_features.get('is_r2l', False) or r2l_features.get('r2l_score', 0) > 0.1):
+                    failed_logins = r2l_features.get('failed_logins', 0) or 0
+                    privilege_attempts = r2l_features.get('privilege_attempts', 0) or 0
+                    suspicious_commands = r2l_features.get('suspicious_commands', 0) or 0
+                    
+                    # Failed logins = brute force attempt
+                    features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                       failed_logins * 5)
+                    # Privilege escalation attempts
+                    if privilege_attempts > 0:
+                        features['Total Backward Packets'] = max(
+                            features.get('Total Backward Packets', 0),
+                            privilege_attempts * 3
+                        )
+                    # Suspicious commands
+                    if suspicious_commands > 0:
+                        features['Fwd Header Length'] = max(features.get('Fwd Header Length', 0),
+                                                          suspicious_commands * 10)
+            except Exception as e:
+                print(f"⚠️ Error processing R2L features: {e}")
+            
+            # U2R FEATURES - User to Root attack indicators (with safety checks)
+            try:
+                if u2r_features and (u2r_features.get('is_u2r', False) or u2r_features.get('u2r_score', 0) > 0.1):
+                    root_commands = u2r_features.get('root_commands', 0) or 0
+                    setuid_attempts = u2r_features.get('setuid_attempts', 0) or 0
+                    
+                    # Root command attempts
+                    if root_commands > 0:
+                        features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                          root_commands * 10)
+                    # Setuid attempts
+                    if setuid_attempts > 0:
+                        features['Total Backward Packets'] = max(
+                            features.get('Total Backward Packets', 0),
+                            setuid_attempts * 8
+                        )
+            except Exception as e:
+                print(f"⚠️ Error processing U2R features: {e}")
+            
+            # BRUTE FORCE FEATURES - Login brute force indicators (with safety checks)
+            try:
+                if bf_features and (bf_features.get('is_brute_force', False) or bf_features.get('brute_force_score', 0) > 0.1):
+                    failed_attempts = bf_features.get('failed_attempts', 0) or 0
+                    login_attempts = bf_features.get('login_attempts', 0) or 0
+                    unique_dest_ips = bf_features.get('unique_dest_ips', 0) or 0
+                    
+                    # High failed login attempts
+                    features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
+                                                       failed_attempts * 8)
+                    # Login attempt rate
+                    if login_attempts > 0:
+                        features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
+                                                        login_attempts * 2)
+                    # Multiple destinations = distributed brute force
+                    if unique_dest_ips > 1:
+                        features['Total Backward Packets'] = max(
+                            features.get('Total Backward Packets', 0),
+                            unique_dest_ips * 5
+                        )
+            except Exception as e:
+                print(f"⚠️ Error processing brute force features: {e}")
+            
+            # OVERALL ATTACK SCORE - Boost all features if ANY attack detected (with safety checks)
+            try:
+                if attack_detection and attack_detection.get('is_malicious', False):
+                    overall_confidence = attack_detection.get('confidence', 0) or 0
+                    # If detector is very confident, significantly boost ML features
+                    if overall_confidence > 0.7:
+                        features['Flow Packets/s'] = (features.get('Flow Packets/s', 0) or 0) * 2
+                        features['Total Fwd Packets'] = (features.get('Total Fwd Packets', 0) or 0) * 2
+                        features['Fwd Packets/s'] = (features.get('Fwd Packets/s', 0) or 0) * 2
+                    # If detector is moderately confident, moderate boost
+                    elif overall_confidence > 0.5:
+                        features['Flow Packets/s'] = (features.get('Flow Packets/s', 0) or 0) * 1.5
+                        features['Total Fwd Packets'] = (features.get('Total Fwd Packets', 0) or 0) * 1.5
+            except Exception as e:
+                print(f"⚠️ Error processing overall attack score: {e}")
     
     # Calculate bulk features
     if start_bytes > 0:
@@ -320,11 +369,24 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
     features['Init_Win_bytes_forward'] = start_bytes
     features['Init_Win_bytes_backward'] = end_bytes
     
+    # ULTRA SHARP: Clean features - replace NaN, inf, and None with 0
+    for key, value in features.items():
+        if value is None or (isinstance(value, float) and (np.isnan(value) or np.isinf(value))):
+            features[key] = 0
+        # Ensure all values are numeric
+        try:
+            features[key] = float(features[key])
+        except (ValueError, TypeError):
+            features[key] = 0
+    
     # Convert to DataFrame and ensure feature order matches training data
     features_df = pd.DataFrame([features])
     
-    # Print feature names for debugging
-    print("Feature names in DataFrame:", features_df.columns.tolist())
+    # Replace any remaining NaN/inf in DataFrame
+    features_df = features_df.fillna(0).replace([np.inf, -np.inf], 0)
+    
+    # Print feature names for debugging (only occasionally to avoid spam)
+    # print("Feature names in DataFrame:", features_df.columns.tolist())
     
     return features_df
 
@@ -373,7 +435,11 @@ def predict():
             dest_ip = packet.get('end_ip', '')
             attack_detection = None
             if source_ip and dest_ip:
-                attack_detection = comprehensive_detector.analyze_packet(packet)
+                try:
+                    attack_detection = comprehensive_detector.analyze_packet(packet)
+                except Exception as e:
+                    print(f"⚠️ Error in attack detector (override logic): {e}")
+                    attack_detection = None  # Continue without detector
             
             # Preprocess packet (this also uses attack_detection internally for feature enhancement)
             try:
@@ -404,10 +470,16 @@ def predict():
                 
                 # ULTRA SHARP: Comprehensive attack detection override - ALWAYS TRUST DETECTORS
                 # Detectors are rule-based and extremely accurate - they override ML completely
-                if attack_detection:
-                    detected_attack_type = attack_detection['attack_type']
-                    detected_confidence = attack_detection['confidence']
-                    is_detector_malicious = attack_detection['is_malicious']
+                if attack_detection and isinstance(attack_detection, dict):
+                    try:
+                        detected_attack_type = attack_detection.get('attack_type', 'unknown')
+                        detected_confidence = float(attack_detection.get('confidence', 0) or 0)
+                        is_detector_malicious = attack_detection.get('is_malicious', False)
+                    except Exception as e:
+                        print(f"⚠️ Error extracting attack detection data: {e}")
+                        detected_attack_type = 'unknown'
+                        detected_confidence = 0.0
+                        is_detector_malicious = False
                     
                     # ULTRA SHARP RULE 1: If detector says attack, ALWAYS mark as malicious
                     # Even if ML says benign, detector is more reliable for known patterns
@@ -437,39 +509,42 @@ def predict():
                             binary_confidence = max(binary_confidence, detected_confidence + 0.2)
                             multiclass_confidence = max(multiclass_confidence, detected_confidence + 0.15)
                         
-                        # Log specific attack details with ULTRA SHARP precision
-                        if detected_attack_type == 'probe':
-                            ps_features = attack_detection['port_scan_features']
-                            print(f"  🔍 PORT SCAN: {ps_features['unique_ports']} unique ports, "
-                                  f"{ps_features['packets_per_second']:.2f} pps, "
-                                  f"score: {ps_features['port_scan_score']:.2f}, "
-                                  f"sequential: {ps_features['sequential_score']:.2f}")
-                        elif detected_attack_type == 'dos':
-                            dos_features = attack_detection['dos_features']
-                            print(f"  💥 DoS ATTACK: {dos_features['packets_per_second']:.2f} pps, "
-                                  f"{dos_features['packet_count']} packets, "
-                                  f"score: {dos_features['dos_score']:.2f}, "
-                                  f"SYN packets: {dos_features['syn_packets']}")
-                        elif detected_attack_type == 'r2l':
-                            r2l_features = attack_detection['r2l_features']
-                            print(f"  🚪 R2L ATTACK: {r2l_features['failed_logins']} failed logins, "
-                                  f"{r2l_features['privilege_attempts']} privilege attempts, "
-                                  f"score: {r2l_features['r2l_score']:.2f}")
-                        elif detected_attack_type == 'u2r':
-                            u2r_features = attack_detection['u2r_features']
-                            print(f"  ⚠️ U2R ATTACK: {u2r_features['root_commands']} root commands, "
-                                  f"{u2r_features['setuid_attempts']} setuid attempts, "
-                                  f"score: {u2r_features['u2r_score']:.2f}")
-                        elif detected_attack_type == 'brute_force':
-                            bf_features = attack_detection['brute_force_features']
-                            print(f"  🔨 BRUTE FORCE: {bf_features['failed_attempts']} failed logins, "
-                                  f"{bf_features['login_attempts']} total attempts, "
-                                  f"score: {bf_features['brute_force_score']:.2f}")
-                        elif detected_attack_type == 'unknown_attack':
-                            print(f"  ⚠️ UNKNOWN ATTACK TYPE - but definitely malicious!")
-                            # Boost confidence for unknown attacks - detector found something
-                            binary_confidence = max(0.80, binary_confidence)  # Minimum 80%
-                            multiclass_confidence = max(0.75, multiclass_confidence)  # Minimum 75%
+                        # Log specific attack details with ULTRA SHARP precision (with safety checks)
+                        try:
+                            if detected_attack_type == 'probe':
+                                ps_features = attack_detection.get('port_scan_features', {})
+                                print(f"  🔍 PORT SCAN: {ps_features.get('unique_ports', 0)} unique ports, "
+                                      f"{ps_features.get('packets_per_second', 0):.2f} pps, "
+                                      f"score: {ps_features.get('port_scan_score', 0):.2f}, "
+                                      f"sequential: {ps_features.get('sequential_score', 0):.2f}")
+                            elif detected_attack_type == 'dos':
+                                dos_features = attack_detection.get('dos_features', {})
+                                print(f"  💥 DoS ATTACK: {dos_features.get('packets_per_second', 0):.2f} pps, "
+                                      f"{dos_features.get('packet_count', 0)} packets, "
+                                      f"score: {dos_features.get('dos_score', 0):.2f}, "
+                                      f"SYN packets: {dos_features.get('syn_packets', 0)}")
+                            elif detected_attack_type == 'r2l':
+                                r2l_features = attack_detection.get('r2l_features', {})
+                                print(f"  🚪 R2L ATTACK: {r2l_features.get('failed_logins', 0)} failed logins, "
+                                      f"{r2l_features.get('privilege_attempts', 0)} privilege attempts, "
+                                      f"score: {r2l_features.get('r2l_score', 0):.2f}")
+                            elif detected_attack_type == 'u2r':
+                                u2r_features = attack_detection.get('u2r_features', {})
+                                print(f"  ⚠️ U2R ATTACK: {u2r_features.get('root_commands', 0)} root commands, "
+                                      f"{u2r_features.get('setuid_attempts', 0)} setuid attempts, "
+                                      f"score: {u2r_features.get('u2r_score', 0):.2f}")
+                            elif detected_attack_type == 'brute_force':
+                                bf_features = attack_detection.get('brute_force_features', {})
+                                print(f"  🔨 BRUTE FORCE: {bf_features.get('failed_attempts', 0)} failed logins, "
+                                      f"{bf_features.get('login_attempts', 0)} total attempts, "
+                                      f"score: {bf_features.get('brute_force_score', 0):.2f}")
+                            elif detected_attack_type == 'unknown_attack':
+                                print(f"  ⚠️ UNKNOWN ATTACK TYPE - but definitely malicious!")
+                                # Boost confidence for unknown attacks - detector found something
+                                binary_confidence = max(0.80, binary_confidence)  # Minimum 80%
+                                multiclass_confidence = max(0.75, multiclass_confidence)  # Minimum 75%
+                        except Exception as e:
+                            print(f"⚠️ Error logging attack details: {e}")
                     
                     # ULTRA SHARP RULE 2: Even if ML says benign but detector says attack, TRUST DETECTOR
                     # This handles cases where ML model hasn't learned the pattern yet
@@ -551,11 +626,20 @@ def predict():
                             if at != detected_type and at in attack_type_probs:
                                 attack_type_probs[at] = attack_type_probs[at] * 0.7  # Reduce by 30%
                         
-                        # Normalize probabilities to sum to 1.0
+                        # Normalize probabilities to sum to 1.0 (with safety check)
                         total_prob = sum(attack_type_probs.values())
-                        if total_prob > 0:
+                        if total_prob > 0 and not np.isnan(total_prob) and not np.isinf(total_prob):
                             for at in attack_type_probs:
-                                attack_type_probs[at] = attack_type_probs[at] / total_prob
+                                normalized = attack_type_probs[at] / total_prob
+                                # Ensure no NaN or inf
+                                if np.isnan(normalized) or np.isinf(normalized):
+                                    attack_type_probs[at] = 0.0
+                                else:
+                                    attack_type_probs[at] = float(normalized)
+                        else:
+                            # If normalization fails, set equal probabilities
+                            for at in attack_type_probs:
+                                attack_type_probs[at] = 1.0 / len(attack_type_probs)
                     
                     elif detected_type == 'unknown_attack':
                         # ULTRA SHARP: For unknown attacks, boost ALL attack types (not normal)
@@ -571,11 +655,20 @@ def predict():
                         if 'normal' in attack_type_probs:
                             attack_type_probs['normal'] = max(0.0, attack_type_probs['normal'] * 0.2)  # Reduce by 80%
                         
-                        # Normalize
+                        # Normalize (with safety check)
                         total_prob = sum(attack_type_probs.values())
-                        if total_prob > 0:
+                        if total_prob > 0 and not np.isnan(total_prob) and not np.isinf(total_prob):
                             for at in attack_type_probs:
-                                attack_type_probs[at] = attack_type_probs[at] / total_prob
+                                normalized = attack_type_probs[at] / total_prob
+                                # Ensure no NaN or inf
+                                if np.isnan(normalized) or np.isinf(normalized):
+                                    attack_type_probs[at] = 0.0
+                                else:
+                                    attack_type_probs[at] = float(normalized)
+                        else:
+                            # If normalization fails, set equal probabilities
+                            for at in attack_type_probs:
+                                attack_type_probs[at] = 1.0 / len(attack_type_probs)
 
                 results.append({
                     'packet_id': packet.get('_id', ''),

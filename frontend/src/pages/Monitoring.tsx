@@ -505,7 +505,22 @@ const Monitoring: FC = () => {
                           </div>
                           <div className="detail-item">
                             <span className="detail-label">Attack Type (Multiclass)</span>
-                            <span className="detail-value">{alert.attack_type || 'Unknown'}</span>
+                            <span className="detail-value">
+                              {(() => {
+                                const attackType = alert.attack_type || 'Unknown';
+                                // Map to display-friendly names
+                                const typeMap: { [key: string]: string } = {
+                                  'dos': 'DoS Attack',
+                                  'probe': 'Port Scan / Reconnaissance',
+                                  'r2l': 'Remote to Local Attack',
+                                  'u2r': 'User to Root Attack',
+                                  'brute_force': 'Brute Force Attack',
+                                  'unknown_attack': 'Unknown Attack Type',
+                                  'normal': 'Normal Traffic'
+                                };
+                                return typeMap[attackType.toLowerCase()] || attackType.charAt(0).toUpperCase() + attackType.slice(1).replace(/_/g, ' ');
+                              })()}
+                            </span>
                           </div>
                           <div className="detail-item">
                             <span className="detail-label">Multiclass Confidence</span>
