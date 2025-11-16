@@ -269,10 +269,14 @@ echo ""
 echo "6. Starting Frontend..."
 cd "$SCRIPT_DIR/frontend" || exit 1
 
-# Kill existing frontend
-pkill -f "vite" >/dev/null 2>&1 || true
-pkill -f "electron" >/dev/null 2>&1 || true
-sleep 1
+# Kill existing frontend more aggressively
+echo "   Stopping any existing frontend processes..."
+pkill -9 -f "vite" >/dev/null 2>&1 || true
+pkill -9 -f "electron" >/dev/null 2>&1 || true
+# Also kill anything using port 5173
+{ sudo lsof -ti:5173 2>/dev/null | xargs sudo kill -9 2>/dev/null || true; } >/dev/null 2>&1
+sleep 2
+echo ""  # Add blank line for cleaner output
 
 # Check if dependencies are installed
 if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
@@ -282,6 +286,9 @@ if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/vite" ]; then
         echo -e "${YELLOW}   ⚠ npm install had issues, but continuing...${NC}"
     fi
 fi
+
+# Clear old log
+> /tmp/ids-frontend.log
 
 # Start frontend
 echo "   Starting web dev server..."
