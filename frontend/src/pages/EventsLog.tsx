@@ -101,7 +101,13 @@ const EventsLog: FC = () => {
     socket.on('connect', () => {
       console.log('Socket connected successfully');
       setSocket(socket);
-      // Don't automatically set scanning to true on connect
+      // Auto-start packet capture when socket connects
+      const token = authService.getToken();
+      if (token) {
+        console.log('Auto-starting packet capture...');
+        setScanningState('starting');
+        socket.emit('start-scanning', { token });
+      }
     });
 
     socket.on('connect_error', (error) => {
@@ -441,7 +447,17 @@ const EventsLog: FC = () => {
         </div>
         
         <div className="pagination-controls">
-          <div className="records-info">Showing 1-10 of {packets.length}</div>
+          <div className="records-info">
+            {packets.length > 0 ? (
+              <>Showing {packets.length} packet{packets.length !== 1 ? 's' : ''}</>
+            ) : scanningState === 'scanning' ? (
+              <>Waiting for packets... (Scanning active)</>
+            ) : scanningState === 'starting' ? (
+              <>Starting packet capture...</>
+            ) : (
+              <>No packets yet. Click "Start Scanning" to begin.</>
+            )}
+          </div>
           <div className="pagination-buttons">
             <motion.button
               className="pagination-btn"
