@@ -273,7 +273,16 @@ sleep 8
 
 # Verify frontend
 echo "   Verifying frontend..."
-if check_process "vite\|electron" "Frontend"; then
+# Check port first (most reliable) since vite might be running under node/npm
+if check_port 5173 "Frontend"; then
+    if check_service "http://localhost:5173" "Frontend"; then
+        echo -e "${GREEN}   ✅ Frontend fully operational${NC}"
+        VM_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
+        echo -e "   🌐 Access at: http://$VM_IP:5173"
+    else
+        echo -e "${YELLOW}   ⚠ Frontend port listening but not responding${NC}"
+    fi
+elif check_process "vite\|electron" "Frontend"; then
     if check_port 5173 "Frontend"; then
         if check_service "http://localhost:5173" "Frontend"; then
             echo -e "${GREEN}   ✅ Frontend fully operational${NC}"
@@ -352,7 +361,12 @@ else
     echo -e "${RED}❌ Backend process is NOT running (port 5001 not listening)${NC}"
 fi
 [ ! -z "$PREDICTION_PID" ] && check_process "prediction_service.py" "Prediction Service"
-check_process "vite\|electron" "Frontend"
+# Check frontend by port (more reliable)
+if check_port 5173 "Frontend"; then
+    echo -e "${GREEN}✅ Frontend process is running (port 5173 listening)${NC}"
+else
+    echo -e "${RED}❌ Frontend process is NOT running (port 5173 not listening)${NC}"
+fi
 check_process "python.*http.server.*8080" "Demo Site"
 echo ""
 
