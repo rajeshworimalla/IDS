@@ -290,16 +290,32 @@ export class PacketCaptureService {
 
         // Update in MongoDB
         await savedPacket.save();
-        console.log('Packet updated with ML predictions');
+        console.log('Packet updated with ML predictions:', {
+          is_malicious: savedPacket.is_malicious,
+          attack_type: savedPacket.attack_type,
+          confidence: savedPacket.confidence
+        });
       } catch (err) {
         console.log('ML service not available, continuing without predictions');
       }
 
+      // Reload packet from DB to ensure we have latest ML predictions
+      await savedPacket.populate('user');
+      const packetToEmit = savedPacket.toObject();
+      
+      // Ensure is_malicious and attack_type are included
+      packetToEmit.is_malicious = savedPacket.is_malicious ?? false;
+      packetToEmit.attack_type = savedPacket.attack_type || 'normal';
+      
       // Broadcast to connected clients
       const io = getIO();
       if (io) {
-        console.log('Broadcasting new packet to clients');
-        io.emit('new-packet', savedPacket.toObject());
+        console.log('Broadcasting new packet to clients:', {
+          is_malicious: packetToEmit.is_malicious,
+          attack_type: packetToEmit.attack_type,
+          status: packetToEmit.status
+        });
+        io.emit('new-packet', packetToEmit);
       } else {
         console.error('Socket.IO not initialized');
       }

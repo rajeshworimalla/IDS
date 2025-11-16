@@ -50,12 +50,25 @@ const AttackAlertModal: FC<AttackAlertModalProps> = ({ alert, onClose }) => {
   };
 
   const getAttackTypeName = (type: string) => {
+    // The type is already formatted from App.tsx, but handle edge cases
+    if (!type || type === 'normal' || type === 'Normal Traffic') {
+      return 'Unknown Attack Type';
+    }
+    
+    // If it's already a formatted name, return as-is
+    if (type.includes('Attack') || type.includes('Attack Type')) {
+      return type;
+    }
+    
+    // Otherwise map it
     const typeLower = type.toLowerCase();
     const types: { [key: string]: string } = {
       'dos': 'Denial of Service (DoS) Attack',
       'probe': 'Port Scanning / Reconnaissance Attack',
       'r2l': 'Remote to Local Attack',
       'u2r': 'User to Root Attack',
+      'brute_force': 'Brute Force Attack',
+      'unknown_attack': 'Unknown Attack Type',
       'normal': 'Normal Traffic',
       'syn flood': 'SYN Flood Attack',
       'port scan': 'Port Scanning Attack',
@@ -65,9 +78,13 @@ const AttackAlertModal: FC<AttackAlertModalProps> = ({ alert, onClose }) => {
     
     // Check if type contains keywords
     if (typeLower.includes('dos') || typeLower.includes('denial')) return types['dos'];
-    if (typeLower.includes('probe') || typeLower.includes('scan')) return types['probe'];
+    if (typeLower.includes('probe') || typeLower.includes('scan') || typeLower.includes('reconnaissance')) return types['probe'];
+    if (typeLower.includes('brute') || typeLower.includes('force')) return types['brute_force'];
+    if (typeLower.includes('r2l') || typeLower.includes('remote to local')) return types['r2l'];
+    if (typeLower.includes('u2r') || typeLower.includes('user to root')) return types['u2r'];
     if (typeLower.includes('syn') || typeLower.includes('flood')) return types['syn flood'];
     if (typeLower.includes('anomaly') || typeLower.includes('suspicious')) return types['network anomaly'];
+    if (typeLower.includes('unknown')) return types['unknown_attack'];
     
     return types[typeLower] || type || 'Unknown Attack Type';
   };
