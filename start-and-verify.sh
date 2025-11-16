@@ -223,12 +223,25 @@ if [ -f "venv/bin/activate" ] && [ -f "binary_attack_model.pkl" ] && [ -f "multi
     PREDICTION_PID=$!
     disown $PREDICTION_PID 2>/dev/null || true
     deactivate 2>/dev/null || true
-    sleep 3
     
-    # Verify prediction service
+    # Wait longer for Python Flask service to start (can take 5-8 seconds)
+    echo "   Waiting for prediction service to start..."
+    sleep 5
+    
+    # Verify prediction service with retries
     echo "   Verifying prediction service..."
-    if check_process "prediction_service.py" "Prediction Service"; then
+    PORT_READY=false
+    for i in {1..5}; do
         if check_port 5002 "Prediction Service"; then
+            PORT_READY=true
+            break
+        else
+            sleep 1
+        fi
+    done
+    
+    if check_process "prediction_service.py" "Prediction Service"; then
+        if [ "$PORT_READY" = true ] || check_port 5002 "Prediction Service"; then
             # Test prediction endpoint
             if curl -s -X POST http://localhost:5002/predict \
                 -H "Content-Type: application/json" \
@@ -239,7 +252,8 @@ if [ -f "venv/bin/activate" ] && [ -f "binary_attack_model.pkl" ] && [ -f "multi
                 echo -e "${YELLOW}   ⚠ Prediction service running but endpoint not responding${NC}"
             fi
         else
-            echo -e "${YELLOW}   ⚠ Prediction service process running but port not listening${NC}"
+            echo -e "${YELLOW}   ⚠ Prediction service process running but port not listening yet${NC}"
+            echo "   (Port may take a few more seconds to become available)"
         fi
     else
         echo -e "${RED}   ❌ Prediction service failed to start${NC}"

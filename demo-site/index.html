@@ -193,9 +193,16 @@
         showMessage('Login successful.', true);
       } else {
         console.warn(`[${ts}] login failed: user="${username}"`);
-        showMessage('Invalid username or password.', false);
-        // Notify IDS backend for rate-limiting/ban
-        await reportFailedLogin();
+        // Notify IDS backend for rate-limiting/ban FIRST
+        const banData = await reportFailedLogin();
+        // If banned, show ban message instead of error
+        if (banData && banData.banned) {
+          // updateBanUI() is already called inside reportFailedLogin(), but ensure it's shown
+          updateBanUI();
+        } else {
+          // Only show error message if not banned
+          showMessage('Invalid username or password.', false);
+        }
       }
 
       // Optional: clear password after attempt
