@@ -382,6 +382,8 @@ const Monitoring: FC = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
                         <h3 style={{ margin: 0 }}>{alert.type}</h3>
                         {/* ML Binary Prediction Badge - Most Important */}
+                        {/* Only show BENIGN if severity is low AND ML says benign */}
+                        {/* If severity is critical/medium, it's an attack regardless of ML */}
                         {alert.is_malicious !== undefined && (
                           <span 
                             style={{
@@ -391,13 +393,17 @@ const Monitoring: FC = () => {
                               fontWeight: '700',
                               textTransform: 'uppercase',
                               letterSpacing: '0.5px',
-                              backgroundColor: alert.is_malicious ? '#ff4d4f' : '#52c41a',
+                              backgroundColor: (alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium') 
+                                ? '#ff4d4f' : '#52c41a',
                               color: '#fff',
-                              boxShadow: alert.is_malicious ? '0 0 8px rgba(255, 77, 79, 0.5)' : '0 0 8px rgba(82, 196, 26, 0.3)',
-                              border: alert.is_malicious ? '1px solid #ff7875' : '1px solid #73d13d'
+                              boxShadow: (alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium')
+                                ? '0 0 8px rgba(255, 77, 79, 0.5)' : '0 0 8px rgba(82, 196, 26, 0.3)',
+                              border: (alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium')
+                                ? '1px solid #ff7875' : '1px solid #73d13d'
                             }}
                           >
-                            {alert.is_malicious ? '🚨 ATTACK DETECTED' : '✓ BENIGN'}
+                            {(alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium')
+                              ? '🚨 ATTACK DETECTED' : '✓ BENIGN'}
                           </span>
                         )}
                         <span 
@@ -444,15 +450,15 @@ const Monitoring: FC = () => {
                             <div className="detail-item full-width" style={{ 
                               marginBottom: '1rem', 
                               padding: '1rem',
-                              background: alert.is_malicious 
+                              background: (alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium')
                                 ? 'rgba(255, 77, 79, 0.1)' 
                                 : 'rgba(82, 196, 26, 0.1)',
-                              border: `2px solid ${alert.is_malicious ? '#ff4d4f' : '#52c41a'}`,
+                              border: `2px solid ${(alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium') ? '#ff4d4f' : '#52c41a'}`,
                               borderRadius: '8px'
                             }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
                                 <span className="detail-label" style={{ fontSize: '1rem', fontWeight: '600' }}>
-                                  ML Model Binary Prediction:
+                                  Detection Result:
                                 </span>
                                 <span style={{
                                   padding: '0.4rem 1rem',
@@ -460,11 +466,24 @@ const Monitoring: FC = () => {
                                   fontSize: '0.9rem',
                                   fontWeight: '700',
                                   textTransform: 'uppercase',
-                                  backgroundColor: alert.is_malicious ? '#ff4d4f' : '#52c41a',
+                                  backgroundColor: (alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium') ? '#ff4d4f' : '#52c41a',
                                   color: '#fff'
                                 }}>
-                                  {alert.is_malicious ? '🚨 ATTACK DETECTED' : '✓ BENIGN TRAFFIC'}
+                                  {(alert.is_malicious || alert.severity === 'critical' || alert.severity === 'medium')
+                                    ? '🚨 ATTACK DETECTED' : '✓ BENIGN TRAFFIC'}
                                 </span>
+                                {alert.has_conflict && (
+                                  <span style={{
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    backgroundColor: '#faad14',
+                                    color: '#000',
+                                    fontWeight: '600'
+                                  }}>
+                                    ⚠️ ML/Rule Conflict
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary, #999)' }}>
                                 Confidence: {alert.confidence ? `${Math.round(alert.confidence * 100)}%` : 'N/A'} 

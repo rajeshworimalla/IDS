@@ -215,11 +215,38 @@ router.get('/alerts', async (req, res) => {
     const formattedAlerts = alerts.map(packet => {
       let severity = 'low';
       let alertStatus = 'active';
+      let hasConflict = false;
       
-      // Map packet status to alert severity
-      if (packet.status === 'critical') severity = 'critical';
-      else if (packet.status === 'medium') severity = 'medium';
-      else if (packet.status === 'normal') severity = 'low';
+      // Map packet status to alert severity (rule-based detection)
+      let ruleBasedSeverity = 'low';
+      if (packet.status === 'critical') ruleBasedSeverity = 'critical';
+      else if (packet.status === 'medium') ruleBasedSeverity = 'medium';
+      else if (packet.status === 'normal') ruleBasedSeverity = 'low';
+      
+      // Priority: Rule-based detection takes precedence for severity
+      // ML is used for attack type classification, but rule-based severity is trusted
+      if (packet.is_malicious === true) {
+        // ML says malicious - trust ML for attack type, use rule-based severity
+        severity = ruleBasedSeverity;
+        // If rule-based said normal but ML says malicious, upgrade
+        if (ruleBasedSeverity === 'low' && packet.status === 'normal') {
+          severity = 'medium'; // Upgrade to medium since ML detected attack
+        }
+      } else if (packet.is_malicious === false) {
+        // ML says benign BUT rule-based detected something suspicious
+        // Trust rule-based severity (it detected the pattern)
+        if (ruleBasedSeverity === 'critical' || ruleBasedSeverity === 'medium') {
+          // Rule-based detected attack pattern - trust it over ML
+          severity = ruleBasedSeverity;
+          hasConflict = true; // Flag conflict but trust rule-based
+        } else {
+          // Both agree it's normal/low
+          severity = 'low';
+        }
+      } else {
+        // ML prediction not available yet - use rule-based
+        severity = ruleBasedSeverity;
+      }
       
       // Set default alert status (packets don't have investigation status)
       alertStatus = 'active'; // Default status for new alerts
@@ -227,8 +254,16 @@ router.get('/alerts', async (req, res) => {
       // Determine alert type - use attack_type if meaningful, otherwise infer from severity/protocol
       let alertType = packet.attack_type || 'Network Anomaly';
       
-      // If attack_type is "normal" but severity is high, provide a more descriptive type
-      if (alertType === 'normal' && (severity === 'critical' || severity === 'medium')) {
+      // If ML says benign, don't call it a "threat" - use more neutral language
+      if (packet.is_malicious === false) {
+        if (alertType === 'normal') {
+          alertType = 'Normal Traffic';
+        } else {
+          // Even if attack_type exists, if ML says benign, it's likely a false positive
+          alertType = 'Normal Traffic (ML Verified)';
+        }
+      } else if (alertType === 'normal' && (severity === 'critical' || severity === 'medium')) {
+        // If attack_type is "normal" but severity is high, provide a more descriptive type
         // Try to infer from description or protocol
         const desc = (packet.description || '').toLowerCase();
         const proto = (packet.protocol || '').toUpperCase();
@@ -263,6 +298,7 @@ router.get('/alerts', async (req, res) => {
         description: packet.description,
         confidence: packet.confidence,
         is_malicious: packet.is_malicious,
+        has_conflict: hasConflict, // Flag to show conflict between rule-based and ML
         attack_type: packet.attack_type,
         attack_type_probabilities: packet.attack_type_probabilities,
         type: alertType,

@@ -44,6 +44,7 @@ export interface ThreatAlert {
   description: string;
   confidence: number;
   is_malicious?: boolean;
+  has_conflict?: boolean;
   attack_type: string;
   attack_type_probabilities?: {
     normal?: number;
