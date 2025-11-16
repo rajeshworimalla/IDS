@@ -405,34 +405,55 @@ const EventsLog: FC = () => {
               </tr>
             </thead>
             <tbody>
-              {packets.map((packet) => (
-                <tr
-                  key={packet._id}
-                  className={selectedRows.includes(packet._id) ? 'selected' : ''}
-                >
-                  <td>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedRows.includes(packet._id)}
-                      onChange={() => toggleRowSelection(packet._id)}
-                    />
+              {packets.length === 0 ? (
+                <tr>
+                  <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                    {scanningState === 'scanning' ? (
+                      <div>
+                        <p style={{ fontSize: '1.1rem', marginBottom: '10px' }}>📡 Scanning for packets...</p>
+                        <p style={{ fontSize: '0.9rem' }}>Waiting for network traffic. Try browsing the site or running an attack from Kali Linux.</p>
+                      </div>
+                    ) : scanningState === 'starting' ? (
+                      <div>
+                        <p style={{ fontSize: '1.1rem' }}>🚀 Starting packet capture...</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p style={{ fontSize: '1.1rem', marginBottom: '10px' }}>No packets captured yet</p>
+                        <p style={{ fontSize: '0.9rem' }}>Click "Start Scanning" to begin capturing network traffic.</p>
+                      </div>
+                    )}
                   </td>
-                  <td>
-                    <div className="status-container" title={getStatusText(packet.status)}>
-                      <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
-                      <span className="status-text">{packet.status}</span>
-                    </div>
-                  </td>
-                  <td>{new Date(packet.date).toLocaleDateString()}</td>
-                  <td>{new Date(packet.date).toLocaleDateString()}</td>
-                  <td>{packet.start_ip}</td>
-                  <td>{packet.end_ip}</td>
-                  <td>{packet.protocol}</td>
-                  <td className="description-cell">{packet.description}</td>
-                  <td>{packet.frequency}</td>
-                  <td>{packet.start_bytes}</td>
-                  <td>{packet.end_bytes}</td>
                 </tr>
+              ) : (
+                packets.map((packet) => (
+                  <tr
+                    key={packet._id}
+                    className={selectedRows.includes(packet._id) ? 'selected' : ''}
+                  >
+                    <td>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedRows.includes(packet._id)}
+                        onChange={() => toggleRowSelection(packet._id)}
+                      />
+                    </td>
+                    <td>
+                      <div className="status-container" title={getStatusText(packet.status)}>
+                        <span className={`status-indicator ${getStatusColor(packet.status)}`}></span>
+                        <span className="status-text">{packet.status}</span>
+                      </div>
+                    </td>
+                    <td>{new Date(packet.date).toLocaleDateString()}</td>
+                    <td>{new Date(packet.date).toLocaleDateString()}</td>
+                    <td>{packet.start_ip}</td>
+                    <td>{packet.end_ip}</td>
+                    <td>{packet.protocol}</td>
+                    <td className="description-cell">{packet.description}</td>
+                    <td>{packet.frequency}</td>
+                    <td>{packet.start_bytes}</td>
+                    <td>{packet.end_bytes}</td>
+                  </tr>
                 ))
               )}
             </tbody>
