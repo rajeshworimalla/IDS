@@ -18,6 +18,8 @@ interface Packet {
 }
 
 const EventsLog: FC = () => {
+  console.log('[EventsLog] Component rendering...');
+  
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [packets, setPackets] = useState<Packet[]>([]);
@@ -27,20 +29,34 @@ const EventsLog: FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Check authentication immediately
+  useEffect(() => {
+    const token = authService.getToken();
+    if (!token) {
+      console.error('[EventsLog] No token found, redirecting...');
+      window.location.href = '/login';
+      return;
+    }
+    console.log('[EventsLog] Token found, proceeding...');
+  }, []);
+
   // Fetch packets on component mount
   useEffect(() => {
     let mounted = true;
     const fetchPackets = async () => {
       try {
+        console.log('[EventsLog] Starting to fetch packets...');
         setIsLoading(true);
         setError(null);
         const token = authService.getToken();
         if (!token) {
+          console.error('[EventsLog] No token in fetchPackets');
           setError('Not authenticated. Please login.');
           setIsLoading(false);
           return;
         }
 
+        console.log('[EventsLog] Fetching from API...');
         const response = await fetch('http://localhost:5001/api/packets/all', {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -49,27 +65,40 @@ const EventsLog: FC = () => {
           credentials: 'include'
         });
 
-        if (!mounted) return;
+        if (!mounted) {
+          console.log('[EventsLog] Component unmounted, aborting');
+          return;
+        }
 
+        console.log('[EventsLog] Response status:', response.status);
         if (response.ok) {
           const data = await response.json();
+          console.log('[EventsLog] Received data:', Array.isArray(data) ? data.length : 'not array');
           const limitedData = Array.isArray(data) ? data.slice(0, 50) : [];
           setPackets(limitedData);
+          console.log('[EventsLog] Set packets:', limitedData.length);
         } else {
+          const errorText = await response.text();
+          console.error('[EventsLog] API error:', response.status, errorText);
           setError(`Failed to load packets: ${response.status}`);
         }
       } catch (error: any) {
         if (!mounted) return;
+        console.error('[EventsLog] Fetch error:', error);
         setError(`Network error: ${error.message || 'Failed to connect to backend'}`);
       } finally {
         if (mounted) {
+          console.log('[EventsLog] Setting loading to false');
           setIsLoading(false);
         }
       }
     };
 
     fetchPackets();
-    return () => { mounted = false; };
+    return () => { 
+      console.log('[EventsLog] Cleanup: unmounting');
+      mounted = false; 
+    };
   }, []);
 
   // Initialize socket connection
@@ -238,24 +267,28 @@ const EventsLog: FC = () => {
     socket.emit('stop-scanning', { token });
   };
 
-  // Always render something visible
-  return (
-    <div className="events-log-page">
-      <Navbar />
-      <main className="events-log-content">
-        <div className="events-header">
-          <h1>Traffic Collector</h1>
-          <div style={{ 
-            background: '#3699ff', 
-            color: '#fff', 
-            padding: '0.5rem 1rem', 
-            borderRadius: '4px',
-            fontSize: '0.9rem',
-            marginTop: '1rem'
-          }}>
-            Status: {isLoading ? 'Loading...' : error ? `Error: ${error}` : `Loaded ${packets.length} packets`}
+  // Always render something visible - wrap in try-catch for safety
+  try {
+    console.log('[EventsLog] Rendering JSX, state:', { isLoading, error, packetsCount: packets.length });
+    
+    return (
+      <div className="events-log-page" style={{ minHeight: '100vh', display: 'flex' }}>
+        <Navbar />
+        <main className="events-log-content" style={{ flex: 1, padding: '2rem', marginLeft: '240px' }}>
+          <div className="events-header">
+            <h1 style={{ color: '#fff', marginBottom: '1rem' }}>Traffic Collector</h1>
+            <div style={{ 
+              background: '#3699ff', 
+              color: '#fff', 
+              padding: '0.5rem 1rem', 
+              borderRadius: '4px',
+              fontSize: '0.9rem',
+              marginBottom: '1rem',
+              display: 'inline-block'
+            }}>
+              Status: {isLoading ? 'Loading...' : error ? `Error: ${error}` : `Loaded ${packets.length} packets`}
+            </div>
           </div>
-        </div>
         
         {isLoading && (
           <div className="loading-container">
@@ -386,7 +419,41 @@ const EventsLog: FC = () => {
         )}
       </main>
     </div>
-  );
+    );
+  } catch (err: any) {
+    console.error('[EventsLog] Render error:', err);
+    return (
+      <div className="events-log-page" style={{ minHeight: '100vh', display: 'flex' }}>
+        <Navbar />
+        <main className="events-log-content" style={{ flex: 1, padding: '2rem', marginLeft: '240px' }}>
+          <h1 style={{ color: '#fff' }}>Traffic Collector</h1>
+          <div style={{ 
+            background: '#ff4d4f', 
+            color: '#fff', 
+            padding: '1rem', 
+            borderRadius: '8px',
+            marginTop: '1rem'
+          }}>
+            <strong>Render Error:</strong> {err.message || 'Unknown error'}
+            <button 
+              onClick={() => window.location.reload()} 
+              style={{
+                marginLeft: '1rem',
+                padding: '0.5rem 1rem',
+                background: '#3699ff',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Reload Page
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 };
 
 export default EventsLog;
