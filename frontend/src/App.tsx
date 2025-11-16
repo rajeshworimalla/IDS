@@ -10,13 +10,26 @@ import Support from './pages/Support'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Blocker from './pages/Blocker'
+import AttackAlertModal from './components/AttackAlertModal'
+import { io, Socket } from 'socket.io-client'
 import './App.css'
+
+interface AttackAlert {
+  id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  attackType: string;
+  sourceIP: string;
+  destinationIP: string;
+  description: string;
+  timestamp: Date;
+}
 
 const App: FC = () => {
   // Use state to track authentication status so it updates the UI when it changes
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
     authService.isAuthenticated()
   );
+  const [attackAlert, setAttackAlert] = useState<AttackAlert | null>(null);
 
   // Listen for changes to localStorage and custom events
   useEffect(() => {
@@ -64,14 +77,67 @@ const App: FC = () => {
     };
   }, []);
 
+  // Listen for attack alerts via WebSocket
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const token = authService.getToken();
+    if (!token) return;
+
+    const socket: Socket = io('http://localhost:5001', {
+      auth: { token },
+      withCredentials: true,
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => {
+      console.log('[Alert System] Connected to WebSocket');
+    });
+
+    socket.on('new-packet', (packet: any) => {
+      // Only show alerts for critical or medium severity
+      if (packet.status === 'critical' || packet.status === 'medium') {
+        const severity = packet.status === 'critical' ? 'critical' : 'medium';
+        const attackType = packet.attack_type || packet.description?.toLowerCase() || 'unknown';
+        
+        // Map status to severity for alerts
+        const alert: AttackAlert = {
+          id: packet._id || Date.now().toString(),
+          severity,
+          attackType: attackType,
+          sourceIP: packet.start_ip || 'Unknown',
+          destinationIP: packet.end_ip || 'Unknown',
+          description: packet.description || `Suspicious ${packet.protocol || 'network'} activity detected`,
+          timestamp: new Date(packet.date || Date.now()),
+        };
+
+        console.log('[Alert System] Critical/Medium attack detected:', alert);
+        setAttackAlert(alert);
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('[Alert System] Disconnected from WebSocket');
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [isAuthenticated]);
+
   // Set up a protected route component
   const ProtectedRoute = ({ element }: { element: React.ReactElement }) => {
     return isAuthenticated ? element : <Navigate to="/login" replace />;
   };
 
   return (
-    <Router>
-      <Routes>
+    <>
+      <AttackAlertModal 
+        alert={attackAlert} 
+        onClose={() => setAttackAlert(null)} 
+      />
+      <Router>
+        <Routes>
         {/* Auth routes - redirect to dashboard if already logged in */}
         <Route 
           path="/login" 
@@ -104,6 +170,7 @@ const App: FC = () => {
         />
       </Routes>
     </Router>
+    </>
   )
 }
 
