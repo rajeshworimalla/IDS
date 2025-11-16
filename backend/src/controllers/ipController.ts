@@ -49,6 +49,12 @@ export const blockIP = async (req: Request, res: Response) => {
     const { ip, reason } = req.body as { ip?: string; reason?: string };
     if (!ip) return res.status(400).json({ error: 'ip is required' });
 
+    // Prevent blocking localhost (safety)
+    const ipToCheck = String(ip).trim();
+    if (ipToCheck === '127.0.0.1' || ipToCheck === 'localhost' || ipToCheck === '::1' || ipToCheck === '::ffff:127.0.0.1') {
+      return res.status(400).json({ error: 'Cannot block localhost (127.0.0.1) for security reasons' });
+    }
+
     // If it's a literal IP, block directly
     if (isIP(ip) !== 0) {
       const setOnInsert: any = { blockedAt: new Date() };
@@ -174,8 +180,24 @@ export const unblockIP = async (req: Request, res: Response) => {
     const { ip } = req.params;
     if (!ip) return res.status(400).json({ error: 'ip param is required' });
 
-    await BlockedIP.deleteOne({ user: req.user._id, ip });
-    const result = await firewall.unblockIP(ip);
+    // Decode IP (might be URL encoded)
+    const decodedIP = decodeURIComponent(ip);
+    
+    // Remove from MongoDB
+    await BlockedIP.deleteOne({ user: req.user._id, ip: decodedIP });
+    
+    // Remove from firewall
+    const result = await firewall.unblockIP(decodedIP);
+    
+    // Also remove from Redis temp ban (if it was auto-banned)
+    try {
+      const { removeTempBan } = await import('../services/blocker');
+      await removeTempBan(decodedIP);
+      console.log(`Removed temp ban for ${decodedIP}`);
+    } catch (e) {
+      console.log(`No temp ban found for ${decodedIP} (or error removing):`, e);
+    }
+    
     return res.json({ message: 'Unblocked', removed: (result as any).removed !== false });
   } catch (e) {
     console.error('unblockIP error:', e);

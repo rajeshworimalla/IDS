@@ -197,3 +197,12 @@ tail -f /tmp/ids-backend.log
 
 That's it! Your ML model automatically analyzes every packet and marks them as malicious/benign with attack types.
 
+
+
+
+
+
+
+
+
+

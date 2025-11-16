@@ -1,46 +1,44 @@
-import React, { FC, useState } from 'react';
+import React, { FC, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
+import { supportService, FAQ } from '../services/supportService';
 import '../styles/Support.css';
-
-interface FAQ {
-  question: string;
-  answer: string;
-}
 
 const Support: FC = () => {
   const [activeTab, setActiveTab] = useState<'faq' | 'contact' | 'resources'>('faq');
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
+  const [faqs, setFaqs] = useState<FAQ[]>([]);
+  const [faqsLoading, setFaqsLoading] = useState(true);
+  const [faqsError, setFaqsError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     subject: '',
     message: '',
-    priority: 'medium'
+    priority: 'medium' as 'low' | 'medium' | 'high' | 'critical'
   });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
 
-  const faqs: FAQ[] = [
-    {
-      question: 'How do I configure alert notifications?',
-      answer: 'Go to Settings > Alerts and configure your preferred notification methods. You can choose between email, SMS, or in-app notifications, and set thresholds for different severity levels.'
-    },
-    {
-      question: 'Can I export security reports?',
-      answer: 'Yes, you can export reports in various formats (PDF, CSV, JSON) from the Dashboard or Monitoring page. Click on the Export button in the top-right corner and select your preferred format.'
-    },
-    {
-      question: 'How do I add new users to the system?',
-      answer: 'Navigate to Settings > Account > User Management and click "Add User". Fill in the required information and assign appropriate roles and permissions.'
-    },
-    {
-      question: 'What does the severity level of alerts mean?',
-      answer: 'The severity levels (Critical, High, Medium, Low) indicate the potential impact and urgency of the threat. Critical alerts require immediate attention, while Low severity alerts are informational.'
-    },
-    {
-      question: 'How often is the threat database updated?',
-      answer: 'Our threat intelligence database is updated in real-time with feeds from multiple sources. The system automatically pulls updates every 15 minutes for emerging threats.'
-    }
-  ];
+  // Fetch FAQ data on mount
+  useEffect(() => {
+    const fetchFAQ = async () => {
+      try {
+        setFaqsLoading(true);
+        setFaqsError(null);
+        const data = await supportService.getFAQ();
+        setFaqs(data);
+      } catch (error: any) {
+        console.error('Error fetching FAQ:', error);
+        setFaqsError(error?.message || 'Failed to load FAQ');
+      } finally {
+        setFaqsLoading(false);
+      }
+    };
+
+    fetchFAQ();
+  }, []);
 
   const resources = [
     {
@@ -93,19 +91,39 @@ const Support: FC = () => {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real application, this would send the data to a server
-    console.log('Form submitted:', formData);
-    alert('Your support request has been submitted. We will get back to you soon.');
-    // Reset form
-    setFormData({
-      name: '',
-      email: '',
-      subject: '',
-      message: '',
-      priority: 'medium'
-    });
+    setSubmitting(true);
+    setSubmitError(null);
+    setSubmitSuccess(false);
+
+    try {
+      await supportService.createTicket({
+        name: formData.name,
+        email: formData.email,
+        subject: formData.subject,
+        message: formData.message,
+        priority: formData.priority
+      });
+
+      setSubmitSuccess(true);
+      // Reset form
+      setFormData({
+        name: '',
+        email: '',
+        subject: '',
+        message: '',
+        priority: 'medium'
+      });
+
+      // Clear success message after 5 seconds
+      setTimeout(() => setSubmitSuccess(false), 5000);
+    } catch (error: any) {
+      console.error('Error submitting ticket:', error);
+      setSubmitError(error?.response?.data?.message || error?.message || 'Failed to submit support request. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -152,8 +170,29 @@ const Support: FC = () => {
               transition={{ duration: 0.3 }}
             >
               <h2>Frequently Asked Questions</h2>
+              {faqsLoading && (
+                <div style={{ textAlign: 'center', padding: '2rem' }}>
+                  <p>Loading FAQ...</p>
+                </div>
+              )}
+              {faqsError && (
+                <div style={{ 
+                  padding: '1rem', 
+                  margin: '1rem 0', 
+                  backgroundColor: '#fee', 
+                  color: '#c33',
+                  borderRadius: '4px'
+                }}>
+                  Error: {faqsError}
+                </div>
+              )}
+              {!faqsLoading && !faqsError && faqs.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '2rem' }}>
+                  <p>No FAQ items available.</p>
+                </div>
+              )}
               <div className="faq-list">
-                {faqs.map((faq, index) => (
+                {!faqsLoading && faqs.map((faq, index) => (
                   <motion.div 
                     key={index}
                     className={`faq-item ${expandedFaq === index ? 'expanded' : ''}`}
@@ -224,6 +263,28 @@ const Support: FC = () => {
 
                 <form className="contact-form" onSubmit={handleSubmit}>
                   <h3>Submit a Support Request</h3>
+                  {submitSuccess && (
+                    <div style={{ 
+                      padding: '1rem', 
+                      marginBottom: '1rem', 
+                      backgroundColor: '#efe', 
+                      color: '#3c3',
+                      borderRadius: '4px'
+                    }}>
+                      ✓ Your support request has been submitted successfully. We will get back to you soon.
+                    </div>
+                  )}
+                  {submitError && (
+                    <div style={{ 
+                      padding: '1rem', 
+                      marginBottom: '1rem', 
+                      backgroundColor: '#fee', 
+                      color: '#c33',
+                      borderRadius: '4px'
+                    }}>
+                      Error: {submitError}
+                    </div>
+                  )}
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="name">Name</label>
@@ -284,7 +345,13 @@ const Support: FC = () => {
                       <option value="critical">Critical</option>
                     </select>
                   </div>
-                  <button type="submit" className="submit-button">Submit Request</button>
+                  <button 
+                    type="submit" 
+                    className="submit-button" 
+                    disabled={submitting}
+                  >
+                    {submitting ? 'Submitting...' : 'Submit Request'}
+                  </button>
                 </form>
               </div>
             </motion.div>

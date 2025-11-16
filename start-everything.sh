@@ -66,9 +66,9 @@ if [ ! -d "dist" ]; then
     npm run build
 fi
 
-# Start backend in background
-echo "   Starting backend server..."
-sudo npm start > /tmp/ids-backend.log 2>&1 &
+# Start backend in background with increased memory
+echo "   Starting backend server (with 4GB memory limit)..."
+sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
 BACKEND_PID=$!
 sleep 3
 

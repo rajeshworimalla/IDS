@@ -41,6 +41,8 @@ logs/
 npm-debug.log
 yarn-debug.log
 yarn-error.log
+/tmp/ids-*.log
+/tmp/*.log
 
 # IDE and editor files
 .idea/
@@ -56,3 +58,11 @@ yarn-error.log
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Temporary files
+Sending
+concurrently
+vite
+frontend@0.0.0
+*.tmp
+*.temp

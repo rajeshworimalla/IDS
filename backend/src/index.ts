@@ -8,10 +8,12 @@ import packetRoutes from './routes/packets';
 import settingsRoutes from './routes/settings';
 import ipsRoutes from './routes/ips';
 import eventsRoutes from './routes/events';
+import supportRoutes from './routes/support';
 import { firewall } from './services/firewall';
 import { BlockedIP } from './models/BlockedIP';
 import { config } from './config/env';
 import { initializeSocket } from './socket';
+import { rateLimitMiddleware } from './middleware/rateLimit';
 
 // Load environment variables
 dotenv.config();
@@ -62,14 +64,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rate-limit and auto-ban middleware (Redis-based)
-(async () => {
-  try {
-    const { rateLimitMiddleware } = await import('./middleware/rateLimit');
-    app.use(rateLimitMiddleware);
-  } catch (e) {
-    console.error('Rate limit middleware failed to init:', e);
-  }
-})();
+app.use(rateLimitMiddleware);
+console.log('Rate limit middleware loaded and applied');
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -88,6 +84,7 @@ app.use('/api/packets', packetRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/ips', ipsRoutes);
 app.use('/api/events', eventsRoutes);
+app.use('/api/support', supportRoutes);
 
 // Database connection
 console.log('Connecting to MongoDB...');

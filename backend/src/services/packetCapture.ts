@@ -420,17 +420,22 @@ export class PacketCaptureService {
     const isLargePacket = totalBytes > 1500; // Larger than typical MTU
     const isSmallPacket = totalBytes < 64;   // Smaller than minimum Ethernet frame
 
-    // Internal network traffic - very high thresholds
+    // Internal network traffic - thresholds (lowered for testing)
     if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
       // Critical: Extremely high frequency that indicates definite attack patterns
-      if (packet.protocol === 'TCP' && packet.frequency > 2000) return 'critical';
-      if (packet.protocol === 'UDP' && packet.frequency > 5000) return 'critical';
-      if (packet.protocol === 'ICMP' && packet.frequency > 1000) return 'critical';
+      if (packet.protocol === 'TCP' && packet.frequency > 500) return 'critical';
+      if (packet.protocol === 'UDP' && packet.frequency > 1000) return 'critical';
+      if (packet.protocol === 'ICMP' && packet.frequency > 200) return 'critical';
 
       // Medium: High frequency with suspicious characteristics
-      if (packet.protocol === 'TCP' && packet.frequency > 500 && (isSmallPacket || isLargePacket)) return 'medium';
-      if (packet.protocol === 'UDP' && packet.frequency > 1000 && (isSmallPacket || isLargePacket)) return 'medium';
-      if (packet.protocol === 'ICMP' && packet.frequency > 200) return 'medium';
+      if (packet.protocol === 'TCP' && packet.frequency > 200) return 'medium';
+      if (packet.protocol === 'UDP' && packet.frequency > 300) return 'medium';
+      if (packet.protocol === 'ICMP' && packet.frequency > 50) return 'medium';
+
+      // Low: Moderate frequency (for testing - lower threshold)
+      if (packet.protocol === 'TCP' && packet.frequency > 50) return 'normal'; // Will show as low threat in UI
+      if (packet.protocol === 'UDP' && packet.frequency > 100) return 'normal';
+      if (packet.protocol === 'ICMP' && packet.frequency > 20) return 'normal';
 
       return 'normal';
     }
