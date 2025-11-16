@@ -1,5 +1,4 @@
 import { FC, useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import DateRangePicker from '../components/DateRangePicker';
 import { packetService, ThreatAlert } from '../services/packetService';
@@ -82,7 +81,9 @@ const Monitoring: FC = () => {
         packetService.getAlertStats(apiFilters)
       ]);
 
-      setAlerts(alertsData);
+      // Limit to last 50 alerts for performance
+      const limitedAlerts = Array.isArray(alertsData) ? alertsData.slice(0, 50) : [];
+      setAlerts(limitedAlerts);
       setAlertStats(statsData);
     } catch (err) {
       console.error('Error fetching monitoring data:', err);
@@ -243,47 +244,28 @@ const Monitoring: FC = () => {
   return (
     <div className="monitoring-page">
       <Navbar />
-      <motion.main
-        className="monitoring-content"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
+      <main className="monitoring-content">
         {error && (
-          <motion.div 
-            className="error-message"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <div className="error-message">
             {error}
-          </motion.div>
+          </div>
         )}
         {blockSuccess && (
-          <motion.div 
-            className="success-message"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <div className="success-message">
             {blockSuccess}
-          </motion.div>
+          </div>
         )}
 
-        <motion.div 
-          className="monitoring-header"
-          initial={{ y: -20 }}
-          animate={{ y: 0 }}
-        >
+        <div className="monitoring-header">
           <div className="header-row">
             <h1>Monitoring</h1>
             <div className="header-actions">
-              <motion.button
+              <button
                 className="view-blocked-button"
                 onClick={handleOpenBlockedIPs}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
               >
                 🚫 View blocked IPs
-              </motion.button>
+              </button>
                 <button
                   className="refresh-button"
                   onClick={() => fetchData()}
@@ -298,44 +280,24 @@ const Monitoring: FC = () => {
             </div>
           </div>
           <div className="monitoring-stats">
-            <motion.div 
-              className="stat-card critical"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-            >
+            <div className="stat-card critical">
               <h3>Critical</h3>
               <span className="stat-value">{alertStats.critical}</span>
-            </motion.div>
-            <motion.div 
-              className="stat-card high"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.2 }}
-            >
+            </div>
+            <div className="stat-card high">
               <h3>High</h3>
               <span className="stat-value">{alertStats.high}</span>
-            </motion.div>
-            <motion.div 
-              className="stat-card medium"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
+            </div>
+            <div className="stat-card medium">
               <h3>Medium</h3>
               <span className="stat-value">{alertStats.medium}</span>
-            </motion.div>
-            <motion.div 
-              className="stat-card low"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.4 }}
-            >
+            </div>
+            <div className="stat-card low">
               <h3>Low</h3>
               <span className="stat-value">{alertStats.low}</span>
-            </motion.div>
+            </div>
           </div>
-        </motion.div>
+        </div>
 
         <div className="controls-container">
           <div className="search-container">
@@ -353,7 +315,7 @@ const Monitoring: FC = () => {
               <h4>Severity</h4>
               <div className="filter-options">
                 {filterOptions.severity.map(option => (
-                  <motion.button
+                  <button
                     key={`severity-${option.value}`}
                     className={`filter-chip ${filters.severity.includes(option.value) ? 'active' : ''}`}
                     style={{ 
@@ -361,11 +323,9 @@ const Monitoring: FC = () => {
                       '--chip-bg': `${option.color}22`
                     } as React.CSSProperties}
                     onClick={() => handleFilterToggle('severity', option.value)}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
                   >
                     {option.label}
-                  </motion.button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -374,15 +334,13 @@ const Monitoring: FC = () => {
               <h4>Status</h4>
               <div className="filter-options">
                 {filterOptions.status.map(option => (
-                  <motion.button
+                  <button
                     key={`status-${option.value}`}
                     className={`filter-chip ${filters.status.includes(option.value) ? 'active' : ''}`}
                     onClick={() => handleFilterToggle('status', option.value)}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
                   >
                     {option.label}
-                  </motion.button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -537,6 +495,7 @@ const Monitoring: FC = () => {
               </div>
             )}
           </div>
+        </div>
         {/* Blocked IPs Modal */}
         {showBlockedIPs && (
           <div className="modal-backdrop" onClick={() => setShowBlockedIPs(false)}>
@@ -569,7 +528,7 @@ const Monitoring: FC = () => {
             </div>
           </div>
         )}
-      </motion.main>
+      </main>
     </div>
   );
 };

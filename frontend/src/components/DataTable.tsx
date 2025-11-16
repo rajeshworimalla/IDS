@@ -1,5 +1,4 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { 
   Search as SearchIcon,
   FilterList as FilterIcon,
@@ -44,7 +43,10 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
     }
   };
 
-  const filteredData = data.filter(item => {
+  // Limit data to last 50 items for performance
+  const limitedData = data.slice(0, 50);
+  
+  const filteredData = limitedData.filter(item => {
     const matchesSearch = Object.values(item).some(
       value => value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -59,11 +61,7 @@ const DataTable: React.FC<DataTableProps> = ({ data, isLoading }) => {
   if (isLoading) {
     return (
       <div className="table-loading">
-        <motion.div
-          className="loading-spinner"
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-        />
+        <div className="loading-spinner" />
         <p>Loading data...</p>
       </div>
     );

@@ -1,5 +1,4 @@
 import { FC, useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import DataTable from '../components/DataTable';
 import { packetService } from '../services/packetService';
@@ -35,7 +34,9 @@ const Activities: FC = () => {
           activeAlerts: packetStats.criticalCount + packetStats.mediumCount,
           systemHealth: calculateSystemHealth(packetStats)
         });
-        setPackets(packetData);
+        // Limit to last 50 packets for performance
+        const limitedPackets = Array.isArray(packetData) ? packetData.slice(0, 50) : [];
+        setPackets(limitedPackets);
       } catch (error) {
         console.error('Error fetching data:', error);
         setError('Failed to fetch data. Please try again later.');
@@ -56,51 +57,26 @@ const Activities: FC = () => {
   return (
     <div className="activities-page">
       <Navbar />
-      <motion.main
-        className="activities-content"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
-        <motion.div
-          className="page-header"
-          initial={{ y: -20 }}
-          animate={{ y: 0 }}
-          transition={{ delay: 0.2, type: "spring" }}
-        >
+      <main className="activities-content">
+        <div className="page-header">
           <h1>Activities</h1>
           <div className="header-stats">
-            <motion.div
-              className="stat-item"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
+            <div className="stat-item">
               <span className="stat-value">{stats.totalEvents}</span>
               <span className="stat-label">Total Events</span>
-            </motion.div>
-            <motion.div
-              className="stat-item"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.4 }}
-            >
+            </div>
+            <div className="stat-item">
               <span className="stat-value">{stats.activeAlerts}</span>
               <span className="stat-label">Active Alerts</span>
-            </motion.div>
-            <motion.div
-              className="stat-item"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.5 }}
-            >
+            </div>
+            <div className="stat-item">
               <span className="stat-value">{stats.systemHealth}%</span>
               <span className="stat-label">System Health</span>
-            </motion.div>
+            </div>
           </div>
-        </motion.div>
+        </div>
         <DataTable data={packets} isLoading={isLoading} />
-      </motion.main>
+      </main>
     </div>
   );
 };
