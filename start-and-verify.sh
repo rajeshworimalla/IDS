@@ -258,7 +258,8 @@ sleep 1
 
 # Start frontend
 echo "   Starting web dev server..."
-npm run dev > /tmp/ids-frontend.log 2>&1 &
+cd "$SCRIPT_DIR/frontend" || exit 1
+nohup npm run dev > /tmp/ids-frontend.log 2>&1 </dev/null &
 FRONTEND_PID=$!
 sleep 8
 
