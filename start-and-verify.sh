@@ -190,6 +190,8 @@ echo "   Verifying backend..."
 if check_port 5001 "Backend"; then
     if check_service "http://localhost:5001" "Backend API"; then
         echo -e "${GREEN}   ✅ Backend fully operational${NC}"
+        VM_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
+        echo -e "   🌐 Access at: http://$VM_IP:5001"
     else
         echo -e "${RED}   ❌ Backend not responding to HTTP requests${NC}"
         echo "   Check logs: tail -f /tmp/ids-backend.log"
@@ -297,6 +299,8 @@ if check_process "python.*http.server.*8080" "Demo Site"; then
     if check_port 8080 "Demo Site"; then
         if check_service "http://localhost:8080" "Demo Site"; then
             echo -e "${GREEN}   ✅ Demo site fully operational${NC}"
+            VM_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
+            echo -e "   🌐 Access at: http://$VM_IP:8080"
         else
             echo -e "${YELLOW}   ⚠ Demo site port listening but not responding${NC}"
         fi
@@ -378,10 +382,15 @@ echo ""
 
 # Access URLs
 echo "Access URLs:"
-echo "  Backend API:    http://$VM_IP:5001"
+echo "  📡 Backend API:    http://$VM_IP:5001"
+echo "  🌐 Frontend:       http://$VM_IP:5173"
+echo "  🧪 Demo Site:      http://$VM_IP:8080"
+[ ! -z "$PREDICTION_PID" ] && echo "  🤖 Prediction API: http://$VM_IP:5002"
+echo ""
+echo "Quick Access (copy and paste in browser):"
 echo "  Frontend:       http://$VM_IP:5173"
 echo "  Demo Site:      http://$VM_IP:8080"
-[ ! -z "$PREDICTION_PID" ] && echo "  Prediction API: http://$VM_IP:5002"
+echo "  Backend API:    http://$VM_IP:5001"
 echo ""
 
 # Log locations
