@@ -137,9 +137,13 @@ echo ""
 echo "4. Starting Backend..."
 cd "$SCRIPT_DIR/backend" || exit 1
 
-# Kill any existing backend
-pkill -f "node dist/index.js" >/dev/null 2>&1 || true
-sleep 1
+# Kill any existing backend more aggressively
+echo "   Stopping any existing backend processes..."
+pkill -9 -f "node dist/index.js" >/dev/null 2>&1 || true
+sudo pkill -9 -f "node dist/index.js" >/dev/null 2>&1 || true
+# Also kill anything using port 5001
+sudo lsof -ti:5001 2>/dev/null | xargs sudo kill -9 2>/dev/null || true
+sleep 2
 
 # Build if needed
 if [ ! -d "dist" ] || [ ! -f "dist/index.js" ]; then
@@ -154,12 +158,25 @@ fi
 
 # Start backend
 echo "   Starting backend server..."
+# Clear old log
+> /tmp/ids-backend.log
 if command -v sudo >/dev/null 2>&1; then
     sudo node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
 else
     node --max-old-space-size=4096 dist/index.js > /tmp/ids-backend.log 2>&1 &
 fi
 BACKEND_PID=$!
+sleep 3
+
+# Check if process is still running after initial start
+if ! ps -p $BACKEND_PID > /dev/null 2>&1; then
+    echo -e "${RED}   ❌ Backend process died immediately after startup${NC}"
+    echo "   Last 20 lines of log:"
+    tail -20 /tmp/ids-backend.log
+    echo ""
+fi
+
+# Wait a bit more for startup
 sleep 5
 
 # Verify backend
@@ -177,7 +194,10 @@ if check_process "node dist/index.js" "Backend"; then
     fi
 else
     echo -e "${RED}   ❌ Backend failed to start${NC}"
-    echo "   Check logs: cat /tmp/ids-backend.log"
+    echo "   Last 30 lines of log:"
+    tail -30 /tmp/ids-backend.log
+    echo ""
+    echo "   Full log: cat /tmp/ids-backend.log"
 fi
 echo ""
 
