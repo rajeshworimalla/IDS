@@ -138,9 +138,35 @@
       }
     }
 
+    // Check ban status from backend on page load
+    async function checkBanStatus() {
+      try {
+        const res = await fetch(`${IDS_BASE}/api/events/check-ban`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          mode: 'cors'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.banned && data.secondsLeft > 0) {
+            // Sync with backend ban status
+            const until = Date.now() + data.secondsLeft * 1000;
+            localStorage.setItem('ids.loginBanUntil', String(until));
+            updateBanUI();
+            scheduleBanTick();
+          }
+        }
+      } catch (e) {
+        // Silently fail - use local state only
+        console.warn('Failed to check ban status:', e);
+      }
+    }
+
     // Initialize ban state on load
     updateBanUI();
     if (getBanUntil() > Date.now()) scheduleBanTick();
+    // Also check backend for current ban status
+    checkBanStatus();
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();

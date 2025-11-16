@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { incrWithTTL, redis } from '../services/redis';
-import { enforceTempBan } from '../services/blocker';
+import { enforceTempBan, isTempBanned } from '../services/blocker';
 import { getPolicy } from '../services/policy';
 
 const router = express.Router();
@@ -79,6 +79,42 @@ router.post('/login-failed', async (req, res) => {
     console.error('login-failed handler error:', e);
     // Best-effort response rather than a hard failure for demo integration
     return res.json({ ok: true, error: e?.message || 'soft error', banned: false });
+  }
+});
+
+// Check if current IP is banned
+router.get('/check-ban', async (req, res) => {
+  try {
+    const ip = getClientIP(req);
+    const banned = await isTempBanned(ip);
+    
+    if (banned) {
+      // Get ban details from Redis
+      const banKey = `ids:tempban:${ip}`;
+      const banData = await redis.get(banKey);
+      if (banData) {
+        try {
+          const ban = JSON.parse(banData);
+          const ttl = await redis.ttl(banKey);
+          const secondsLeft = ttl > 0 ? ttl : 0;
+          return res.json({ 
+            banned: true, 
+            ip,
+            secondsLeft,
+            expiresAt: ban.expiresAt,
+            reason: ban.reason 
+          });
+        } catch (e) {
+          // If parsing fails, just return banned status
+        }
+      }
+      return res.json({ banned: true, ip, secondsLeft: 0 });
+    }
+    
+    return res.json({ banned: false, ip });
+  } catch (e: any) {
+    console.error('check-ban error:', e);
+    return res.json({ banned: false, error: e?.message });
   }
 });
 
