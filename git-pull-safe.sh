@@ -1,37 +1,32 @@
 #!/bin/bash
 
-# Safe git pull script - automatically handles conflicts
-# Use this instead of regular git pull
+# Hard reset git pull script - discards all local changes and resets to remote
+# Use this to always match the remote repository exactly
 
-echo "Updating IDS project from repository..."
+echo "Hard resetting and updating IDS project from repository..."
 
 cd ~/IDS || exit 1
 
-# Check if there are local changes
-if ! git diff --quiet start-demo.sh 2>/dev/null; then
-    echo "⚠ Local changes detected in start-demo.sh"
-    echo "   Discarding local changes and pulling latest version..."
-    git checkout -- start-demo.sh
+# Fetch latest from remote
+echo "Fetching latest changes from remote..."
+git fetch origin main
+
+if [ $? -ne 0 ]; then
+    echo "✗ Failed to fetch from remote. Check your connection."
+    exit 1
 fi
 
-# Check for other uncommitted changes
-if ! git diff --quiet; then
-    echo "⚠ Other uncommitted changes detected"
-    echo "   Stashing them..."
-    git stash push -m "Auto-stash before pull $(date +%Y-%m-%d_%H:%M:%S)"
-fi
-
-# Pull latest changes
-echo "Pulling latest changes..."
-git pull
+# Hard reset to match remote exactly
+echo "Hard resetting to match remote (discarding all local changes)..."
+git reset --hard origin/main
 
 if [ $? -eq 0 ]; then
-    echo "✓ Successfully updated!"
+    echo "✓ Successfully hard reset and updated!"
     echo ""
-    echo "To see stashed changes (if any): git stash list"
-    echo "To restore stashed changes: git stash pop"
+    echo "⚠ All local uncommitted changes have been discarded."
+    echo "   Your repository now matches the remote exactly."
 else
-    echo "✗ Pull failed. Check the error above."
+    echo "✗ Hard reset failed. Check the error above."
     exit 1
 fi
 
