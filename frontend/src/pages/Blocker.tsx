@@ -17,6 +17,7 @@ const Blocker: FC = () => {
     windowSeconds: 60,
     threshold: 100,
     banMinutes: 60,
+    maxLoginRetries: 3,
     useFirewall: true,
     useNginxDeny: false,
   });
@@ -369,6 +370,15 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                   <input type="number" min={1} value={policy.banMinutes}
                     onChange={(e)=>setPolicy(p=>({ ...p, banMinutes: Number(e.target.value) }))}
                   />
+                </div>
+                <div className="form-item">
+                  <label>Maximum login retries allowed</label>
+                  <input type="number" min={1} max={10} value={policy.maxLoginRetries ?? 3}
+                    onChange={(e)=>setPolicy(p=>({ ...p, maxLoginRetries: Number(e.target.value) }))}
+                  />
+                  <small style={{color: '#999', fontSize: '0.85em', display: 'block', marginTop: '4px'}}>
+                    Number of failed login attempts before temporary ban
+                  </small>
                 </div>
                 <div className="form-item inline">
                   <label>

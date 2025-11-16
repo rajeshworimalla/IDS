@@ -41,9 +41,8 @@ router.post('/login-failed', async (req, res) => {
     const policy = await getPolicy();
     const windowSeconds = policy.windowSeconds || 60;
     
-    // Use a lower threshold for login failures (more sensitive)
-    // Default to 3 failed attempts, but can be adjusted via policy
-    const threshold = Math.min(3, Math.max(1, Math.floor(policy.threshold / 10))); // 10% of main threshold, min 1, max 3
+    // Use maxLoginRetries from policy, or fallback to calculated value
+    const threshold = policy.maxLoginRetries ?? Math.min(3, Math.max(1, Math.floor(policy.threshold / 10)));
     
     const bucket = Math.floor(Date.now() / 1000 / windowSeconds);
     const key = `ids:loginfail:${host}:${ip}:${bucket}`;

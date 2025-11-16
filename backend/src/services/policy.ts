@@ -9,6 +9,7 @@ export type BlockPolicy = {
   windowSeconds: number;
   threshold: number;
   banMinutes: number;
+  maxLoginRetries?: number; // Maximum failed login attempts before ban
   useFirewall?: boolean;
   useNginxDeny?: boolean;
 };
@@ -17,6 +18,7 @@ const defaults: BlockPolicy = {
   windowSeconds: Number(process.env.RL_WINDOW_SECONDS || config.RL_WINDOW_SECONDS),
   threshold: Number(process.env.RL_THRESHOLD || config.RL_THRESHOLD),
   banMinutes: Number(process.env.BAN_MINUTES || config.BAN_MINUTES),
+  maxLoginRetries: Number(process.env.MAX_LOGIN_RETRIES || 3), // Default 3 failed attempts
   useFirewall: (process.env.USE_FIREWALL ?? String(config.USE_FIREWALL)) === 'true' || (process.env.USE_FIREWALL ?? String(config.USE_FIREWALL)) === '1',
   useNginxDeny: (process.env.USE_NGINX_DENY ?? String(config.USE_NGINX_DENY)) === 'true' || (process.env.USE_NGINX_DENY ?? String(config.USE_NGINX_DENY)) === '1',
 };
@@ -29,6 +31,7 @@ function normalizePolicy(data: any): BlockPolicy {
     windowSeconds: Number(data.windowSeconds ?? defaults.windowSeconds),
     threshold: Number(data.threshold ?? defaults.threshold),
     banMinutes: Number(data.banMinutes ?? defaults.banMinutes),
+    maxLoginRetries: Number(data.maxLoginRetries ?? defaults.maxLoginRetries ?? 3),
     useFirewall: (data.useFirewall ?? String(defaults.useFirewall)) === 'true' || data.useFirewall === '1' || data.useFirewall === true,
     useNginxDeny: (data.useNginxDeny ?? String(defaults.useNginxDeny)) === 'true' || data.useNginxDeny === '1' || data.useNginxDeny === true,
   };
@@ -63,6 +66,7 @@ export async function setPolicy(p: Partial<BlockPolicy>): Promise<void> {
       windowSeconds: String(merged.windowSeconds),
       threshold: String(merged.threshold),
       banMinutes: String(merged.banMinutes),
+      maxLoginRetries: String(merged.maxLoginRetries ?? 3),
       useFirewall: merged.useFirewall ? '1' : '0',
       useNginxDeny: merged.useNginxDeny ? '1' : '0',
     });

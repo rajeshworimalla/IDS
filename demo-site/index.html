@@ -80,13 +80,16 @@
       if (until > Date.now()) {
         const left = secondsLeft(until);
         const message = `Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`;
+        // Always show the message when banned
         showMessage(message, false);
-        form.querySelector('button[type="submit"]').disabled = true;
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
         console.log('[BAN UI] Showing ban message:', message, 'seconds left:', left);
       } else {
-        form.querySelector('button[type="submit"]').disabled = false;
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = false;
         // Clear any existing ban message if ban expired
-        if (messageEl.textContent.includes('Temporarily blocked') || messageEl.textContent.includes('Temporarily banned')) {
+        if (messageEl && (messageEl.textContent.includes('Temporarily blocked') || messageEl.textContent.includes('Temporarily banned'))) {
           messageEl.className = 'msg';
           messageEl.textContent = '';
         }
@@ -236,18 +239,21 @@
           console.log('[LOGIN] User is banned, showing ban message');
           // Ensure ban is set in localStorage if backend says banned
           if (banData && banData.banned && banData.ttlSeconds) {
-            setBanFor(banData.ttlSeconds);
+            const until = setBanFor(banData.ttlSeconds);
+            console.log('[LOGIN] Ban set until:', new Date(until).toLocaleTimeString());
           }
-          // Update UI and show message
-          updateBanUI();
-          scheduleBanTick();
-          // Force show the message with current time remaining
+          // Update UI and show message immediately
           const currentUntil = getBanUntil();
           if (currentUntil > Date.now()) {
             const left = secondsLeft(currentUntil);
             const banMessage = `Temporarily blocked. Try again in ${left} second${left !== 1 ? 's' : ''}.`;
             showMessage(banMessage, false);
             console.log('[LOGIN] Showing ban message:', banMessage);
+            // Disable form immediately
+            form.querySelector('button[type="submit"]').disabled = true;
+            // Start countdown timer
+            updateBanUI();
+            scheduleBanTick();
           }
         } else {
           // Only show error message if not banned

@@ -19,6 +19,7 @@ export interface BlockPolicy {
   windowSeconds: number; // e.g., 60
   threshold: number; // requests/events per window
   banMinutes: number; // duration of ban
+  maxLoginRetries?: number; // Maximum failed login attempts before ban
   useFirewall?: boolean; // iptables/ipset
   useNginxDeny?: boolean; // nginx deny list
 }
