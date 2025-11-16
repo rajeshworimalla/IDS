@@ -516,10 +516,9 @@ const Monitoring: FC = () => {
                 >
                   Reset Filters
                 </button>
-              </motion.div>
+              </div>
             )}
           </div>
-        </AnimatePresence>
         {/* Blocked IPs Modal */}
         {showBlockedIPs && (
           <div className="modal-backdrop" onClick={() => setShowBlockedIPs(false)}>
