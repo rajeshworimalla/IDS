@@ -556,7 +556,6 @@ const Monitoring: FC = () => {
               </div>
             </div>
           )}
-        </div>
         {/* Blocked IPs Modal */}
         {showBlockedIPs && (
           <div className="modal-backdrop" onClick={() => setShowBlockedIPs(false)}>
