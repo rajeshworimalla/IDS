@@ -379,8 +379,27 @@ const Monitoring: FC = () => {
                       <span className="alert-icon">{getSeverityIcon(alert.severity)}</span>
                     </div>
                     <div className="alert-basic-info">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
                         <h3 style={{ margin: 0 }}>{alert.type}</h3>
+                        {/* ML Binary Prediction Badge - Most Important */}
+                        {alert.is_malicious !== undefined && (
+                          <span 
+                            style={{
+                              padding: '0.35rem 0.9rem',
+                              borderRadius: '4px',
+                              fontSize: '0.8rem',
+                              fontWeight: '700',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                              backgroundColor: alert.is_malicious ? '#ff4d4f' : '#52c41a',
+                              color: '#fff',
+                              boxShadow: alert.is_malicious ? '0 0 8px rgba(255, 77, 79, 0.5)' : '0 0 8px rgba(82, 196, 26, 0.3)',
+                              border: alert.is_malicious ? '1px solid #ff7875' : '1px solid #73d13d'
+                            }}
+                          >
+                            {alert.is_malicious ? '🚨 ATTACK DETECTED' : '✓ BENIGN'}
+                          </span>
+                        )}
                         <span 
                           className="severity-badge"
                           style={{
@@ -420,6 +439,43 @@ const Monitoring: FC = () => {
                         className="alert-details"
                       >
                         <div className="detail-group">
+                          {/* ML Binary Prediction - Most Important */}
+                          {alert.is_malicious !== undefined && (
+                            <div className="detail-item full-width" style={{ 
+                              marginBottom: '1rem', 
+                              padding: '1rem',
+                              background: alert.is_malicious 
+                                ? 'rgba(255, 77, 79, 0.1)' 
+                                : 'rgba(82, 196, 26, 0.1)',
+                              border: `2px solid ${alert.is_malicious ? '#ff4d4f' : '#52c41a'}`,
+                              borderRadius: '8px'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                                <span className="detail-label" style={{ fontSize: '1rem', fontWeight: '600' }}>
+                                  ML Model Binary Prediction:
+                                </span>
+                                <span style={{
+                                  padding: '0.4rem 1rem',
+                                  borderRadius: '4px',
+                                  fontSize: '0.9rem',
+                                  fontWeight: '700',
+                                  textTransform: 'uppercase',
+                                  backgroundColor: alert.is_malicious ? '#ff4d4f' : '#52c41a',
+                                  color: '#fff'
+                                }}>
+                                  {alert.is_malicious ? '🚨 ATTACK DETECTED' : '✓ BENIGN TRAFFIC'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary, #999)' }}>
+                                Confidence: {alert.confidence ? `${Math.round(alert.confidence * 100)}%` : 'N/A'} 
+                                {alert.confidence && (
+                                  <span style={{ marginLeft: '0.5rem', fontStyle: 'italic' }}>
+                                    ({alert.confidence >= 0.8 ? 'Very High' : alert.confidence >= 0.6 ? 'High' : alert.confidence >= 0.4 ? 'Medium' : 'Low'} confidence)
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
                           <div className="detail-item">
                             <span className="detail-label">Source</span>
                             <span className="detail-value">{alert.source}</span>
@@ -429,11 +485,11 @@ const Monitoring: FC = () => {
                             <span className="detail-value">{alert.destination}</span>
                           </div>
                           <div className="detail-item">
-                            <span className="detail-label">Attack Type</span>
+                            <span className="detail-label">Attack Type (Multiclass)</span>
                             <span className="detail-value">{alert.attack_type || 'Unknown'}</span>
                           </div>
                           <div className="detail-item">
-                            <span className="detail-label">Confidence</span>
+                            <span className="detail-label">Multiclass Confidence</span>
                             <span className="detail-value">{alert.confidence ? `${Math.round(alert.confidence * 100)}%` : 'N/A'}</span>
                           </div>
                         </div>

@@ -43,6 +43,7 @@ export interface ThreatAlert {
   status: 'open' | 'closed' | 'in-progress' | 'investigating' | 'mitigated' | 'resolved';
   description: string;
   confidence: number;
+  is_malicious?: boolean;
   attack_type: string;
   attack_type_probabilities?: {
     normal?: number;

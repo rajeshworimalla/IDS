@@ -262,6 +262,7 @@ router.get('/alerts', async (req, res) => {
         status: alertStatus,
         description: packet.description,
         confidence: packet.confidence,
+        is_malicious: packet.is_malicious,
         attack_type: packet.attack_type,
         attack_type_probabilities: packet.attack_type_probabilities,
         type: alertType,
