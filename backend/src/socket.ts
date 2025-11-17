@@ -68,7 +68,7 @@ export function initializeSocket(server: any) {
   if (!io) {
     io = new Server(server, {
       cors: {
-        origin: "http://localhost:5173",
+        origin: true, // Allow all origins (localhost, IP addresses, etc.)
         methods: ["GET", "POST"],
         credentials: true,
         allowedHeaders: ["Authorization"]
