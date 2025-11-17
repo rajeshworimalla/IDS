@@ -277,25 +277,34 @@ export class PacketCaptureService {
   }
 
   private async processPacket(raw: Buffer) {
-    // PACKET SAMPLING: During high-volume attacks, only process every Nth packet
-    // This prevents backend from being overwhelmed
-    this.packetCount++;
-    const SAMPLE_RATE = 10; // Process every 10th packet during high volume
+    // PACKET SAMPLING: Only skip packets if queue is VERY full (emergency mode)
+    // This prevents backend from being overwhelmed while still detecting attacks
+    const EMERGENCY_QUEUE_THRESHOLD = 100; // Only sample when queue is very full
+    const SAMPLE_RATE = 5; // Process every 5th packet in emergency mode
     
-    // Reset counter every 5 seconds to allow new packets through
-    if (Date.now() - this.lastSamplingReset > 5000) {
+    // Only apply sampling if queue is critically full
+    if (requestQueue.length > EMERGENCY_QUEUE_THRESHOLD) {
+      this.packetCount++;
+      // Reset counter every 2 seconds to allow new packets through
+      if (Date.now() - this.lastSamplingReset > 2000) {
+        this.packetCount = 0;
+        this.lastSamplingReset = Date.now();
+      }
+      
+      // Skip processing if in emergency mode and this isn't a sampled packet
+      if (this.packetCount % SAMPLE_RATE !== 0) {
+        return; // Skip this packet - emergency mode
+      }
+    } else {
+      // Normal mode - process all packets
       this.packetCount = 0;
-      this.lastSamplingReset = Date.now();
-    }
-    
-    // Skip processing if we're in high-volume mode and this isn't a sampled packet
-    // But always process if queue is not too full (to ensure we catch attacks)
-    if (this.packetCount % SAMPLE_RATE !== 0 && requestQueue.length > 50) {
-      return; // Skip this packet - too many in queue
     }
     
     try {
-      console.log(`Processing packet of ${raw.length} bytes`);
+      // Only log every 100th packet to reduce console spam
+      if (this.packetCount % 100 === 0 || this.packetCount === 0) {
+        console.log(`Processing packet ${this.packetCount} of ${raw.length} bytes`);
+      }
 
       // Check if packet has Ethernet header (minimum 14 bytes)
       if (raw.length < 14) {
