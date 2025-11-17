@@ -28,7 +28,7 @@ const EventsLog: FC = () => {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
+  
   // Refs for throttling packet updates (must be at top level, not inside useEffect)
   const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPacketsRef = useRef<Packet[]>([]);
@@ -169,7 +169,7 @@ const EventsLog: FC = () => {
           });
         }, 1000);
         
-        return prev;
+          return prev;
       });
     });
 
@@ -178,7 +178,7 @@ const EventsLog: FC = () => {
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current);
       }
-      socket.disconnect();
+        socket.disconnect();
     };
   }, []);
 
@@ -223,7 +223,7 @@ const EventsLog: FC = () => {
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      handleSearch();
+        handleSearch();
     }
   };
 
@@ -254,29 +254,29 @@ const EventsLog: FC = () => {
 
   const handleStartScanning = () => {
     if (scanningState !== 'idle' || !socket?.connected) return;
-    const token = authService.getToken();
+      const token = authService.getToken();
     if (!token) return;
-    setScanningState('starting');
-    socket.emit('start-scanning', { token });
+      setScanningState('starting');
+      socket.emit('start-scanning', { token });
   };
 
   const handleStopScanning = () => {
     if (scanningState !== 'scanning' || !socket?.connected) return;
-    const token = authService.getToken();
+      const token = authService.getToken();
     if (!token) return;
-    setScanningState('stopping');
-    socket.emit('stop-scanning', { token });
+      setScanningState('stopping');
+      socket.emit('stop-scanning', { token });
   };
 
   // Always render something visible - wrap in try-catch for safety
   try {
     console.log('[EventsLog] Rendering JSX, state:', { isLoading, error, packetsCount: packets.length });
-    
-    return (
+
+  return (
       <div className="events-log-page" style={{ minHeight: '100vh', display: 'flex' }}>
-        <Navbar />
+      <Navbar />
         <main className="events-log-content" style={{ flex: 1, padding: '2rem', marginLeft: '240px' }}>
-          <div className="events-header">
+        <div className="events-header">
             <h1 style={{ color: '#fff', marginBottom: '1rem' }}>Traffic Collector</h1>
             <div style={{ 
               background: '#3699ff', 
@@ -288,9 +288,9 @@ const EventsLog: FC = () => {
               display: 'inline-block'
             }}>
               Status: {isLoading ? 'Loading...' : error ? `Error: ${error}` : `Loaded ${packets.length} packets`}
+              </div>
             </div>
-          </div>
-        
+            
         {isLoading && (
           <div className="loading-container">
             <p>Loading packets...</p>
@@ -310,7 +310,7 @@ const EventsLog: FC = () => {
           <>
             <div className="events-controls">
               <input
-                type="text"
+                type="text" 
                 id="search-input"
                 placeholder="Search packets..."
                 value={searchTerm}
@@ -329,29 +329,29 @@ const EventsLog: FC = () => {
               ) : (
                 <button disabled className="btn-disabled">Stopping...</button>
               )}
-            </div>
-
+          </div>
+          
             <div className="events-table-container">
               <table className="events-table">
-                <thead>
-                  <tr>
-                    <th>
-                      <input 
-                        type="checkbox" 
+            <thead>
+              <tr>
+                <th>
+                  <input 
+                    type="checkbox" 
                         checked={selectedRows.length === packets.length && packets.length > 0}
-                        onChange={handleSelectAll}
-                      />
-                    </th>
+                    onChange={handleSelectAll}
+                  />
+                </th>
                     <th>Status</th>
-                    <th>Date</th>
+                <th>Date</th>
                     <th>Source IP</th>
                     <th>Dest IP</th>
-                    <th>Protocol</th>
-                    <th>Description</th>
-                    <th>Frequency</th>
-                  </tr>
-                </thead>
-                <tbody>
+                <th>Protocol</th>
+                <th>Description</th>
+                <th>Frequency</th>
+              </tr>
+            </thead>
+            <tbody>
                   {packets.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="empty-state">
@@ -375,34 +375,34 @@ const EventsLog: FC = () => {
                   const statusBg = getStatusColor(packet.status);
                   return (
                     <tr
-                      key={packet._id}
-                      className={selectedRows.includes(packet._id) ? 'selected' : ''}
-                    >
-                      <td>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedRows.includes(packet._id)}
-                          onChange={() => toggleRowSelection(packet._id)}
-                        />
-                      </td>
-                      <td>
+                  key={packet._id}
+                  className={selectedRows.includes(packet._id) ? 'selected' : ''}
+                >
+                  <td>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedRows.includes(packet._id)}
+                      onChange={() => toggleRowSelection(packet._id)}
+                    />
+                  </td>
+                  <td>
                         <span className="status-badge" style={{ backgroundColor: statusBg }}>
                           {packet.status}
                         </span>
-                      </td>
+                  </td>
                       <td>{new Date(packet.date).toLocaleString()}</td>
                       <td className="ip-cell">{packet.start_ip}</td>
                       <td className="ip-cell">{packet.end_ip}</td>
-                      <td>{packet.protocol}</td>
-                      <td className="description-cell">{packet.description}</td>
-                      <td>{packet.frequency}</td>
+                  <td>{packet.protocol}</td>
+                  <td className="description-cell">{packet.description}</td>
+                  <td>{packet.frequency}</td>
                     </tr>
                   );
                 })
               )}
-                </tbody>
+            </tbody>
               </table>
-            </div>
+        </div>
           </>
         )}
 
@@ -415,8 +415,8 @@ const EventsLog: FC = () => {
                 <button onClick={() => setShowResetConfirm(false)} className="btn-secondary">Cancel</button>
                 <button onClick={handleReset} className="btn-danger">Confirm Reset</button>
               </div>
+              </div>
             </div>
-          </div>
         )}
       </main>
     </div>
@@ -452,9 +452,9 @@ const EventsLog: FC = () => {
             </button>
           </div>
         </main>
-      </div>
-    );
+    </div>
+  );
   }
 };
 
-export default EventsLog;
+export default EventsLog; 

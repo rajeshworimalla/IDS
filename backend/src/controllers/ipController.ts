@@ -127,11 +127,23 @@ export const blockIP = async (req: Request, res: Response) => {
 
     const reasonText = reason && reason.trim().length > 0 ? reason : `domain: ${host}`;
 
+    // CRITICAL: Block domain via /etc/hosts FIRST (prevents DNS resolution)
+    let hostsBlocked = false;
+    try {
+      const domainBlockResult = await firewall.blockDomain(host);
+      if ((domainBlockResult as any).applied) {
+        hostsBlocked = (domainBlockResult as any).hostsBlocked || false;
+        console.log(`✅ DNS blocked for ${host} via /etc/hosts: ${hostsBlocked}`);
+      }
+    } catch (e: any) {
+      console.warn(`⚠️ Failed to block domain ${host} via /etc/hosts: ${e?.message || String(e)}`);
+    }
+
     const results: any[] = [];
     let successCount = 0;
     let failCount = 0;
     
-    // Block ALL IPs for the domain
+    // Block ALL IPs for the domain (in case DNS blocking fails or IPs change)
     for (const addr of uniq) {
       try {
         const doc = await BlockedIP.findOneAndUpdate(
@@ -159,10 +171,12 @@ export const blockIP = async (req: Request, res: Response) => {
     }
 
     return res.status(201).json({ 
-      message: `Blocked ${successCount} of ${uniq.length} IP address(es) for ${host}${failCount > 0 ? ` (${failCount} failed)` : ''}`, 
+      message: `Blocked ${host}${hostsBlocked ? ' (DNS blocked via /etc/hosts)' : ''} and ${successCount} of ${uniq.length} IP address(es)${failCount > 0 ? ` (${failCount} failed)` : ''}`, 
       total: uniq.length,
       successful: successCount,
       failed: failCount,
+      hostsBlocked: hostsBlocked,
+      domain: host,
       items: results 
     });
   } catch (e: any) {
@@ -183,11 +197,18 @@ export const unblockIP = async (req: Request, res: Response) => {
     // Decode IP (might be URL encoded)
     const decodedIP = decodeURIComponent(ip);
     
+    // Check if it's a domain (not an IP)
+    const isDomain = isIP(decodedIP) === 0;
+    
     // Remove from MongoDB
     await BlockedIP.deleteOne({ user: req.user._id, ip: decodedIP });
     
-    // Remove from firewall
+    // Remove from firewall (both IP and domain blocking)
     const result = await firewall.unblockIP(decodedIP);
+    if (isDomain) {
+      // Also unblock domain from /etc/hosts
+      await firewall.unblockDomain(decodedIP).catch(() => {});
+    }
     
     // Also remove from Redis temp ban (if it was auto-banned)
     try {

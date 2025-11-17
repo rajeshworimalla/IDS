@@ -96,19 +96,42 @@ const App: FC = () => {
     });
 
     socket.on('new-packet', (packet: any) => {
-      // Only show alerts if:
-      // 1. It's marked as malicious (is_malicious === true)
-      // 2. AND it's critical or medium severity
+      console.log('[Alert System] Received packet:', {
+        is_malicious: packet.is_malicious,
+        attack_type: packet.attack_type,
+        status: packet.status,
+        start_ip: packet.start_ip
+      });
+      
+      // Show alerts if:
+      // 1. Status is critical or medium (rule-based detection found attack)
+      // 2. OR is_malicious is true (ML detected attack)
       // 3. AND we haven't shown this attack type from this source IP yet
-      if (packet.is_malicious === true && (packet.status === 'critical' || packet.status === 'medium')) {
-        const severity = packet.status === 'critical' ? 'critical' : 'medium';
+      const isCriticalOrMedium = packet.status === 'critical' || packet.status === 'medium';
+      const isMalicious = packet.is_malicious === true;
+      
+      if (isCriticalOrMedium || isMalicious) {
+        // Determine severity from status or default to medium if malicious
+        const severity = packet.status === 'critical' ? 'critical' : 
+                        packet.status === 'medium' ? 'medium' : 
+                        isMalicious ? 'medium' : 'low';
         
-        // Get actual attack type - don't use "normal" if it's malicious
+        // Get actual attack type - prioritize detector/ML result
         let attackType = packet.attack_type || 'unknown_attack';
         
-        // If attack_type is "normal" but is_malicious is true, it's an unknown attack
-        if (attackType === 'normal' || attackType === 'Normal Traffic') {
-          attackType = 'unknown_attack';
+        // If attack_type is "normal" but status is critical/medium or is_malicious is true, infer attack type
+        if ((attackType === 'normal' || attackType === 'Normal Traffic') && (isCriticalOrMedium || isMalicious)) {
+          // Try to infer from description
+          const desc = (packet.description || '').toLowerCase();
+          if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+            attackType = 'dos';
+          } else if (desc.includes('scan') || desc.includes('probe') || desc.includes('reconnaissance')) {
+            attackType = 'probe';
+          } else if (desc.includes('brute') || desc.includes('login') || desc.includes('failed')) {
+            attackType = 'brute_force';
+          } else {
+            attackType = 'unknown_attack';
+          }
         }
         
         // Create unique key: attack_type + source_ip (so we only show once per attack type per source)

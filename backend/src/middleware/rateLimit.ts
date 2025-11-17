@@ -54,10 +54,10 @@ export async function rateLimitMiddleware(req: Request, res: Response, next: Nex
     
     // Check if IP is already banned
     try {
-      const banned = await redis.get(`ids:tempban:${ip}`);
-      if (banned) {
+    const banned = await redis.get(`ids:tempban:${ip}`);
+    if (banned) {
         console.log(`[RATE LIMIT] IP ${ip} is already banned`);
-        return res.status(403).json({ message: 'Temporarily banned' });
+      return res.status(403).json({ message: 'Temporarily banned' });
       }
     } catch (redisError) {
       console.error('[RATE LIMIT] Redis error checking ban status:', redisError);

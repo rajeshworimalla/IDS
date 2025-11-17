@@ -278,10 +278,34 @@ export class PacketCaptureService {
 
         const predictions = response.data;
 
-        // Update packet with predictions
+        // Update packet with predictions - CRITICAL: Always use detector's attack_type if available
         savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
-        savedPacket.attack_type = predictions.attack_type;
-        savedPacket.confidence = predictions.confidence.binary;
+        
+        // CRITICAL FIX: Use attack_type from predictions (which comes from detector override)
+        // Don't use 'normal' if it's marked as malicious
+        if (predictions.attack_type && predictions.attack_type !== 'normal') {
+          savedPacket.attack_type = predictions.attack_type;
+        } else if (savedPacket.is_malicious && (!predictions.attack_type || predictions.attack_type === 'normal')) {
+          // If malicious but attack_type is normal, infer from status/description
+          if (packetData.status === 'critical' || packetData.status === 'medium') {
+            const desc = (packetData.description || '').toLowerCase();
+            if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+              savedPacket.attack_type = 'dos';
+            } else if (desc.includes('scan') || desc.includes('probe')) {
+              savedPacket.attack_type = 'probe';
+            } else if (desc.includes('brute') || desc.includes('login')) {
+              savedPacket.attack_type = 'brute_force';
+            } else {
+              savedPacket.attack_type = 'unknown_attack';
+            }
+          } else {
+            savedPacket.attack_type = predictions.attack_type || 'unknown_attack';
+          }
+        } else {
+          savedPacket.attack_type = predictions.attack_type || 'normal';
+        }
+        
+        savedPacket.confidence = predictions.confidence?.binary || predictions.confidence || 0.5;
         
         // Store attack type probabilities if available
         if (predictions.attack_type_probabilities) {
@@ -293,7 +317,8 @@ export class PacketCaptureService {
         console.log('Packet updated with ML predictions:', {
           is_malicious: savedPacket.is_malicious,
           attack_type: savedPacket.attack_type,
-          confidence: savedPacket.confidence
+          confidence: savedPacket.confidence,
+          status: savedPacket.status
         });
       } catch (err) {
         console.log('ML service not available, continuing without predictions');
@@ -303,9 +328,15 @@ export class PacketCaptureService {
       await savedPacket.populate('user');
       const packetToEmit = savedPacket.toObject();
       
-      // Ensure is_malicious and attack_type are included
+      // CRITICAL: Ensure is_malicious and attack_type are correctly set
       packetToEmit.is_malicious = savedPacket.is_malicious ?? false;
-      packetToEmit.attack_type = savedPacket.attack_type || 'normal';
+      
+      // CRITICAL FIX: Don't default to 'normal' if it's malicious or critical/medium
+      if (packetToEmit.is_malicious || packetToEmit.status === 'critical' || packetToEmit.status === 'medium') {
+        packetToEmit.attack_type = savedPacket.attack_type || 'unknown_attack';
+      } else {
+        packetToEmit.attack_type = savedPacket.attack_type || 'normal';
+      }
       
       // Broadcast to connected clients
       const io = getIO();

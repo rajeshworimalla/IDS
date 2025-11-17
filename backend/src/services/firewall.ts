@@ -1,8 +1,12 @@
 import { isIP } from 'net';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { readFile, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
 
 const execFileAsync = promisify(execFile);
+const HOSTS_FILE = '/etc/hosts';
+const IDS_HOSTS_MARKER = '# IDS_BLOCKED_DOMAINS';
 
 type Bins = {
   ipset: string | null;
@@ -85,8 +89,18 @@ async function ensureIptablesSetRules(v6 = false) {
 
 async function flushConntrack(ip: string, v6 = false) {
   if (!bins.conntrack) return; // optional
-  await tryRun(bins.conntrack, ['-D', v6 ? '-f' : '-f', v6 ? 'ipv6' : 'ipv4', '-s', ip]);
-  await tryRun(bins.conntrack, ['-D', v6 ? '-f' : '-f', v6 ? 'ipv6' : 'ipv4', '-d', ip]);
+  // Delete connections by source IP
+  await tryRun(bins.conntrack, ['-D', '-s', ip]);
+  // Delete connections by destination IP
+  await tryRun(bins.conntrack, ['-D', '-d', ip]);
+  // Also try with family flag for IPv6
+  if (v6) {
+    await tryRun(bins.conntrack, ['-D', '-f', 'ipv6', '-s', ip]);
+    await tryRun(bins.conntrack, ['-D', '-f', 'ipv6', '-d', ip]);
+  } else {
+    await tryRun(bins.conntrack, ['-D', '-f', 'ipv4', '-s', ip]);
+    await tryRun(bins.conntrack, ['-D', '-f', 'ipv4', '-d', ip]);
+  }
 }
 
 async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
@@ -132,6 +146,73 @@ async function iptablesDelete(ip: string, v6 = false) {
   await run(bin, ['-D', 'OUTPUT', '-d', ip, '-j', 'DROP']).catch(() => {});
   await run(bin, ['-D', 'FORWARD', '-s', ip, '-j', 'DROP']).catch(() => {});
   await run(bin, ['-D', 'FORWARD', '-d', ip, '-j', 'DROP']).catch(() => {});
+}
+
+// DNS blocking via /etc/hosts
+async function addHostsBlock(domain: string): Promise<boolean> {
+  try {
+    if (!existsSync(HOSTS_FILE)) {
+      console.warn(`Hosts file ${HOSTS_FILE} does not exist`);
+      return false;
+    }
+    
+    const content = await readFile(HOSTS_FILE, 'utf-8');
+    const lines = content.split('\n');
+    
+    // Check if already blocked
+    const normalizedDomain = domain.toLowerCase().trim();
+    if (content.includes(`127.0.0.1 ${normalizedDomain}`) || 
+        content.includes(`0.0.0.0 ${normalizedDomain}`)) {
+      return true; // Already blocked
+    }
+    
+    // Find marker or add at end
+    let markerIndex = lines.findIndex((line: string) => line.includes(IDS_HOSTS_MARKER));
+    if (markerIndex === -1) {
+      lines.push(''); // Add blank line
+      lines.push(IDS_HOSTS_MARKER);
+      lines.push(`127.0.0.1 ${normalizedDomain}`);
+      lines.push(`0.0.0.0 ${normalizedDomain}`);
+    } else {
+      // Insert after marker
+      lines.splice(markerIndex + 1, 0, `127.0.0.1 ${normalizedDomain}`, `0.0.0.0 ${normalizedDomain}`);
+    }
+    
+    // Write back (requires sudo)
+    await writeFile(HOSTS_FILE, lines.join('\n') + '\n', 'utf-8');
+    return true;
+  } catch (e: any) {
+    console.warn(`Failed to add hosts block for ${domain}: ${e?.message || String(e)}`);
+    return false;
+  }
+}
+
+async function removeHostsBlock(domain: string): Promise<boolean> {
+  try {
+    if (!existsSync(HOSTS_FILE)) {
+      return false;
+    }
+    
+    const content = await readFile(HOSTS_FILE, 'utf-8');
+    const lines = content.split('\n');
+    const normalizedDomain = domain.toLowerCase().trim();
+    
+    // Remove lines containing this domain
+    const filtered = lines.filter((line: string) => 
+      !line.includes(`127.0.0.1 ${normalizedDomain}`) && 
+      !line.includes(`0.0.0.0 ${normalizedDomain}`)
+    );
+    
+    if (filtered.length === lines.length) {
+      return true; // Already removed
+    }
+    
+    await writeFile(HOSTS_FILE, filtered.join('\n') + '\n', 'utf-8');
+    return true;
+  } catch (e: any) {
+    console.warn(`Failed to remove hosts block for ${domain}: ${e?.message || String(e)}`);
+    return false;
+  }
 }
 
 export const firewall = {
@@ -198,6 +279,41 @@ export const firewall = {
       }
       await flushConntrack(ip, version === 6);
       return { removed: true };
+    } catch (e: any) {
+      return { removed: false, error: e?.message || String(e) };
+    }
+  },
+
+  async blockDomain(domain: string): Promise<{ applied: boolean; hostsBlocked?: boolean } | { applied: false; error: string }> {
+    try {
+      const hostsBlocked = await addHostsBlock(domain);
+      // Also resolve and block IPs
+      const dns = await import('dns/promises');
+      let allIPs: string[] = [];
+      try {
+        const ipv4Promise = dns.resolve4(domain).catch(() => [] as string[]);
+        const ipv6Promise = dns.resolve6(domain).catch(() => [] as string[]);
+        const [ipv4Addrs, ipv6Addrs] = await Promise.all([ipv4Promise, ipv6Promise]);
+        if (Array.isArray(ipv4Addrs)) allIPs.push(...ipv4Addrs);
+        if (Array.isArray(ipv6Addrs)) allIPs.push(...ipv6Addrs);
+      } catch {}
+      
+      // Block all resolved IPs
+      for (const ip of allIPs) {
+        await this.blockIP(ip).catch(() => {});
+      }
+      
+      return { applied: true, hostsBlocked };
+    } catch (e: any) {
+      return { applied: false, error: e?.message || String(e) };
+    }
+  },
+
+  async unblockDomain(domain: string): Promise<{ removed: boolean; hostsRemoved?: boolean } | { removed: false; error: string }> {
+    try {
+      const hostsRemoved = await removeHostsBlock(domain);
+      // Note: We don't automatically unblock IPs here since they might be blocked for other reasons
+      return { removed: true, hostsRemoved };
     } catch (e: any) {
       return { removed: false, error: e?.message || String(e) };
     }

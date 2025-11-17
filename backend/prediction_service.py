@@ -231,39 +231,59 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
             except Exception as e:
                 print(f"⚠️ Error processing port scan features: {e}")
             
-            # DOS FEATURES - Map all DoS attack indicators (with safety checks)
+            # DOS FEATURES - Map all DoS attack indicators (with safety checks and value capping)
             try:
                 if dos_features and (dos_features.get('is_dos', False) or dos_features.get('dos_score', 0) > 0.1):
-                    packets_per_sec = dos_features.get('packets_per_second', 0) or 0
-                    packet_count = dos_features.get('packet_count', 0) or 0
-                    avg_packet_size = dos_features.get('avg_packet_size', 0) or 0
-                    syn_packets = dos_features.get('syn_packets', 0) or 0
-                    bytes_per_sec = dos_features.get('bytes_per_second', 0) or 0
+                    # Extract and cap values to prevent overflow
+                    packets_per_sec = min(float(dos_features.get('packets_per_second', 0) or 0), 100000.0)  # Cap at 100k
+                    packet_count = min(float(dos_features.get('packet_count', 0) or 0), 100000.0)  # Cap at 100k
+                    avg_packet_size = min(float(dos_features.get('avg_packet_size', 0) or 0), 65535.0)  # Cap at max packet size
+                    syn_packets = min(float(dos_features.get('syn_packets', 0) or 0), 10000.0)  # Cap at 10k
+                    bytes_per_sec = min(float(dos_features.get('bytes_per_second', 0) or 0), 10000000.0)  # Cap at 10MB/s
                     
-                    # Extremely high packet rate = DoS
-                    features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0),
-                                                    packets_per_sec * 3)  # Amplify
-                    features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                       packet_count * 2)  # Amplify
-                    features['Fwd Packets/s'] = max(features.get('Fwd Packets/s', 0),
-                                                   packets_per_sec * 3)
+                    # Ensure no NaN or inf
+                    if np.isnan(packets_per_sec) or np.isinf(packets_per_sec):
+                        packets_per_sec = 0.0
+                    if np.isnan(packet_count) or np.isinf(packet_count):
+                        packet_count = 0.0
+                    if np.isnan(avg_packet_size) or np.isinf(avg_packet_size):
+                        avg_packet_size = 0.0
+                    if np.isnan(syn_packets) or np.isinf(syn_packets):
+                        syn_packets = 0.0
+                    if np.isnan(bytes_per_sec) or np.isinf(bytes_per_sec):
+                        bytes_per_sec = 0.0
+                    
+                    # Extremely high packet rate = DoS (cap amplified values)
+                    amplified_pps = min(packets_per_sec * 3, 100000.0)  # Cap amplified value
+                    features['Flow Packets/s'] = max(features.get('Flow Packets/s', 0) or 0, amplified_pps)
+                    
+                    amplified_packet_count = min(packet_count * 2, 100000.0)  # Cap amplified value
+                    features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0) or 0, amplified_packet_count)
+                    
+                    features['Fwd Packets/s'] = max(features.get('Fwd Packets/s', 0) or 0, amplified_pps)
+                    
                     # Small packets at high rate = flood
                     if avg_packet_size > 0 and avg_packet_size < 200:
                         features['Min Packet Length'] = avg_packet_size
                         features['Packet Length Mean'] = avg_packet_size
-                    # SYN flood indicator
+                    
+                    # SYN flood indicator (cap values)
                     if syn_packets > 20:
                         features['SYN Flag Count'] = min(100, syn_packets)  # Cap at 100
-                        features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0),
-                                                           syn_packets * 5)
-                    # Bytes per second = bandwidth attack
+                        amplified_syn = min(syn_packets * 5, 50000.0)  # Cap amplified value
+                        features['Total Fwd Packets'] = max(features.get('Total Fwd Packets', 0) or 0, amplified_syn)
+                    
+                    # Bytes per second = bandwidth attack (safe division)
                     if bytes_per_sec > 0:
+                        normalized_bytes = min(bytes_per_sec / 10, 1000000.0)  # Cap normalized value
                         features['Total Length of Fwd Packets'] = max(
-                        features.get('Total Length of Fwd Packets', 0),
-                        bytes_per_sec / 10  # Normalize
-                    )
+                            features.get('Total Length of Fwd Packets', 0) or 0,
+                            normalized_bytes
+                        )
             except Exception as e:
                 print(f"⚠️ Error processing DoS features: {e}")
+                import traceback
+                traceback.print_exc()  # Print full traceback for debugging
             
             # R2L FEATURES - Remote to Local attack indicators (with safety checks)
             try:
@@ -330,21 +350,33 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
             except Exception as e:
                 print(f"⚠️ Error processing brute force features: {e}")
             
-            # OVERALL ATTACK SCORE - Boost all features if ANY attack detected (with safety checks)
+            # OVERALL ATTACK SCORE - Boost all features if ANY attack detected (with safety checks and capping)
             try:
                 if attack_detection and attack_detection.get('is_malicious', False):
-                    overall_confidence = attack_detection.get('confidence', 0) or 0
-                    # If detector is very confident, significantly boost ML features
+                    overall_confidence = float(attack_detection.get('confidence', 0) or 0)
+                    # Cap confidence to valid range
+                    overall_confidence = max(0.0, min(1.0, overall_confidence))
+                    
+                    # If detector is very confident, significantly boost ML features (with capping)
                     if overall_confidence > 0.7:
-                        features['Flow Packets/s'] = (features.get('Flow Packets/s', 0) or 0) * 2
-                        features['Total Fwd Packets'] = (features.get('Total Fwd Packets', 0) or 0) * 2
-                        features['Fwd Packets/s'] = (features.get('Fwd Packets/s', 0) or 0) * 2
-                    # If detector is moderately confident, moderate boost
+                        current_pps = min(float(features.get('Flow Packets/s', 0) or 0), 50000.0)
+                        current_fwd = min(float(features.get('Total Fwd Packets', 0) or 0), 50000.0)
+                        current_fwd_pps = min(float(features.get('Fwd Packets/s', 0) or 0), 50000.0)
+                        
+                        features['Flow Packets/s'] = min(current_pps * 2, 100000.0)  # Cap at 100k
+                        features['Total Fwd Packets'] = min(current_fwd * 2, 100000.0)  # Cap at 100k
+                        features['Fwd Packets/s'] = min(current_fwd_pps * 2, 100000.0)  # Cap at 100k
+                    # If detector is moderately confident, moderate boost (with capping)
                     elif overall_confidence > 0.5:
-                        features['Flow Packets/s'] = (features.get('Flow Packets/s', 0) or 0) * 1.5
-                        features['Total Fwd Packets'] = (features.get('Total Fwd Packets', 0) or 0) * 1.5
+                        current_pps = min(float(features.get('Flow Packets/s', 0) or 0), 50000.0)
+                        current_fwd = min(float(features.get('Total Fwd Packets', 0) or 0), 50000.0)
+                        
+                        features['Flow Packets/s'] = min(current_pps * 1.5, 100000.0)  # Cap at 100k
+                        features['Total Fwd Packets'] = min(current_fwd * 1.5, 100000.0)  # Cap at 100k
             except Exception as e:
                 print(f"⚠️ Error processing overall attack score: {e}")
+                import traceback
+                traceback.print_exc()  # Print full traceback for debugging
     
     # Calculate bulk features
     if start_bytes > 0:
@@ -444,18 +476,60 @@ def predict():
             # Preprocess packet (this also uses attack_detection internally for feature enhancement)
             try:
                 features = preprocess_packet(packet)
+                # Additional safety check - ensure features are valid
+                if features is None or features.empty:
+                    print("⚠️ Warning: Empty features DataFrame, using defaults")
+                    # Create minimal valid features
+                    features = pd.DataFrame([{col: 0 for col in features.columns if hasattr(features, 'columns')}])
             except Exception as e:
-                return jsonify({'error': f'Error preprocessing packet: {str(e)}'}), 400
+                print(f"❌ CRITICAL: Error preprocessing packet: {e}")
+                import traceback
+                traceback.print_exc()
+                # Return error but don't crash - return a default prediction
+                return jsonify({
+                    'packet_id': packet.get('_id', ''),
+                    'binary_prediction': 'benign',
+                    'attack_type': 'normal',
+                    'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                    'attack_type_probabilities': {
+                        'normal': 1.0,
+                        'dos': 0.0,
+                        'probe': 0.0,
+                        'r2l': 0.0,
+                        'u2r': 0.0,
+                        'brute_force': 0.0
+                    },
+                    'error': f'Error preprocessing packet: {str(e)}'
+                }), 200  # Return 200 so backend doesn't crash, but include error in response
             
-            # Get predictions
+            # Get predictions (with comprehensive error handling)
             try:
+                # Validate features before prediction
+                if features is None or features.empty:
+                    raise ValueError("Features DataFrame is empty or None")
+                
+                # Ensure features have the right shape
+                if len(features) == 0:
+                    raise ValueError("Features DataFrame has no rows")
+                
+                # Ensure all feature values are finite
+                features_clean = features.fillna(0).replace([np.inf, -np.inf], 0)
+                
                 print("Making binary prediction...")
-                binary_pred = binary_model.predict(features)[0]
-                print(f"Binary prediction: {binary_pred}")
+                try:
+                    binary_pred = binary_model.predict(features_clean)[0]
+                    print(f"Binary prediction: {binary_pred}")
+                except Exception as e:
+                    print(f"⚠️ Error in binary prediction: {e}")
+                    binary_pred = 0  # Default to benign
                 
                 print("Making multiclass prediction...")
-                multiclass_pred = multiclass_model.predict(features)[0]
-                print(f"Multiclass prediction: {multiclass_pred}")
+                try:
+                    multiclass_pred = multiclass_model.predict(features_clean)[0]
+                    print(f"Multiclass prediction: {multiclass_pred}")
+                except Exception as e:
+                    print(f"⚠️ Error in multiclass prediction: {e}")
+                    multiclass_pred = 0  # Default to normal
                 
                 # Map predictions to labels (6 attack types: normal, dos, probe, r2l, u2r, brute_force)
                 binary_label = 'malicious' if binary_pred == 1 else 'benign'
@@ -467,6 +541,30 @@ def predict():
                     4: 'u2r',
                     5: 'brute_force'  # 6th attack type
                 }.get(multiclass_pred, 'unknown')
+                
+                # Get confidence scores BEFORE override logic (so override can boost them)
+                binary_confidence = 0.5
+                multiclass_confidence = 0.5
+                
+                try:
+                    binary_proba = binary_model.predict_proba(features_clean)[0]
+                    if len(binary_proba) > 1:
+                        binary_confidence = float(binary_proba[1])  # Probability of malicious
+                    else:
+                        binary_confidence = float(binary_proba[0])
+                except Exception as e:
+                    print(f"⚠️ Error getting binary confidence: {e}")
+                    binary_confidence = 0.5
+
+                try:
+                    multiclass_proba = multiclass_model.predict_proba(features_clean)[0]
+                    if multiclass_pred < len(multiclass_proba):
+                        multiclass_confidence = float(multiclass_proba[multiclass_pred])
+                    else:
+                        multiclass_confidence = float(max(multiclass_proba))  # Use max probability
+                except Exception as e:
+                    print(f"⚠️ Error getting multiclass confidence: {e}")
+                    multiclass_confidence = 0.5
                 
                 # ULTRA SHARP: Comprehensive attack detection override - ALWAYS TRUST DETECTORS
                 # Detectors are rule-based and extremely accurate - they override ML completely
@@ -481,6 +579,13 @@ def predict():
                         detected_confidence = 0.0
                         is_detector_malicious = False
                     
+                    # CRITICAL: If detector found ANY attack, ALWAYS use detector's attack_type
+                    # This ensures we always show the correct attack type (dos, probe, brute_force, etc.)
+                    if is_detector_malicious and detected_attack_type and detected_attack_type != 'normal':
+                        print(f"🚨 DETECTOR OVERRIDE: Using detector attack_type: {detected_attack_type} "
+                              f"(detector confidence: {detected_confidence:.2f})")
+                        attack_type = detected_attack_type  # ALWAYS use detector's attack type
+                    
                     # ULTRA SHARP RULE 1: If detector says attack, ALWAYS mark as malicious
                     # Even if ML says benign, detector is more reliable for known patterns
                     if is_detector_malicious:
@@ -489,7 +594,12 @@ def predict():
                         
                         # COMPLETE OVERRIDE: Detector wins, no questions asked
                         binary_label = 'malicious'
-                        attack_type = detected_attack_type
+                        # CRITICAL: Always use detector's attack_type, never use ML's "normal"
+                        if detected_attack_type and detected_attack_type != 'normal':
+                            attack_type = detected_attack_type
+                        elif attack_type == 'normal':
+                            # If detector says attack but type is unclear, use unknown_attack
+                            attack_type = 'unknown_attack'
                         
                         # ULTRA SHARP: Boost confidence aggressively based on detector confidence
                         if detected_confidence >= 0.8:
@@ -565,17 +675,6 @@ def predict():
                         # Boost ML confidence but don't override label (let ML decide with better features)
                         binary_confidence = max(binary_confidence, detected_confidence * 0.8)
                         multiclass_confidence = max(multiclass_confidence, detected_confidence * 0.75)
-                
-                # Get confidence scores safely
-                try:
-                    binary_confidence = float(binary_model.predict_proba(features)[0][1])
-                except:
-                    binary_confidence = 0.5
-
-                try:
-                    multiclass_confidence = float(multiclass_model.predict_proba(features)[0][multiclass_pred])
-                except:
-                    multiclass_confidence = 0.5
 
                 # Get probabilities for all attack types (6 types: normal, dos, probe, r2l, u2r, brute_force)
                 attack_type_probs = {}
@@ -673,10 +772,10 @@ def predict():
                 results.append({
                     'packet_id': packet.get('_id', ''),
                     'binary_prediction': binary_label,
-                    'attack_type': attack_type,
+                    'attack_type': attack_type,  # This will be the correct attack type from detector
                     'confidence': {
-                        'binary': binary_confidence,
-                        'multiclass': multiclass_confidence
+                        'binary': float(binary_confidence),
+                        'multiclass': float(multiclass_confidence)
                     },
                     'attack_type_probabilities': attack_type_probs
                 })

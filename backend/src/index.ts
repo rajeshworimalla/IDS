@@ -64,7 +64,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rate-limit and auto-ban middleware (Redis-based)
-app.use(rateLimitMiddleware);
+    app.use(rateLimitMiddleware);
 console.log('Rate limit middleware loaded and applied');
 
 // Error handling middleware
