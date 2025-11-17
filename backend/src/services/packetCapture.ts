@@ -19,6 +19,71 @@ setInterval(() => {
   });
 }, 300000); // Run every 5 minutes
 
+// Circuit breaker for prediction service
+interface CircuitBreakerState {
+  failures: number;
+  lastFailureTime: number;
+  state: 'closed' | 'open' | 'half-open';
+}
+
+const circuitBreaker: CircuitBreakerState = {
+  failures: 0,
+  lastFailureTime: 0,
+  state: 'closed'
+};
+
+const CIRCUIT_BREAKER_THRESHOLD = 5; // Open after 5 failures
+const CIRCUIT_BREAKER_TIMEOUT = 30000; // Try again after 30 seconds
+const MAX_CONCURRENT_REQUESTS = 10; // Limit concurrent prediction requests
+let activeRequests = 0;
+const requestQueue: Array<() => Promise<void>> = [];
+
+function isCircuitBreakerOpen(): boolean {
+  if (circuitBreaker.state === 'open') {
+    const timeSinceLastFailure = Date.now() - circuitBreaker.lastFailureTime;
+    if (timeSinceLastFailure > CIRCUIT_BREAKER_TIMEOUT) {
+      circuitBreaker.state = 'half-open';
+      circuitBreaker.failures = 0;
+      return false; // Try again
+    }
+    return true; // Still open
+  }
+  return false;
+}
+
+function recordSuccess() {
+  if (circuitBreaker.state === 'half-open') {
+    circuitBreaker.state = 'closed';
+  }
+  circuitBreaker.failures = 0;
+}
+
+function recordFailure() {
+  circuitBreaker.failures++;
+  circuitBreaker.lastFailureTime = Date.now();
+  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreaker.state = 'open';
+    console.warn('⚠️ Circuit breaker OPENED - prediction service is failing');
+  }
+}
+
+async function processRequestQueue() {
+  while (requestQueue.length > 0 && activeRequests < MAX_CONCURRENT_REQUESTS) {
+    const request = requestQueue.shift();
+    if (request) {
+      activeRequests++;
+      request()
+        .finally(() => {
+          activeRequests--;
+          // Process next request in queue
+          if (requestQueue.length > 0) {
+            setImmediate(processRequestQueue);
+          }
+        });
+    }
+  }
+}
+
 export class PacketCaptureService {
   private cap: Cap;
   private isCapturing: boolean = false;
@@ -270,58 +335,128 @@ export class PacketCaptureService {
       const savedPacket = await PacketModel.create(packetData);
       console.log('Packet saved successfully with ID:', savedPacket._id);
 
-      // Try to get predictions from ML service (non-blocking)
-      try {
-        const response = await axios.post(this.predictionServiceUrl, {
-          packet: packetData
-        }, { timeout: 5000 });
-
-        const predictions = response.data;
-
-        // Update packet with predictions - CRITICAL: Always use detector's attack_type if available
-        savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
-        
-        // CRITICAL FIX: Use attack_type from predictions (which comes from detector override)
-        // Don't use 'normal' if it's marked as malicious
-        if (predictions.attack_type && predictions.attack_type !== 'normal') {
-          savedPacket.attack_type = predictions.attack_type;
-        } else if (savedPacket.is_malicious && (!predictions.attack_type || predictions.attack_type === 'normal')) {
-          // If malicious but attack_type is normal, infer from status/description
-          if (packetData.status === 'critical' || packetData.status === 'medium') {
-            const desc = (packetData.description || '').toLowerCase();
-            if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
-              savedPacket.attack_type = 'dos';
-            } else if (desc.includes('scan') || desc.includes('probe')) {
-              savedPacket.attack_type = 'probe';
-            } else if (desc.includes('brute') || desc.includes('login')) {
-              savedPacket.attack_type = 'brute_force';
-            } else {
-              savedPacket.attack_type = 'unknown_attack';
-            }
+      // Try to get predictions from ML service (non-blocking with circuit breaker)
+      if (isCircuitBreakerOpen()) {
+        console.log('⚠️ Circuit breaker is OPEN - skipping ML prediction, using rule-based detection only');
+        // Use rule-based detection only
+        savedPacket.is_malicious = packetData.status === 'critical' || packetData.status === 'medium';
+        if (savedPacket.is_malicious) {
+          const desc = (packetData.description || '').toLowerCase();
+          if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+            savedPacket.attack_type = 'dos';
+          } else if (desc.includes('scan') || desc.includes('probe')) {
+            savedPacket.attack_type = 'probe';
+          } else if (desc.includes('brute') || desc.includes('login')) {
+            savedPacket.attack_type = 'brute_force';
           } else {
-            savedPacket.attack_type = predictions.attack_type || 'unknown_attack';
+            savedPacket.attack_type = 'unknown_attack';
           }
         } else {
-          savedPacket.attack_type = predictions.attack_type || 'normal';
+          savedPacket.attack_type = 'normal';
         }
-        
-        savedPacket.confidence = predictions.confidence?.binary || predictions.confidence || 0.5;
-        
-        // Store attack type probabilities if available
-        if (predictions.attack_type_probabilities) {
-          savedPacket.attack_type_probabilities = predictions.attack_type_probabilities;
-        }
-
-        // Update in MongoDB
+        savedPacket.confidence = 0.7; // Default confidence for rule-based
         await savedPacket.save();
-        console.log('Packet updated with ML predictions:', {
-          is_malicious: savedPacket.is_malicious,
-          attack_type: savedPacket.attack_type,
-          confidence: savedPacket.confidence,
-          status: savedPacket.status
-        });
-      } catch (err) {
-        console.log('ML service not available, continuing without predictions');
+      } else {
+        // Queue the request if we're at max capacity
+        const makePredictionRequest = async () => {
+          try {
+            const response = await axios.post(this.predictionServiceUrl, {
+              packet: packetData
+            }, { 
+              timeout: 10000, // Increased timeout to 10 seconds
+              validateStatus: () => true // Don't throw on HTTP errors
+            });
+
+            if (response.status >= 200 && response.status < 300 && response.data) {
+              recordSuccess();
+              const predictions = response.data;
+
+              // Update packet with predictions - CRITICAL: Always use detector's attack_type if available
+              savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
+              
+              // CRITICAL FIX: Use attack_type from predictions (which comes from detector override)
+              // Don't use 'normal' if it's marked as malicious
+              if (predictions.attack_type && predictions.attack_type !== 'normal') {
+                savedPacket.attack_type = predictions.attack_type;
+              } else if (savedPacket.is_malicious && (!predictions.attack_type || predictions.attack_type === 'normal')) {
+                // If malicious but attack_type is normal, infer from status/description
+                if (packetData.status === 'critical' || packetData.status === 'medium') {
+                  const desc = (packetData.description || '').toLowerCase();
+                  if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+                    savedPacket.attack_type = 'dos';
+                  } else if (desc.includes('scan') || desc.includes('probe')) {
+                    savedPacket.attack_type = 'probe';
+                  } else if (desc.includes('brute') || desc.includes('login')) {
+                    savedPacket.attack_type = 'brute_force';
+                  } else {
+                    savedPacket.attack_type = 'unknown_attack';
+                  }
+                } else {
+                  savedPacket.attack_type = predictions.attack_type || 'unknown_attack';
+                }
+              } else {
+                savedPacket.attack_type = predictions.attack_type || 'normal';
+              }
+              
+              savedPacket.confidence = predictions.confidence?.binary || predictions.confidence || 0.5;
+              
+              // Store attack type probabilities if available
+              if (predictions.attack_type_probabilities) {
+                savedPacket.attack_type_probabilities = predictions.attack_type_probabilities;
+              }
+
+              // Update in MongoDB
+              await savedPacket.save();
+              console.log('Packet updated with ML predictions:', {
+                is_malicious: savedPacket.is_malicious,
+                attack_type: savedPacket.attack_type,
+                confidence: savedPacket.confidence,
+                status: savedPacket.status
+              });
+            } else {
+              // HTTP error response
+              throw new Error(`Prediction service returned status ${response.status}`);
+            }
+          } catch (err: any) {
+            recordFailure();
+            console.warn('⚠️ ML service error:', err?.message || 'Unknown error');
+            // Fallback to rule-based detection
+            savedPacket.is_malicious = packetData.status === 'critical' || packetData.status === 'medium';
+            if (savedPacket.is_malicious) {
+              const desc = (packetData.description || '').toLowerCase();
+              if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+                savedPacket.attack_type = 'dos';
+              } else if (desc.includes('scan') || desc.includes('probe')) {
+                savedPacket.attack_type = 'probe';
+              } else if (desc.includes('brute') || desc.includes('login')) {
+                savedPacket.attack_type = 'brute_force';
+              } else {
+                savedPacket.attack_type = 'unknown_attack';
+              }
+            } else {
+              savedPacket.attack_type = 'normal';
+            }
+            savedPacket.confidence = 0.7; // Default confidence for rule-based
+            await savedPacket.save();
+          }
+        };
+
+        // Add to queue if at capacity, otherwise process immediately
+        if (activeRequests >= MAX_CONCURRENT_REQUESTS) {
+          requestQueue.push(makePredictionRequest);
+          // Process queue asynchronously
+          setImmediate(processRequestQueue);
+        } else {
+          activeRequests++;
+          makePredictionRequest()
+            .finally(() => {
+              activeRequests--;
+              // Process next request in queue
+              if (requestQueue.length > 0) {
+                setImmediate(processRequestQueue);
+              }
+            });
+        }
       }
 
       // Reload packet from DB to ensure we have latest ML predictions

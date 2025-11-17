@@ -787,14 +787,44 @@ def predict():
             return jsonify(results[0])
         return jsonify(results)
     except Exception as e:
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        import traceback
+        print(f"❌ CRITICAL SERVER ERROR: {e}")
+        traceback.print_exc()
+        # Return error response instead of crashing
+        return jsonify({
+            'error': f'Server error: {str(e)}',
+            'binary_prediction': 'benign',
+            'attack_type': 'normal',
+            'confidence': {'binary': 0.5, 'multiclass': 0.5},
+            'attack_type_probabilities': {
+                'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+            }
+        }), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Global error handler to prevent crashes"""
+    import traceback
+    print(f"❌ UNHANDLED EXCEPTION: {e}")
+    traceback.print_exc()
+    return jsonify({
+        'error': f'Internal server error: {str(e)}',
+        'binary_prediction': 'benign',
+        'attack_type': 'normal',
+        'confidence': {'binary': 0.5, 'multiclass': 0.5},
+        'attack_type_probabilities': {
+            'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+        }
+    }), 500
 
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=5002, debug=True)
+        app.run(host='0.0.0.0', port=5002, debug=False, threaded=True)  # Disable debug in production
     except KeyboardInterrupt:
         print("\nShutting down gracefully...")
     except Exception as e:
         print(f"Error running server: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         print("Server stopped.") 
