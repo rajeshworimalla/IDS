@@ -118,6 +118,20 @@ export class PacketCaptureService {
     }
 
     const interfacePreferences = [
+    // Priority 1: Interface with 192.168.100.x network (where Kali packets arrive)
+    (iface: any) =>
+      iface.addresses &&
+      iface.addresses.some((addr: any) => 
+        addr.addr && addr.addr.startsWith('192.168.100.')
+      ) &&
+      !iface.name?.toLowerCase().includes('loopback'),
+
+    // Priority 2: Interface named enp0s3 (known working interface)
+    (iface: any) =>
+      iface.name === 'enp0s3' &&
+      !iface.name?.toLowerCase().includes('loopback'),
+
+    // Priority 3: Standard preferences
     (iface: any) =>
       iface.addresses &&
       iface.addresses.length > 0 &&
@@ -132,12 +146,14 @@ export class PacketCaptureService {
       iface.description?.toLowerCase().includes('realtek') ||
       iface.description?.toLowerCase().includes('intel')),
 
+    // Priority 4: Any non-loopback with addresses
     (iface: any) =>
       iface.addresses &&
       iface.addresses.length > 0 &&
       !iface.name?.toLowerCase().includes('loopback') &&
       !iface.description?.toLowerCase().includes('loopback'),
 
+    // Priority 5: Any non-loopback
     (iface: any) =>
       !iface.name?.toLowerCase().includes('loopback') &&
       !iface.description?.toLowerCase().includes('loopback'),
