@@ -3,10 +3,13 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
+import { join } from 'path';
 
 const execFileAsync = promisify(execFile);
 const HOSTS_FILE = '/etc/hosts';
 const IDS_HOSTS_MARKER = '# IDS_BLOCKED_DOMAINS';
+// Path to script relative to backend directory (works after compilation)
+const UPDATE_HOSTS_SCRIPT = join(process.cwd(), 'scripts', 'update-hosts.sh');
 
 type Bins = {
   ipset: string | null;
@@ -148,7 +151,7 @@ async function iptablesDelete(ip: string, v6 = false) {
   await run(bin, ['-D', 'FORWARD', '-d', ip, '-j', 'DROP']).catch(() => {});
 }
 
-// DNS blocking via /etc/hosts
+// DNS blocking via /etc/hosts using sudo script
 async function addHostsBlock(domain: string): Promise<boolean> {
   try {
     if (!existsSync(HOSTS_FILE)) {
@@ -156,30 +159,34 @@ async function addHostsBlock(domain: string): Promise<boolean> {
       return false;
     }
     
+    // Check if already blocked (read-only check, no sudo needed)
     const content = await readFile(HOSTS_FILE, 'utf-8');
-    const lines = content.split('\n');
-    
-    // Check if already blocked
     const normalizedDomain = domain.toLowerCase().trim();
     if (content.includes(`127.0.0.1 ${normalizedDomain}`) || 
         content.includes(`0.0.0.0 ${normalizedDomain}`)) {
       return true; // Already blocked
     }
     
-    // Find marker or add at end
-    let markerIndex = lines.findIndex((line: string) => line.includes(IDS_HOSTS_MARKER));
-    if (markerIndex === -1) {
-      lines.push(''); // Add blank line
-      lines.push(IDS_HOSTS_MARKER);
-      lines.push(`127.0.0.1 ${normalizedDomain}`);
-      lines.push(`0.0.0.0 ${normalizedDomain}`);
-    } else {
-      // Insert after marker
-      lines.splice(markerIndex + 1, 0, `127.0.0.1 ${normalizedDomain}`, `0.0.0.0 ${normalizedDomain}`);
+    // Use sudo script to add domain
+    if (!existsSync(UPDATE_HOSTS_SCRIPT)) {
+      console.warn(`Update hosts script not found at ${UPDATE_HOSTS_SCRIPT}, falling back to direct write`);
+      // Fallback to direct write (will fail without sudo, but at least we tried)
+      const lines = content.split('\n');
+      let markerIndex = lines.findIndex((line: string) => line.includes(IDS_HOSTS_MARKER));
+      if (markerIndex === -1) {
+        lines.push('');
+        lines.push(IDS_HOSTS_MARKER);
+        lines.push(`127.0.0.1 ${normalizedDomain}`);
+        lines.push(`0.0.0.0 ${normalizedDomain}`);
+      } else {
+        lines.splice(markerIndex + 1, 0, `127.0.0.1 ${normalizedDomain}`, `0.0.0.0 ${normalizedDomain}`);
+      }
+      await writeFile(HOSTS_FILE, lines.join('\n') + '\n', 'utf-8');
+      return true;
     }
     
-    // Write back (requires sudo)
-    await writeFile(HOSTS_FILE, lines.join('\n') + '\n', 'utf-8');
+    // Execute script with sudo
+    await execFileAsync('sudo', [UPDATE_HOSTS_SCRIPT, 'add', normalizedDomain]);
     return true;
   } catch (e: any) {
     console.warn(`Failed to add hosts block for ${domain}: ${e?.message || String(e)}`);
@@ -193,21 +200,30 @@ async function removeHostsBlock(domain: string): Promise<boolean> {
       return false;
     }
     
-    const content = await readFile(HOSTS_FILE, 'utf-8');
-    const lines = content.split('\n');
     const normalizedDomain = domain.toLowerCase().trim();
     
-    // Remove lines containing this domain
-    const filtered = lines.filter((line: string) => 
-      !line.includes(`127.0.0.1 ${normalizedDomain}`) && 
-      !line.includes(`0.0.0.0 ${normalizedDomain}`)
-    );
-    
-    if (filtered.length === lines.length) {
+    // Check if domain is blocked (read-only check)
+    const content = await readFile(HOSTS_FILE, 'utf-8');
+    if (!content.includes(`127.0.0.1 ${normalizedDomain}`) && 
+        !content.includes(`0.0.0.0 ${normalizedDomain}`)) {
       return true; // Already removed
     }
     
-    await writeFile(HOSTS_FILE, filtered.join('\n') + '\n', 'utf-8');
+    // Use sudo script to remove domain
+    if (!existsSync(UPDATE_HOSTS_SCRIPT)) {
+      console.warn(`Update hosts script not found at ${UPDATE_HOSTS_SCRIPT}, falling back to direct write`);
+      // Fallback to direct write
+      const lines = content.split('\n');
+      const filtered = lines.filter((line: string) => 
+        !line.includes(`127.0.0.1 ${normalizedDomain}`) && 
+        !line.includes(`0.0.0.0 ${normalizedDomain}`)
+      );
+      await writeFile(HOSTS_FILE, filtered.join('\n') + '\n', 'utf-8');
+      return true;
+    }
+    
+    // Execute script with sudo
+    await execFileAsync('sudo', [UPDATE_HOSTS_SCRIPT, 'remove', normalizedDomain]);
     return true;
   } catch (e: any) {
     console.warn(`Failed to remove hosts block for ${domain}: ${e?.message || String(e)}`);
