@@ -135,6 +135,9 @@ router.get('/debug/count', async (req, res) => {
 
 // Get alerts with filtering support
 router.get('/alerts', async (req, res) => {
+  // Set timeout to prevent hanging
+  req.setTimeout(10000); // 10 second timeout
+  
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'User not authenticated' });
@@ -209,7 +212,12 @@ router.get('/alerts', async (req, res) => {
     }
     
     console.log('Fetching alerts from MongoDB for user:', req.user._id, 'with filter:', JSON.stringify(filter));
-    const alerts = await Packet.find(filter).sort({ date: -1 });
+    
+    // Limit results to prevent overload during attacks (max 1000 alerts)
+    const alerts = await Packet.find(filter)
+      .sort({ date: -1 })
+      .limit(1000)
+      .lean(); // Use lean() for better performance
     
     // Transform packets into alerts format
     const formattedAlerts = alerts.map(packet => {
@@ -342,9 +350,17 @@ router.get('/alerts', async (req, res) => {
     
     console.log(`Found ${filteredAlerts.length} alerts for user ${req.user._id}`);
     res.json(filteredAlerts);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching alerts:', error);
-    res.status(500).json({ error: 'Error fetching alerts' });
+    // Return empty array instead of error to prevent frontend crash
+    if (res.headersSent) {
+      return; // Response already sent
+    }
+    res.status(500).json({ 
+      error: 'Error fetching alerts',
+      message: error?.message || 'Failed to fetch monitoring data. Please try again later.',
+      alerts: [] // Return empty array so frontend doesn't crash
+    });
   }
 });
 

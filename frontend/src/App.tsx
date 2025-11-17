@@ -31,6 +31,8 @@ const App: FC = () => {
   );
   const [attackAlert, setAttackAlert] = useState<AttackAlert | null>(null);
   const shownAlertsRef = useRef<Set<string>>(new Set()); // Track shown alerts to prevent duplicates
+  const processingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAlertTimeRef = useRef<number>(0); // Throttle alerts to max 1 per 500ms
 
   // Listen for changes to localStorage and custom events
   useEffect(() => {
@@ -96,88 +98,96 @@ const App: FC = () => {
     });
 
     socket.on('new-packet', (packet: any) => {
-      console.log('[Alert System] Received packet:', {
-        is_malicious: packet.is_malicious,
-        attack_type: packet.attack_type,
-        status: packet.status,
-        start_ip: packet.start_ip
-      });
-      
-      // Show alerts if:
-      // 1. Status is critical or medium (rule-based detection found attack)
-      // 2. OR is_malicious is true (ML detected attack)
-      // 3. AND we haven't shown this attack type from this source IP yet
+      // EARLY EXIT: Skip non-malicious packets immediately to prevent UI freeze
       const isCriticalOrMedium = packet.status === 'critical' || packet.status === 'medium';
       const isMalicious = packet.is_malicious === true;
       
-      if (isCriticalOrMedium || isMalicious) {
-        // Determine severity from status or default to medium if malicious
-        const severity = packet.status === 'critical' ? 'critical' : 
-                        packet.status === 'medium' ? 'medium' : 
-                        isMalicious ? 'medium' : 'low';
-        
-        // Get actual attack type - prioritize detector/ML result
-        let attackType = packet.attack_type || 'unknown_attack';
-        
-        // If attack_type is "normal" but status is critical/medium or is_malicious is true, infer attack type
-        if ((attackType === 'normal' || attackType === 'Normal Traffic') && (isCriticalOrMedium || isMalicious)) {
-          // Try to infer from description
-          const desc = (packet.description || '').toLowerCase();
-          if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
-            attackType = 'dos';
-          } else if (desc.includes('scan') || desc.includes('probe') || desc.includes('reconnaissance')) {
-            attackType = 'probe';
-          } else if (desc.includes('brute') || desc.includes('login') || desc.includes('failed')) {
-            attackType = 'brute_force';
-          } else {
-            attackType = 'unknown_attack';
-          }
-        }
-        
-        // Create unique key: attack_type + source_ip (so we only show once per attack type per source)
-        const alertKey = `${attackType}_${packet.start_ip}`;
-        
-        // Skip if we've already shown this alert
-        if (shownAlertsRef.current.has(alertKey)) {
-          console.log('[Alert System] Skipping duplicate alert:', alertKey);
-          return;
-        }
-        
-        // Mark as shown
-        shownAlertsRef.current.add(alertKey);
-        
-        // Clean up old alerts after 5 minutes to allow re-alerting if needed
-        setTimeout(() => {
-          shownAlertsRef.current.delete(alertKey);
-        }, 5 * 60 * 1000);
-        
-        // Map attack type to display name
-        const attackTypeNames: { [key: string]: string } = {
-          'dos': 'Denial of Service (DoS) Attack',
-          'probe': 'Port Scanning / Reconnaissance Attack',
-          'r2l': 'Remote to Local Attack',
-          'u2r': 'User to Root Attack',
-          'brute_force': 'Brute Force Attack',
-          'unknown_attack': 'Unknown Attack Type',
-          'normal': 'Normal Traffic'
-        };
-        
-        const displayAttackType = attackTypeNames[attackType.toLowerCase()] || attackType;
-        
-        // Map status to severity for alerts
-        const alert: AttackAlert = {
-          id: packet._id || Date.now().toString(),
-          severity,
-          attackType: displayAttackType,
-          sourceIP: packet.start_ip || 'Unknown',
-          destinationIP: packet.end_ip || 'Unknown',
-          description: packet.description || `Suspicious ${packet.protocol || 'network'} activity detected`,
-          timestamp: new Date(packet.date || Date.now()),
-        };
-
-        console.log('[Alert System] 🚨 ATTACK DETECTED:', alert);
-        setAttackAlert(alert);
+      // Only process malicious/critical packets - skip everything else instantly
+      if (!isCriticalOrMedium && !isMalicious) {
+        return; // Early exit - no processing needed
       }
+      
+      // THROTTLE: Only process alerts at most once per 500ms to prevent UI freeze
+      const now = Date.now();
+      if (now - lastAlertTimeRef.current < 500) {
+        return; // Skip if too soon since last alert
+      }
+      
+      // Determine severity from status or default to medium if malicious
+      const severity = packet.status === 'critical' ? 'critical' : 
+                      packet.status === 'medium' ? 'medium' : 
+                      isMalicious ? 'medium' : 'low';
+      
+      // Get actual attack type - prioritize detector/ML result
+      let attackType = packet.attack_type || 'unknown_attack';
+      
+      // If attack_type is "normal" but status is critical/medium or is_malicious is true, infer attack type
+      if ((attackType === 'normal' || attackType === 'Normal Traffic') && (isCriticalOrMedium || isMalicious)) {
+        // Try to infer from description
+        const desc = (packet.description || '').toLowerCase();
+        if (desc.includes('syn') || desc.includes('flood') || desc.includes('dos')) {
+          attackType = 'dos';
+        } else if (desc.includes('scan') || desc.includes('probe') || desc.includes('reconnaissance')) {
+          attackType = 'probe';
+        } else if (desc.includes('brute') || desc.includes('login') || desc.includes('failed')) {
+          attackType = 'brute_force';
+        } else {
+          attackType = 'unknown_attack';
+        }
+      }
+      
+      // Create unique key: attack_type + source_ip (so we only show once per attack type per source)
+      const alertKey = `${attackType}_${packet.start_ip}`;
+      
+      // Skip if we've already shown this alert
+      if (shownAlertsRef.current.has(alertKey)) {
+        return; // Skip duplicate - no console log to reduce overhead
+      }
+      
+      // Mark as shown
+      shownAlertsRef.current.add(alertKey);
+      lastAlertTimeRef.current = now; // Update throttle timer
+      
+      // Clean up old alerts after 5 minutes to allow re-alerting if needed
+      setTimeout(() => {
+        shownAlertsRef.current.delete(alertKey);
+      }, 5 * 60 * 1000);
+      
+      // Map attack type to display name
+      const attackTypeNames: { [key: string]: string } = {
+        'dos': 'Denial of Service (DoS) Attack',
+        'probe': 'Port Scanning / Reconnaissance Attack',
+        'r2l': 'Remote to Local Attack',
+        'u2r': 'User to Root Attack',
+        'brute_force': 'Brute Force Attack',
+        'unknown_attack': 'Unknown Attack Type',
+        'normal': 'Normal Traffic'
+      };
+      
+      const displayAttackType = attackTypeNames[attackType.toLowerCase()] || attackType;
+      
+      // Map status to severity for alerts
+      const alert: AttackAlert = {
+        id: packet._id || Date.now().toString(),
+        severity,
+        attackType: displayAttackType,
+        sourceIP: packet.start_ip || 'Unknown',
+        destinationIP: packet.end_ip || 'Unknown',
+        description: packet.description || `Suspicious ${packet.protocol || 'network'} activity detected`,
+        timestamp: new Date(packet.date || Date.now()),
+      };
+
+      // Use requestAnimationFrame for smooth UI updates (prevents blocking)
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current);
+      }
+      
+      // Batch state update to prevent multiple re-renders
+      processingTimeoutRef.current = setTimeout(() => {
+        requestAnimationFrame(() => {
+          setAttackAlert(alert);
+        });
+      }, 50); // Small delay to batch rapid updates
     });
 
     socket.on('disconnect', () => {
@@ -186,11 +196,15 @@ const App: FC = () => {
 
     return () => {
       socket.disconnect();
+      // Cleanup timeouts
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current);
+      }
     };
   }, [isAuthenticated]);
 
   // Set up a protected route component
-  const ProtectedRoute = ({ element }: { element: React.ReactElement }) => {
+  const ProtectedRoute = ({ element }: { element: React.ReactElement<any> }) => {
     return isAuthenticated ? element : <Navigate to="/login" replace />;
   };
 

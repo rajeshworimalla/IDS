@@ -92,6 +92,8 @@ export class PacketCaptureService {
   private predictionServiceUrl: string;
   private packetHandler: ((nbytes: number, trunc: boolean) => void) | null = null;
   private userId: string;
+  private packetCount: number = 0; // Track total packets for sampling
+  private lastSamplingReset: number = Date.now(); // Track when we last reset sampling
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -275,6 +277,23 @@ export class PacketCaptureService {
   }
 
   private async processPacket(raw: Buffer) {
+    // PACKET SAMPLING: During high-volume attacks, only process every Nth packet
+    // This prevents backend from being overwhelmed
+    this.packetCount++;
+    const SAMPLE_RATE = 10; // Process every 10th packet during high volume
+    
+    // Reset counter every 5 seconds to allow new packets through
+    if (Date.now() - this.lastSamplingReset > 5000) {
+      this.packetCount = 0;
+      this.lastSamplingReset = Date.now();
+    }
+    
+    // Skip processing if we're in high-volume mode and this isn't a sampled packet
+    // But always process if queue is not too full (to ensure we catch attacks)
+    if (this.packetCount % SAMPLE_RATE !== 0 && requestQueue.length > 50) {
+      return; // Skip this packet - too many in queue
+    }
+    
     try {
       console.log(`Processing packet of ${raw.length} bytes`);
 
