@@ -3,6 +3,7 @@ import Navbar from '../components/Navbar';
 import DateRangePicker from '../components/DateRangePicker';
 import { packetService, ThreatAlert } from '../services/packetService';
 import { ipBlockService, BlockedIP, BlockResponse } from '../services/ipBlockService';
+import { formatDate } from '../utils/dateUtils';
 import '../styles/Monitoring.css';
 
 interface FilterState {
@@ -425,7 +426,7 @@ const Monitoring: FC = () => {
                       </div>
                       <div className="alert-meta">
                         <span className="timestamp">
-                          {new Date(alert.timestamp).toLocaleString()}
+                          {formatDate(alert.timestamp)}
                         </span>
                         {getStatusBadge(alert.status)}
                       </div>
@@ -722,7 +723,7 @@ const Monitoring: FC = () => {
                         <li key={item.ip} className="blocked-item">
                           <div className="blocked-info">
                             <span className="blocked-ip">{item.ip}</span>
-                            <span className="blocked-at">{new Date(item.blockedAt).toLocaleString()}</span>
+                            <span className="blocked-at">{formatDate(item.blockedAt)}</span>
                           </div>
                           <button className="unblock-btn" onClick={() => handleUnblockIP(item.ip)}>Unblock</button>
                         </li>

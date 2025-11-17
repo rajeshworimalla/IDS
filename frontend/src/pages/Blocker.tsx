@@ -2,6 +2,7 @@ import { FC, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
 import { ipBlockService, BlockedIP, BlockPolicy } from '../services/ipBlockService';
+import { formatDate } from '../utils/dateUtils';
 import '../styles/Blocker.css';
 
 const Blocker: FC = () => {
@@ -333,7 +334,7 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                         <td>{item.ip}</td>
                         <td>{item.reason || '-'}</td>
                         <td>{item.method || '-'}</td>
-                        <td>{new Date(item.blockedAt).toLocaleString()}</td>
+                        <td>{formatDate(item.blockedAt)}</td>
                         <td>
                           <button className="btn danger" onClick={()=>handleUnblock(item.ip)}>Unblock</button>
                         </td>

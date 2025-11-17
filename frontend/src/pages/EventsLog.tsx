@@ -1,6 +1,7 @@
 import { FC, useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import Navbar from '../components/Navbar';
+import { formatDate } from '../utils/dateUtils';
 import '../styles/EventsLog.css';
 import { authService } from '../services/auth';
 
@@ -390,7 +391,7 @@ const EventsLog: FC = () => {
                           {packet.status}
                         </span>
                   </td>
-                      <td>{new Date(packet.date).toLocaleString()}</td>
+                      <td>{formatDate(packet.date)}</td>
                       <td className="ip-cell">{packet.start_ip}</td>
                       <td className="ip-cell">{packet.end_ip}</td>
                   <td>{packet.protocol}</td>

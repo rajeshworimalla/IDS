@@ -7,6 +7,7 @@ import {
   Error as ErrorIcon,
   Info as InfoIcon
 } from '@mui/icons-material';
+import { formatDate } from '../utils/dateUtils';
 import '../styles/DataTable.css';
 
 interface TableData {
@@ -67,9 +68,6 @@ const DataTable: React.FC<DataTableProps> = ({
   const endIndex = startIndex + itemsPerPage;
   const paginatedData = filteredData.slice(startIndex, endIndex);
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
-  };
 
   if (isLoading) {
     return (

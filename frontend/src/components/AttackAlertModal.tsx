@@ -128,7 +128,7 @@ const AttackAlertModal: FC<AttackAlertModalProps> = ({ alert, onClose }) => {
             </div>
             <div className="detail-row">
               <span className="detail-label">Time:</span>
-              <span className="detail-value">{new Date(alert.timestamp).toLocaleString()}</span>
+              <span className="detail-value">{formatDate(alert.timestamp)}</span>
             </div>
             {alert.description && (
               <div className="detail-row full-width">
