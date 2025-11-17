@@ -1,4 +1,5 @@
 import { FC, useEffect } from 'react';
+import { formatDate } from '../utils/dateUtils';
 import '../styles/AttackAlertModal.css';
 
 interface AttackAlert {
