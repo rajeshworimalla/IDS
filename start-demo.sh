@@ -155,7 +155,8 @@ if [ $? -ne 0 ]; then
         echo -e "${GREEN}   ✓ Build completed (dist/ exists)${NC}"
     fi
 else
-echo -e "${GREEN}   ✓ Build successful${NC}"
+    echo -e "${GREEN}   ✓ Build successful${NC}"
+fi
 
 # Start backend in background
 echo "   Starting backend..."
