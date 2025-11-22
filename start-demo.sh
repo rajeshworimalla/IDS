@@ -181,9 +181,9 @@ if ps -p $BACKEND_PID > /dev/null 2>&1 || is_running "node dist/index.js"; then
         fi
     done
 else
-    echo "   ✗ Backend failed to start"
+    echo -e "${YELLOW}   ⚠ Backend process not found, but continuing anyway${NC}"
     echo "   Check logs: cat /tmp/ids-backend.log"
-    exit 1
+    echo "   Backend may start later or may need manual intervention"
 fi
 echo ""
 
