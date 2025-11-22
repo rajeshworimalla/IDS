@@ -293,27 +293,37 @@ export class PacketCaptureService {
   }
 
   private async processPacket(raw: Buffer) {
+    // Validate input
+    if (!raw || !Buffer.isBuffer(raw) || raw.length === 0) {
+      return; // Skip invalid packets
+    }
+    
     // PACKET SAMPLING: Only skip packets if queue is VERY full (emergency mode)
     // This prevents backend from being overwhelmed while still detecting attacks
     const EMERGENCY_QUEUE_THRESHOLD = 100; // Only sample when queue is very full
     const SAMPLE_RATE = 5; // Process every 5th packet in emergency mode
     
     // Only apply sampling if queue is critically full
-    if (requestQueue.length > EMERGENCY_QUEUE_THRESHOLD) {
-      this.packetCount++;
-      // Reset counter every 2 seconds to allow new packets through
-      if (Date.now() - this.lastSamplingReset > 2000) {
+    try {
+      if (requestQueue.length > EMERGENCY_QUEUE_THRESHOLD) {
+        this.packetCount++;
+        // Reset counter every 2 seconds to allow new packets through
+        if (Date.now() - this.lastSamplingReset > 2000) {
+          this.packetCount = 0;
+          this.lastSamplingReset = Date.now();
+        }
+        
+        // Skip processing if in emergency mode and this isn't a sampled packet
+        if (this.packetCount % SAMPLE_RATE !== 0) {
+          return; // Skip this packet - emergency mode
+        }
+      } else {
+        // Normal mode - process all packets
         this.packetCount = 0;
-        this.lastSamplingReset = Date.now();
       }
-      
-      // Skip processing if in emergency mode and this isn't a sampled packet
-      if (this.packetCount % SAMPLE_RATE !== 0) {
-        return; // Skip this packet - emergency mode
-      }
-    } else {
-      // Normal mode - process all packets
-      this.packetCount = 0;
+    } catch (e) {
+      console.warn('⚠️ Error in packet sampling logic:', e);
+      // Continue processing - don't skip due to sampling error
     }
     
     try {
@@ -375,9 +385,20 @@ export class PacketCaptureService {
 
       console.log('Saving packet to database:', packetData);
 
-      // Save to MongoDB
-      const savedPacket = await PacketModel.create(packetData);
-      console.log('Packet saved successfully with ID:', savedPacket._id);
+      // Save to MongoDB with error handling
+      let savedPacket;
+      try {
+        savedPacket = await PacketModel.create(packetData);
+        console.log('Packet saved successfully with ID:', savedPacket._id);
+      } catch (dbError: any) {
+        console.error('❌ Error saving packet to database:', dbError);
+        // If we can't save, we can't continue - but don't crash the whole service
+        // Log the error and return early
+        if (dbError.message && dbError.message.includes('duplicate')) {
+          console.warn('⚠️ Duplicate packet detected, skipping');
+        }
+        return; // Exit early - can't process without DB save
+      }
 
       // Try to get predictions from ML service (non-blocking with circuit breaker)
       if (isCircuitBreakerOpen()) {
@@ -504,30 +525,68 @@ export class PacketCaptureService {
       }
 
       // Reload packet from DB to ensure we have latest ML predictions
-      await savedPacket.populate('user');
-      const packetToEmit = savedPacket.toObject();
+      try {
+        await savedPacket.populate('user');
+      } catch (e) {
+        console.warn('⚠️ Error populating packet user:', e);
+        // Continue without user population
+      }
+      
+      let packetToEmit: any;
+      try {
+        packetToEmit = savedPacket.toObject();
+      } catch (e) {
+        console.warn('⚠️ Error converting packet to object:', e);
+        // Create a safe object from saved packet
+        packetToEmit = {
+          _id: savedPacket._id,
+          date: savedPacket.date,
+          start_ip: savedPacket.start_ip,
+          end_ip: savedPacket.end_ip,
+          protocol: savedPacket.protocol,
+          frequency: savedPacket.frequency,
+          status: savedPacket.status,
+          description: savedPacket.description,
+          start_bytes: savedPacket.start_bytes,
+          end_bytes: savedPacket.end_bytes,
+          is_malicious: savedPacket.is_malicious ?? false,
+          attack_type: savedPacket.attack_type || 'normal',
+          confidence: savedPacket.confidence || 0
+        };
+      }
       
       // CRITICAL: Ensure is_malicious and attack_type are correctly set
-      packetToEmit.is_malicious = savedPacket.is_malicious ?? false;
-      
-      // CRITICAL FIX: Don't default to 'normal' if it's malicious or critical/medium
-      if (packetToEmit.is_malicious || packetToEmit.status === 'critical' || packetToEmit.status === 'medium') {
-        packetToEmit.attack_type = savedPacket.attack_type || 'unknown_attack';
-      } else {
-        packetToEmit.attack_type = savedPacket.attack_type || 'normal';
+      try {
+        packetToEmit.is_malicious = savedPacket.is_malicious ?? false;
+        
+        // CRITICAL FIX: Don't default to 'normal' if it's malicious or critical/medium
+        if (packetToEmit.is_malicious || packetToEmit.status === 'critical' || packetToEmit.status === 'medium') {
+          packetToEmit.attack_type = savedPacket.attack_type || 'unknown_attack';
+        } else {
+          packetToEmit.attack_type = savedPacket.attack_type || 'normal';
+        }
+      } catch (e) {
+        console.warn('⚠️ Error setting packet attack fields:', e);
+        packetToEmit.is_malicious = false;
+        packetToEmit.attack_type = 'normal';
       }
       
       // Broadcast to connected clients
-      const io = getIO();
-      if (io) {
-        console.log('Broadcasting new packet to clients:', {
-          is_malicious: packetToEmit.is_malicious,
-          attack_type: packetToEmit.attack_type,
-          status: packetToEmit.status
-        });
-        io.emit('new-packet', packetToEmit);
-      } else {
-        console.error('Socket.IO not initialized');
+      try {
+        const io = getIO();
+        if (io) {
+          console.log('Broadcasting new packet to clients:', {
+            is_malicious: packetToEmit.is_malicious,
+            attack_type: packetToEmit.attack_type,
+            status: packetToEmit.status
+          });
+          io.emit('new-packet', packetToEmit);
+        } else {
+          console.warn('⚠️ Socket.IO not initialized - packet saved but not broadcast');
+        }
+      } catch (e) {
+        console.error('⚠️ Error broadcasting packet:', e);
+        // Don't crash - packet is saved, just not broadcast
       }
 
       // Auto-ban on critical events
@@ -537,11 +596,17 @@ export class PacketCaptureService {
           await autoBan(packetData.start_ip, 'ids:critical');
         }
       } catch (e) {
-        console.error('Auto-ban failed for critical packet:', e);
+        console.error('⚠️ Auto-ban failed for critical packet:', e);
+        // Don't crash - continue processing
       }
     } catch (err) {
       const error = err as Error;
-      console.error('Error processing packet:', error);
+      console.error('❌ Error processing packet:', error);
+      // Log stack trace for debugging
+      if (error.stack) {
+        console.error('Stack trace:', error.stack);
+      }
+      // Don't rethrow - continue processing other packets
     }
   }
 

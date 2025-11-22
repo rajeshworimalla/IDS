@@ -50,26 +50,50 @@ class PortScanDetector(AttackDetectorBase):
     def add_packet(self, source_ip: str, dest_ip: str, dest_port: int = None, 
                    protocol: str = 'TCP'):
         """Add packet to tracking"""
-        now = datetime.now()
-        cutoff_time = now - timedelta(seconds=self.time_window)
-        
-        with self.lock:
-            data = self.port_tracking[source_ip]
+        try:
+            # Validate inputs
+            if not source_ip or not isinstance(source_ip, str):
+                return
+            if not dest_ip or not isinstance(dest_ip, str):
+                return
+            if dest_port is not None:
+                try:
+                    dest_port = int(dest_port)
+                    if dest_port < 1 or dest_port > 65535:
+                        dest_port = None
+                except (ValueError, TypeError):
+                    dest_port = None
             
-            # Clean old data
-            data['timestamps'] = [ts for ts in data['timestamps'] if ts > cutoff_time]
+            now = datetime.now()
+            cutoff_time = now - timedelta(seconds=self.time_window)
             
-            # Add new data
-            data['timestamps'].append(now)
-            data['unique_dest_ips'].add(dest_ip)
-            data['total_packets'] += 1
-            
-            if dest_port:
-                data['ports'].add(dest_port)
-                data['sequential_ports'].append((dest_port, now))
-                # Keep only recent ports
-                data['sequential_ports'] = [(p, t) for p, t in data['sequential_ports'] 
-                                          if t > cutoff_time]
+            with self.lock:
+                data = self.port_tracking[source_ip]
+                
+                # Clean old data
+                try:
+                    data['timestamps'] = [ts for ts in data['timestamps'] if isinstance(ts, datetime) and ts > cutoff_time]
+                except Exception as e:
+                    print(f"⚠️ Error cleaning timestamps: {e}")
+                    data['timestamps'] = []
+                
+                # Add new data
+                data['timestamps'].append(now)
+                if dest_ip:
+                    data['unique_dest_ips'].add(dest_ip)
+                data['total_packets'] = max(0, data.get('total_packets', 0) + 1)
+                
+                if dest_port:
+                    try:
+                        data['ports'].add(dest_port)
+                        data['sequential_ports'].append((dest_port, now))
+                        # Keep only recent ports
+                        data['sequential_ports'] = [(p, t) for p, t in data['sequential_ports'] 
+                                                  if isinstance(t, datetime) and t > cutoff_time]
+                    except Exception as e:
+                        print(f"⚠️ Error adding port data: {e}")
+        except Exception as e:
+            print(f"⚠️ Error in PortScanDetector.add_packet: {e}")
     
     def get_features(self, source_ip: str) -> dict:
         """Get port scan detection features"""
@@ -171,25 +195,47 @@ class DoSDetector(AttackDetectorBase):
                    protocol: str = 'TCP', is_syn: bool = False, 
                    connection_failed: bool = False):
         """Add packet to DoS tracking"""
-        now = datetime.now()
-        cutoff_time = now - timedelta(seconds=self.time_window)
-        
-        with self.lock:
-            data = self.dos_tracking[source_ip]
+        try:
+            # Validate inputs
+            if not source_ip or not isinstance(source_ip, str):
+                return
+            if not dest_ip or not isinstance(dest_ip, str):
+                return
+            try:
+                packet_size = int(packet_size)
+                packet_size = max(0, min(packet_size, 65535))  # Cap at max packet size
+            except (ValueError, TypeError):
+                packet_size = 0
             
-            # Clean old data
-            data['packets'] = [(ts, size) for ts, size in data['packets'] if ts > cutoff_time]
-            data['bytes'] = [(ts, size) for ts, size in data['bytes'] if ts > cutoff_time]
+            now = datetime.now()
+            cutoff_time = now - timedelta(seconds=self.time_window)
             
-            # Add new data
-            data['packets'].append((now, 1))
-            data['bytes'].append((now, packet_size))
-            data['dest_ips'].add(dest_ip)
-            
-            if is_syn:
-                data['syn_packets'] += 1
-            if connection_failed:
-                data['failed_connections'] += 1
+            with self.lock:
+                data = self.dos_tracking[source_ip]
+                
+                # Clean old data
+                try:
+                    data['packets'] = [(ts, size) for ts, size in data['packets'] 
+                                     if isinstance(ts, datetime) and ts > cutoff_time]
+                    data['bytes'] = [(ts, size) for ts, size in data['bytes'] 
+                                    if isinstance(ts, datetime) and ts > cutoff_time]
+                except Exception as e:
+                    print(f"⚠️ Error cleaning DoS data: {e}")
+                    data['packets'] = []
+                    data['bytes'] = []
+                
+                # Add new data
+                data['packets'].append((now, 1))
+                data['bytes'].append((now, packet_size))
+                if dest_ip:
+                    data['dest_ips'].add(dest_ip)
+                
+                if is_syn:
+                    data['syn_packets'] = max(0, data.get('syn_packets', 0) + 1)
+                if connection_failed:
+                    data['failed_connections'] = max(0, data.get('failed_connections', 0) + 1)
+        except Exception as e:
+            print(f"⚠️ Error in DoSDetector.add_packet: {e}")
     
     def get_features(self, source_ip: str) -> dict:
         """Get DoS detection features"""
@@ -453,27 +499,52 @@ class BruteForceDetector(AttackDetectorBase):
                    is_login_attempt: bool = False, is_failed: bool = False,
                    is_success_after_failures: bool = False):
         """Add packet to brute force tracking"""
-        now = datetime.now()
-        cutoff_time = now - timedelta(seconds=self.time_window)
-        
-        with self.lock:
-            data = self.brute_force_tracking[source_ip]
+        try:
+            # Validate inputs
+            if not source_ip or not isinstance(source_ip, str):
+                return
+            if dest_port is not None:
+                try:
+                    dest_port = int(dest_port)
+                    if dest_port < 1 or dest_port > 65535:
+                        dest_port = None
+                except (ValueError, TypeError):
+                    dest_port = None
             
-            # Clean old data
-            data['login_attempts'] = [ts for ts in data['login_attempts'] if ts > cutoff_time]
-            data['failed_attempts'] = [ts for ts in data['failed_attempts'] if ts > cutoff_time]
-            data['successful_after_failures'] = [ts for ts in data['successful_after_failures'] 
-                                                if ts > cutoff_time]
+            now = datetime.now()
+            cutoff_time = now - timedelta(seconds=self.time_window)
             
-            if dest_port:
-                data['target_ports'].add(dest_port)
-            
-            if is_login_attempt:
-                data['login_attempts'].append(now)
-                if is_failed:
-                    data['failed_attempts'].append(now)
-                if is_success_after_failures:
-                    data['successful_after_failures'].append(now)
+            with self.lock:
+                data = self.brute_force_tracking[source_ip]
+                
+                # Clean old data
+                try:
+                    data['login_attempts'] = [ts for ts in data['login_attempts'] 
+                                            if isinstance(ts, datetime) and ts > cutoff_time]
+                    data['failed_attempts'] = [ts for ts in data['failed_attempts'] 
+                                             if isinstance(ts, datetime) and ts > cutoff_time]
+                    data['successful_after_failures'] = [ts for ts in data['successful_after_failures'] 
+                                                        if isinstance(ts, datetime) and ts > cutoff_time]
+                except Exception as e:
+                    print(f"⚠️ Error cleaning brute force data: {e}")
+                    data['login_attempts'] = []
+                    data['failed_attempts'] = []
+                    data['successful_after_failures'] = []
+                
+                if dest_port:
+                    try:
+                        data['target_ports'].add(dest_port)
+                    except Exception:
+                        pass
+                
+                if is_login_attempt:
+                    data['login_attempts'].append(now)
+                    if is_failed:
+                        data['failed_attempts'].append(now)
+                    if is_success_after_failures:
+                        data['successful_after_failures'].append(now)
+        except Exception as e:
+            print(f"⚠️ Error in BruteForceDetector.add_packet: {e}")
     
     def get_features(self, source_ip: str) -> dict:
         """Get brute force detection features"""
@@ -550,86 +621,176 @@ class ComprehensiveAttackDetector:
         Returns:
             Dictionary with attack_type, is_malicious, confidence, and all detector features
         """
-        source_ip = packet.get('start_ip', '')
-        dest_ip = packet.get('end_ip', '')
-        protocol = packet.get('protocol', 'TCP')
-        packet_size = packet.get('start_bytes', 0) + packet.get('end_bytes', 0)
-        
-        # Extract destination port from description
-        dest_port = None
-        description = packet.get('description', '')
-        if '->' in description:
+        try:
+            # Validate and sanitize input
+            if not isinstance(packet, dict):
+                return self._default_detection_result()
+            
+            source_ip = str(packet.get('start_ip', '')).strip()
+            dest_ip = str(packet.get('end_ip', '')).strip()
+            protocol = str(packet.get('protocol', 'TCP')).upper()
+            
+            # Validate IP addresses
+            if not source_ip or not dest_ip or source_ip == '0.0.0.0' or dest_ip == '0.0.0.0':
+                return self._default_detection_result()
+            
+            packet_size = int(packet.get('start_bytes', 0) or 0) + int(packet.get('end_bytes', 0) or 0)
+            packet_size = max(0, min(packet_size, 65535))  # Cap at max packet size
+            
+            # Extract destination port from description with error handling
+            dest_port = None
+            description = str(packet.get('description', '')).strip()
+            if '->' in description:
+                try:
+                    port_str = description.split('->')[1].strip().split()[0]  # Get port, remove any trailing text
+                    dest_port = int(port_str)
+                    dest_port = max(1, min(dest_port, 65535))  # Validate port range
+                except (ValueError, IndexError):
+                    dest_port = None
+            
+            # Add to all detectors with error handling
             try:
-                dest_port = int(description.split('->')[1].strip())
-            except:
-                pass
-        
-        # Add to all detectors
-        self.port_scan_detector.add_packet(source_ip, dest_ip, dest_port, protocol)
-        self.dos_detector.add_packet(source_ip, dest_ip, packet_size, protocol)
-        
-        # Check if this looks like a login attempt (common ports: 22 SSH, 23 Telnet, 80/443 HTTP/HTTPS, 3306 MySQL, 5432 PostgreSQL)
-        is_login_attempt = dest_port in [22, 23, 80, 443, 3306, 5432, 3389, 5900] if dest_port else False
-        # For brute force, we'll track failed login attempts from the packet description or status
-        is_failed = 'failed' in description.lower() or 'denied' in description.lower() or 'refused' in description.lower()
-        
-        self.brute_force_detector.add_packet(
-            source_ip=source_ip,
-            dest_port=dest_port,
-            is_login_attempt=is_login_attempt,
-            is_failed=is_failed
-        )
-        
-        # Get features from all detectors
-        port_scan_features = self.port_scan_detector.get_features(source_ip)
-        dos_features = self.dos_detector.get_features(source_ip)
-        r2l_features = self.r2l_detector.get_features(source_ip)
-        u2r_features = self.u2r_detector.get_features(source_ip)
-        brute_force_features = self.brute_force_detector.get_features(source_ip)
-        
-        # Determine primary attack type and confidence (6 attack types)
-        attack_scores = {
-            'probe': port_scan_features['port_scan_score'],
-            'dos': dos_features['dos_score'],
-            'r2l': r2l_features['r2l_score'],
-            'u2r': u2r_features['u2r_score'],
-            'brute_force': brute_force_features['brute_force_score'],
-            'normal': 0.0
-        }
-        
-        # Find highest scoring attack
-        max_attack = max(attack_scores.items(), key=lambda x: x[1])
-        attack_type = max_attack[0] if max_attack[1] > 0.3 else 'normal'
-        confidence = max_attack[1]
-        
-        # CRITICAL: If ANY detector says it's an attack, mark as malicious
-        # Even if we can't determine the specific type, it's still an attack
-        is_malicious = (
-            port_scan_features['is_port_scan'] or
-            dos_features['is_dos'] or
-            r2l_features['is_r2l'] or
-            u2r_features['is_u2r'] or
-            brute_force_features['is_brute_force'] or
-            attack_type != 'normal'
-        )
-        
-        # If malicious but type is unclear, use "unknown_attack"
-        if is_malicious and attack_type == 'normal':
-            attack_type = 'unknown_attack'
-            # Use the highest non-zero score as confidence
-            non_zero_scores = [score for score in attack_scores.values() if score > 0]
-            confidence = max(non_zero_scores) if non_zero_scores else 0.5
-        
+                self.port_scan_detector.add_packet(source_ip, dest_ip, dest_port, protocol)
+            except Exception as e:
+                print(f"⚠️ Error in port_scan_detector.add_packet: {e}")
+            
+            try:
+                self.dos_detector.add_packet(source_ip, dest_ip, packet_size, protocol)
+            except Exception as e:
+                print(f"⚠️ Error in dos_detector.add_packet: {e}")
+            
+            # Check if this looks like a login attempt (common ports: 22 SSH, 23 Telnet, 80/443 HTTP/HTTPS, 3306 MySQL, 5432 PostgreSQL)
+            is_login_attempt = dest_port in [22, 23, 80, 443, 3306, 5432, 3389, 5900] if dest_port else False
+            # For brute force, we'll track failed login attempts from the packet description or status
+            is_failed = 'failed' in description.lower() or 'denied' in description.lower() or 'refused' in description.lower()
+            
+            try:
+                self.brute_force_detector.add_packet(
+                    source_ip=source_ip,
+                    dest_port=dest_port,
+                    is_login_attempt=is_login_attempt,
+                    is_failed=is_failed
+                )
+            except Exception as e:
+                print(f"⚠️ Error in brute_force_detector.add_packet: {e}")
+            
+            # Get features from all detectors with error handling
+            try:
+                port_scan_features = self.port_scan_detector.get_features(source_ip)
+            except Exception as e:
+                print(f"⚠️ Error in port_scan_detector.get_features: {e}")
+                port_scan_features = self.port_scan_detector._default_features()
+            
+            try:
+                dos_features = self.dos_detector.get_features(source_ip)
+            except Exception as e:
+                print(f"⚠️ Error in dos_detector.get_features: {e}")
+                dos_features = self.dos_detector._default_features()
+            
+            try:
+                r2l_features = self.r2l_detector.get_features(source_ip)
+            except Exception as e:
+                print(f"⚠️ Error in r2l_detector.get_features: {e}")
+                r2l_features = self.r2l_detector._default_features()
+            
+            try:
+                u2r_features = self.u2r_detector.get_features(source_ip)
+            except Exception as e:
+                print(f"⚠️ Error in u2r_detector.get_features: {e}")
+                u2r_features = self.u2r_detector._default_features()
+            
+            try:
+                brute_force_features = self.brute_force_detector.get_features(source_ip)
+            except Exception as e:
+                print(f"⚠️ Error in brute_force_detector.get_features: {e}")
+                brute_force_features = self.brute_force_detector._default_features()
+            
+            # Safely extract scores with defaults
+            try:
+                attack_scores = {
+                    'probe': float(port_scan_features.get('port_scan_score', 0) or 0),
+                    'dos': float(dos_features.get('dos_score', 0) or 0),
+                    'r2l': float(r2l_features.get('r2l_score', 0) or 0),
+                    'u2r': float(u2r_features.get('u2r_score', 0) or 0),
+                    'brute_force': float(brute_force_features.get('brute_force_score', 0) or 0),
+                    'normal': 0.0
+                }
+                
+                # Ensure all scores are valid numbers
+                for key, value in attack_scores.items():
+                    if not isinstance(value, (int, float)) or (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
+                        attack_scores[key] = 0.0
+            except Exception as e:
+                print(f"⚠️ Error calculating attack_scores: {e}")
+                attack_scores = {'probe': 0.0, 'dos': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0, 'normal': 0.0}
+            
+            # Find highest scoring attack
+            try:
+                max_attack = max(attack_scores.items(), key=lambda x: x[1])
+                attack_type = max_attack[0] if max_attack[1] > 0.3 else 'normal'
+                confidence = float(max_attack[1])
+                confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
+            except Exception as e:
+                print(f"⚠️ Error finding max attack: {e}")
+                attack_type = 'normal'
+                confidence = 0.0
+            
+            # CRITICAL: If ANY detector says it's an attack, mark as malicious
+            # Even if we can't determine the specific type, it's still an attack
+            try:
+                is_malicious = (
+                    bool(port_scan_features.get('is_port_scan', False)) or
+                    bool(dos_features.get('is_dos', False)) or
+                    bool(r2l_features.get('is_r2l', False)) or
+                    bool(u2r_features.get('is_u2r', False)) or
+                    bool(brute_force_features.get('is_brute_force', False)) or
+                    attack_type != 'normal'
+                )
+            except Exception as e:
+                print(f"⚠️ Error determining is_malicious: {e}")
+                is_malicious = attack_type != 'normal'
+            
+            # If malicious but type is unclear, use "unknown_attack"
+            if is_malicious and attack_type == 'normal':
+                attack_type = 'unknown_attack'
+                # Use the highest non-zero score as confidence
+                try:
+                    non_zero_scores = [score for score in attack_scores.values() if score > 0]
+                    confidence = float(max(non_zero_scores)) if non_zero_scores else 0.5
+                    confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
+                except Exception as e:
+                    print(f"⚠️ Error calculating unknown_attack confidence: {e}")
+                    confidence = 0.5
+            
+            return {
+                'attack_type': str(attack_type),
+                'is_malicious': bool(is_malicious),
+                'confidence': float(confidence),
+                'port_scan_features': port_scan_features,
+                'dos_features': dos_features,
+                'r2l_features': r2l_features,
+                'u2r_features': u2r_features,
+                'brute_force_features': brute_force_features,
+                'all_scores': attack_scores
+            }
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR in analyze_packet: {e}")
+            import traceback
+            traceback.print_exc()
+            return self._default_detection_result()
+    
+    def _default_detection_result(self) -> dict:
+        """Return a safe default detection result when errors occur"""
         return {
-            'attack_type': attack_type,
-            'is_malicious': is_malicious,
-            'confidence': confidence,
-            'port_scan_features': port_scan_features,
-            'dos_features': dos_features,
-            'r2l_features': r2l_features,
-            'u2r_features': u2r_features,
-            'brute_force_features': brute_force_features,
-            'all_scores': attack_scores
+            'attack_type': 'normal',
+            'is_malicious': False,
+            'confidence': 0.0,
+            'port_scan_features': self.port_scan_detector._default_features(),
+            'dos_features': self.dos_detector._default_features(),
+            'r2l_features': self.r2l_detector._default_features(),
+            'u2r_features': self.u2r_detector._default_features(),
+            'brute_force_features': self.brute_force_detector._default_features(),
+            'all_scores': {'probe': 0.0, 'dos': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0, 'normal': 0.0}
         }
 
 

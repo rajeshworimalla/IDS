@@ -5,40 +5,53 @@ import pandas as pd
 from typing import List, Dict, Any
 from sklearn.base import BaseEstimator
 import joblib
+import os
 from attack_detectors import comprehensive_detector
 
 app = Flask(__name__)
 
-# Load models
-try:
-    print("Attempting to load models...")
-    # Try loading with joblib first
+# Configuration: Set USE_ML_MODELS=false to disable ML models and use only rule-based detection
+USE_ML_MODELS = os.getenv('USE_ML_MODELS', 'false').lower() == 'true'
+
+binary_model = None
+multiclass_model = None
+
+# Load models only if ML models are enabled
+if USE_ML_MODELS:
     try:
-        binary_model = joblib.load('binary_attack_model.pkl')
-        multiclass_model = joblib.load('multiclass_attack_model.pkl')
-        print("Models loaded successfully with joblib")
-    except:
-        # Fall back to pickle if joblib fails
-        print("Joblib loading failed, trying pickle...")
-        binary_model = pickle.load(open('binary_attack_model.pkl', 'rb'))
-        multiclass_model = pickle.load(open('multiclass_attack_model.pkl', 'rb'))
-        print("Models loaded successfully with pickle")
+        print("🤖 ML MODELS ENABLED - Attempting to load models...")
+        # Try loading with joblib first
+        try:
+            binary_model = joblib.load('binary_attack_model.pkl')
+            multiclass_model = joblib.load('multiclass_attack_model.pkl')
+            print("✅ Models loaded successfully with joblib")
+        except:
+            # Fall back to pickle if joblib fails
+            print("⚠️ Joblib loading failed, trying pickle...")
+            binary_model = pickle.load(open('binary_attack_model.pkl', 'rb'))
+            multiclass_model = pickle.load(open('multiclass_attack_model.pkl', 'rb'))
+            print("✅ Models loaded successfully with pickle")
 
-    # Print model information
-    print(f"Binary model type: {type(binary_model)}")
-    print(f"Binary model attributes: {dir(binary_model)}")
-    print(f"Multiclass model type: {type(multiclass_model)}")
-    print(f"Multiclass model attributes: {dir(multiclass_model)}")
+        # Print model information
+        print(f"Binary model type: {type(binary_model)}")
+        print(f"Multiclass model type: {type(multiclass_model)}")
 
-    # Verify models have required methods
-    if not hasattr(binary_model, 'predict'):
-        raise AttributeError("Binary model does not have predict method")
-    if not hasattr(multiclass_model, 'predict'):
-        raise AttributeError("Multiclass model does not have predict method")
-
-except Exception as e:
-    print(f"Error loading models: {e}")
-    raise
+        # Verify models have required methods
+        if not hasattr(binary_model, 'predict'):
+            raise AttributeError("Binary model does not have predict method")
+        if not hasattr(multiclass_model, 'predict'):
+            raise AttributeError("Multiclass model does not have predict method")
+        
+        print("✅ ML models ready!")
+    except Exception as e:
+        print(f"❌ Error loading ML models: {e}")
+        print("⚠️ Falling back to rule-based detection only")
+        binary_model = None
+        multiclass_model = None
+        USE_ML_MODELS = False
+else:
+    print("🔍 ML MODELS DISABLED - Using rule-based attack detection only")
+    print("   (Set USE_ML_MODELS=true to enable ML models)")
 
 def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
     """Preprocess a single packet into features."""
@@ -425,42 +438,130 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
+        # Validate request
+        if not request.is_json:
+            return jsonify({
+                'error': 'Content-Type must be application/json',
+                'binary_prediction': 'benign',
+                'attack_type': 'normal',
+                'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                'attack_type_probabilities': {
+                    'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                }
+            }), 400
+        
         data = request.json
         if not data:
-            return jsonify({'error': 'No data provided'}), 400
-
-        print(f"Received data: {data}")
+            return jsonify({
+                'error': 'No data provided',
+                'binary_prediction': 'benign',
+                'attack_type': 'normal',
+                'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                'attack_type_probabilities': {
+                    'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                }
+            }), 400
 
         # Handle both single packet and list of packets
-        if isinstance(data, dict) and 'packet' in data:
-            # Single packet wrapped in object
-            packets = [data['packet']]
-        elif isinstance(data, list):
-            # List of packets
-            packets = data
-        elif isinstance(data, dict):
-            # Single packet
-            packets = [data]
-        else:
-            return jsonify({'error': 'Invalid data format'}), 400
+        try:
+            if isinstance(data, dict) and 'packet' in data:
+                # Single packet wrapped in object
+                packets = [data['packet']]
+            elif isinstance(data, list):
+                # List of packets
+                packets = data
+            elif isinstance(data, dict):
+                # Single packet
+                packets = [data]
+            else:
+                return jsonify({
+                    'error': 'Invalid data format',
+                    'binary_prediction': 'benign',
+                    'attack_type': 'normal',
+                    'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                    'attack_type_probabilities': {
+                        'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                    }
+                }), 400
 
-        if len(packets) == 0:
-            return jsonify({'error': 'Empty packet list'}), 400
+            if len(packets) == 0:
+                return jsonify({
+                    'error': 'Empty packet list',
+                    'binary_prediction': 'benign',
+                    'attack_type': 'normal',
+                    'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                    'attack_type_probabilities': {
+                        'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                    }
+                }), 400
+        except Exception as e:
+            print(f"⚠️ Error parsing packet data: {e}")
+            return jsonify({
+                'error': f'Error parsing packet data: {str(e)}',
+                'binary_prediction': 'benign',
+                'attack_type': 'normal',
+                'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                'attack_type_probabilities': {
+                    'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                }
+            }), 400
 
         results = []
         for packet in packets:
-            # Validate packet structure
-            if not isinstance(packet, dict):
-                return jsonify({'error': 'Each packet must be a dictionary'}), 400
+            try:
+                # Validate packet structure
+                if not isinstance(packet, dict):
+                    print(f"⚠️ Invalid packet type: {type(packet)}")
+                    results.append({
+                        'packet_id': '',
+                        'binary_prediction': 'benign',
+                        'attack_type': 'normal',
+                        'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                        'attack_type_probabilities': {
+                            'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                        },
+                        'error': 'Packet must be a dictionary'
+                    })
+                    continue
 
-            print(f"Processing packet: {packet}")
-
-            # Set default values for missing fields
-            packet.setdefault('start_bytes', 0)
-            packet.setdefault('end_bytes', 0)
-            packet.setdefault('protocol', 'TCP')
-            packet.setdefault('description', 'Unknown')
-            packet.setdefault('frequency', 1)
+                # Set default values for missing fields with validation
+                try:
+                    packet.setdefault('start_bytes', 0)
+                    packet.setdefault('end_bytes', 0)
+                    packet.setdefault('protocol', 'TCP')
+                    packet.setdefault('description', 'Unknown')
+                    packet.setdefault('frequency', 1)
+                    packet.setdefault('start_ip', '0.0.0.0')
+                    packet.setdefault('end_ip', '0.0.0.0')
+                    
+                    # Validate and sanitize values
+                    try:
+                        packet['start_bytes'] = max(0, min(int(packet.get('start_bytes', 0) or 0), 65535))
+                        packet['end_bytes'] = max(0, min(int(packet.get('end_bytes', 0) or 0), 65535))
+                        packet['frequency'] = max(0, min(float(packet.get('frequency', 1) or 1), 1000000))
+                    except (ValueError, TypeError) as e:
+                        print(f"⚠️ Error validating packet numeric fields: {e}")
+                        packet['start_bytes'] = 0
+                        packet['end_bytes'] = 0
+                        packet['frequency'] = 1
+                    
+                    packet['protocol'] = str(packet.get('protocol', 'TCP')).upper()
+                    packet['description'] = str(packet.get('description', 'Unknown'))
+                    packet['start_ip'] = str(packet.get('start_ip', '0.0.0.0'))
+                    packet['end_ip'] = str(packet.get('end_ip', '0.0.0.0'))
+                except Exception as e:
+                    print(f"⚠️ Error setting packet defaults: {e}")
+                    # Use safe defaults
+                    packet = {
+                        'start_bytes': 0,
+                        'end_bytes': 0,
+                        'protocol': 'TCP',
+                        'description': 'Unknown',
+                        'frequency': 1,
+                        'start_ip': '0.0.0.0',
+                        'end_ip': '0.0.0.0',
+                        '_id': packet.get('_id', '') if isinstance(packet, dict) else ''
+                    }
 
             # ULTRA SHARP: Get attack detection BEFORE preprocessing (needed for override logic)
             source_ip = packet.get('start_ip', '')
@@ -503,67 +604,104 @@ def predict():
                 }), 200  # Return 200 so backend doesn't crash, but include error in response
             
             # Get predictions (with comprehensive error handling)
-            try:
-                # Validate features before prediction
-                if features is None or features.empty:
-                    raise ValueError("Features DataFrame is empty or None")
-                
-                # Ensure features have the right shape
-                if len(features) == 0:
-                    raise ValueError("Features DataFrame has no rows")
-                
-                # Ensure all feature values are finite
-                features_clean = features.fillna(0).replace([np.inf, -np.inf], 0)
-                
-                print("Making binary prediction...")
-                try:
-                    binary_pred = binary_model.predict(features_clean)[0]
-                    print(f"Binary prediction: {binary_pred}")
-                except Exception as e:
-                    print(f"⚠️ Error in binary prediction: {e}")
-                    binary_pred = 0  # Default to benign
-                
-                print("Making multiclass prediction...")
-                try:
-                    multiclass_pred = multiclass_model.predict(features_clean)[0]
-                    print(f"Multiclass prediction: {multiclass_pred}")
-                except Exception as e:
-                    print(f"⚠️ Error in multiclass prediction: {e}")
-                    multiclass_pred = 0  # Default to normal
-                
-                # Map predictions to labels (6 attack types: normal, dos, probe, r2l, u2r, brute_force)
-                binary_label = 'malicious' if binary_pred == 1 else 'benign'
-                attack_type = {
-                    0: 'normal',
-                    1: 'dos',
-                    2: 'probe',
-                    3: 'r2l',
-                    4: 'u2r',
-                    5: 'brute_force'  # 6th attack type
-                }.get(multiclass_pred, 'unknown')
-                
-                # Get confidence scores BEFORE override logic (so override can boost them)
-                binary_confidence = 0.5
-                multiclass_confidence = 0.5
-                
-                try:
-                    binary_proba = binary_model.predict_proba(features_clean)[0]
-                    if len(binary_proba) > 1:
-                        binary_confidence = float(binary_proba[1])  # Probability of malicious
+            # If ML models are disabled, skip ML prediction and use only rule-based detection
+            if not USE_ML_MODELS or binary_model is None or multiclass_model is None:
+                print("🔍 Using rule-based detection only (ML models disabled)")
+                # Use rule-based detection results from comprehensive_detector
+                if attack_detection and isinstance(attack_detection, dict):
+                    # Use detector results directly - THIS IS THE MAIN DETECTION LOGIC
+                    is_malicious = attack_detection.get('is_malicious', False)
+                    detected_type = attack_detection.get('attack_type', 'normal')
+                    detected_confidence = float(attack_detection.get('confidence', 0) or 0)
+                    
+                    # Set labels based on detector results
+                    binary_label = 'malicious' if is_malicious else 'benign'
+                    attack_type = detected_type  # Always use detector's attack type
+                    
+                    # Set confidence based on detector confidence
+                    if is_malicious:
+                        binary_confidence = max(0.7, detected_confidence)  # At least 70% if malicious
+                        multiclass_confidence = max(0.7, detected_confidence)
                     else:
-                        binary_confidence = float(binary_proba[0])
-                except Exception as e:
-                    print(f"⚠️ Error getting binary confidence: {e}")
+                        binary_confidence = max(0.3, 1.0 - detected_confidence)  # Higher confidence if definitely normal
+                        multiclass_confidence = max(0.5, 1.0 - detected_confidence)
+                    
+                    print(f"🔍 Rule-based detection: {attack_type} (malicious: {is_malicious}, confidence: {detected_confidence:.2f})")
+                else:
+                    # Fallback if detector didn't run
+                    print("⚠️ Warning: Rule-based detector didn't run, using defaults")
+                    binary_label = 'benign'
+                    attack_type = 'normal'
                     binary_confidence = 0.5
-
+                    multiclass_confidence = 0.5
+            else:
                 try:
-                    multiclass_proba = multiclass_model.predict_proba(features_clean)[0]
-                    if multiclass_pred < len(multiclass_proba):
-                        multiclass_confidence = float(multiclass_proba[multiclass_pred])
-                    else:
-                        multiclass_confidence = float(max(multiclass_proba))  # Use max probability
+                    # Validate features before prediction
+                    if features is None or features.empty:
+                        raise ValueError("Features DataFrame is empty or None")
+                    
+                    # Ensure features have the right shape
+                    if len(features) == 0:
+                        raise ValueError("Features DataFrame has no rows")
+                    
+                    # Ensure all feature values are finite
+                    features_clean = features.fillna(0).replace([np.inf, -np.inf], 0)
+                    
+                    print("🤖 Making binary prediction with ML model...")
+                    try:
+                        binary_pred = binary_model.predict(features_clean)[0]
+                        print(f"Binary prediction: {binary_pred}")
+                    except Exception as e:
+                        print(f"⚠️ Error in binary prediction: {e}")
+                        binary_pred = 0  # Default to benign
+                    
+                    print("🤖 Making multiclass prediction with ML model...")
+                    try:
+                        multiclass_pred = multiclass_model.predict(features_clean)[0]
+                        print(f"Multiclass prediction: {multiclass_pred}")
+                    except Exception as e:
+                        print(f"⚠️ Error in multiclass prediction: {e}")
+                        multiclass_pred = 0  # Default to normal
+                    
+                    # Map predictions to labels (6 attack types: normal, dos, probe, r2l, u2r, brute_force)
+                    binary_label = 'malicious' if binary_pred == 1 else 'benign'
+                    attack_type = {
+                        0: 'normal',
+                        1: 'dos',
+                        2: 'probe',
+                        3: 'r2l',
+                        4: 'u2r',
+                        5: 'brute_force'  # 6th attack type
+                    }.get(multiclass_pred, 'unknown')
+                    
+                    # Get confidence scores BEFORE override logic (so override can boost them)
+                    binary_confidence = 0.5
+                    multiclass_confidence = 0.5
+                    
+                    try:
+                        binary_proba = binary_model.predict_proba(features_clean)[0]
+                        if len(binary_proba) > 1:
+                            binary_confidence = float(binary_proba[1])  # Probability of malicious
+                        else:
+                            binary_confidence = float(binary_proba[0])
+                    except Exception as e:
+                        print(f"⚠️ Error getting binary confidence: {e}")
+                        binary_confidence = 0.5
+
+                    try:
+                        multiclass_proba = multiclass_model.predict_proba(features_clean)[0]
+                        if multiclass_pred < len(multiclass_proba):
+                            multiclass_confidence = float(multiclass_proba[multiclass_pred])
+                        else:
+                            multiclass_confidence = float(max(multiclass_proba))  # Use max probability
+                    except Exception as e:
+                        print(f"⚠️ Error getting multiclass confidence: {e}")
+                        multiclass_confidence = 0.5
                 except Exception as e:
-                    print(f"⚠️ Error getting multiclass confidence: {e}")
+                    print(f"⚠️ Error in ML prediction, falling back to rule-based: {e}")
+                    binary_label = 'benign'
+                    attack_type = 'normal'
+                    binary_confidence = 0.5
                     multiclass_confidence = 0.5
                 
                 # ULTRA SHARP: Comprehensive attack detection override - ALWAYS TRUST DETECTORS
@@ -678,21 +816,52 @@ def predict():
 
                 # Get probabilities for all attack types (6 types: normal, dos, probe, r2l, u2r, brute_force)
                 attack_type_probs = {}
-                try:
-                    multiclass_probs = multiclass_model.predict_proba(features)[0]
-                    attack_type_names = ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']
-                    for i, prob in enumerate(multiclass_probs):
-                        if i < len(attack_type_names):
-                            attack_type_probs[attack_type_names[i]] = float(prob)
-                    # If model only has 5 classes, add brute_force with 0
-                    if len(multiclass_probs) < 6:
-                        attack_type_probs['brute_force'] = 0.0
-                except:
-                    # Fallback: set probability for predicted type only
-                    attack_type_probs = {attack_type: multiclass_confidence}
-                    for at in ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']:
-                        if at not in attack_type_probs:
-                            attack_type_probs[at] = 0.0
+                if USE_ML_MODELS and multiclass_model is not None:
+                    try:
+                        multiclass_probs = multiclass_model.predict_proba(features)[0]
+                        attack_type_names = ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']
+                        for i, prob in enumerate(multiclass_probs):
+                            if i < len(attack_type_names):
+                                attack_type_probs[attack_type_names[i]] = float(prob)
+                        # If model only has 5 classes, add brute_force with 0
+                        if len(multiclass_probs) < 6:
+                            attack_type_probs['brute_force'] = 0.0
+                    except:
+                        # Fallback: set probability for predicted type only
+                        attack_type_probs = {attack_type: multiclass_confidence}
+                        for at in ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']:
+                            if at not in attack_type_probs:
+                                attack_type_probs[at] = 0.0
+                else:
+                    # Rule-based only: set probabilities based on detector results
+                    if attack_detection and isinstance(attack_detection, dict):
+                        detected_type = attack_detection.get('attack_type', 'normal')
+                        detected_confidence = float(attack_detection.get('confidence', 0) or 0)
+                        all_scores = attack_detection.get('all_scores', {})
+                        
+                        # Use detector scores to set probabilities
+                        total_score = sum([max(0, float(s)) for s in all_scores.values()])
+                        if total_score > 0:
+                            # Normalize scores to probabilities
+                            for at in ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']:
+                                score = float(all_scores.get(at, 0) or 0)
+                                attack_type_probs[at] = max(0.0, min(1.0, score / total_score if total_score > 0 else 0))
+                        else:
+                            # Default probabilities
+                            attack_type_probs[detected_type] = max(0.5, detected_confidence)
+                            for at in ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']:
+                                if at not in attack_type_probs:
+                                    attack_type_probs[at] = 0.0
+                        
+                        # Ensure detected type has high probability
+                        if detected_type in attack_type_probs:
+                            attack_type_probs[detected_type] = max(attack_type_probs[detected_type], detected_confidence)
+                    else:
+                        # Fallback: set probability for predicted type only
+                        attack_type_probs = {attack_type: multiclass_confidence}
+                        for at in ['normal', 'dos', 'probe', 'r2l', 'u2r', 'brute_force']:
+                            if at not in attack_type_probs:
+                                attack_type_probs[at] = 0.0
                 
                 # ULTRA SHARP: Aggressively boost probabilities when detector finds attacks
                 if attack_detection and attack_detection['is_malicious']:
@@ -780,7 +949,20 @@ def predict():
                     'attack_type_probabilities': attack_type_probs
                 })
             except Exception as e:
-                return jsonify({'error': f'Error making predictions: {str(e)}'}), 500
+                print(f"❌ Error processing packet: {e}")
+                import traceback
+                traceback.print_exc()
+                # Add error result instead of crashing
+                results.append({
+                    'packet_id': packet.get('_id', '') if isinstance(packet, dict) else '',
+                    'binary_prediction': 'benign',
+                    'attack_type': 'normal',
+                    'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                    'attack_type_probabilities': {
+                        'normal': 1.0, 'dos': 0.0, 'probe': 0.0, 'r2l': 0.0, 'u2r': 0.0, 'brute_force': 0.0
+                    },
+                    'error': f'Error processing packet: {str(e)}'
+                })
 
         # Return single result if single packet was sent
         if len(results) == 1:
