@@ -209,20 +209,18 @@ fi
 if [ -d "venv/bin" ]; then
     source venv/bin/activate
     
-    # Check if models exist
-    if [ ! -f "binary_attack_model.pkl" ] || [ ! -f "multiclass_attack_model.pkl" ]; then
-        echo -e "${YELLOW}   ⚠ Model files not found, skipping prediction service${NC}"
-        echo "   Make sure binary_attack_model.pkl and multiclass_attack_model.pkl are in backend/"
-        PREDICTION_PID="N/A"
-    else
-        # Kill any existing prediction service
-        pkill -f "prediction_service.py" >/dev/null 2>&1
-        sleep 1
-        
-        python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
-        PREDICTION_PID=$!
-        sleep 3
-        
+    # Kill any existing prediction service
+    pkill -f "prediction_service.py" >/dev/null 2>&1
+    sleep 1
+    
+    # Set USE_ML_MODELS=false to use rule-based detection only (works without model files)
+    export USE_ML_MODELS=false
+    
+    python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
+    PREDICTION_PID=$!
+    sleep 3
+    
+    if is_running "prediction_service.py"; then
         echo -e "${GREEN}   ✓ Prediction service started (PID: $PREDICTION_PID)${NC}"
         echo "   Logs: tail -f /tmp/ids-prediction.log"
         echo "   Note: Using rule-based detection (ML models disabled)"
@@ -240,7 +238,6 @@ if [ -d "venv/bin" ]; then
         PREDICTION_PID="N/A"
     fi
     deactivate
-    fi
 else
     echo -e "${YELLOW}   ⚠ Virtual environment not found, skipping prediction service${NC}"
     PREDICTION_PID="N/A"
