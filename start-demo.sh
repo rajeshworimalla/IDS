@@ -70,8 +70,8 @@ if [ "$MONGODB_RUNNING" = false ]; then
         # Stop any existing MongoDB container
         sudo docker stop mongodb >/dev/null 2>&1 || true
         sudo docker rm mongodb >/dev/null 2>&1 || true
-        # Start MongoDB in Docker
-        if sudo docker run -d -p 27017:27017 --name mongodb mongo:latest >/dev/null 2>&1; then
+        # Start MongoDB in Docker (use 4.4 for CPUs without AVX support)
+        if sudo docker run -d -p 27017:27017 --name mongodb mongo:4.4 >/dev/null 2>&1; then
             sleep 4
             if test_mongodb; then
                 echo -e "${GREEN}   ✓ MongoDB started via Docker${NC}"
@@ -85,7 +85,7 @@ if [ "$MONGODB_RUNNING" = false ]; then
         echo "   Installing Docker for MongoDB..."
         sudo apt install -y docker.io >/dev/null 2>&1 || true
         sudo systemctl start docker >/dev/null 2>&1 || true
-        if sudo docker run -d -p 27017:27017 --name mongodb mongo:latest >/dev/null 2>&1; then
+        if sudo docker run -d -p 27017:27017 --name mongodb mongo:4.4 >/dev/null 2>&1; then
             sleep 4
             if test_mongodb; then
                 echo -e "${GREEN}   ✓ MongoDB started via Docker (auto-installed)${NC}"
