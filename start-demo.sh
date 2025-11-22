@@ -138,9 +138,18 @@ else
     echo "   ⚠ MongoDB may not be fully ready, but continuing..."
 fi
 
-# Kill any existing backend process
-pkill -f "node dist/index.js" >/dev/null 2>&1
-sleep 1
+# Kill any existing backend process (more aggressively)
+echo "   Stopping any existing backend processes..."
+pkill -9 -f "node.*dist/index.js" >/dev/null 2>&1 || true
+pkill -9 -f "node.*index.js" >/dev/null 2>&1 || true
+# Also kill anything using port 5001
+if command -v lsof >/dev/null 2>&1; then
+    sudo lsof -ti:5001 2>/dev/null | xargs sudo kill -9 2>/dev/null || true
+fi
+if command -v fuser >/dev/null 2>&1; then
+    sudo fuser -k 5001/tcp >/dev/null 2>&1 || true
+fi
+sleep 2
 
 # Build backend first
 echo "   Building TypeScript..."
