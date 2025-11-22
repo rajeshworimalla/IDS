@@ -45,49 +45,58 @@ echo ""
 # Step 2: Start MongoDB
 echo -e "${YELLOW}[2/8]${NC} Starting MongoDB..."
 
-# Check if MongoDB is already running and accessible
+# Function to test MongoDB connection (avoids calling broken mongosh)
+test_mongodb() {
+    # Use Python to test connection (more reliable than mongosh)
+    python3 -c "from pymongo import MongoClient; MongoClient('mongodb://127.0.0.1:27017', serverSelectionTimeoutMS=1000).admin.command('ping')" >/dev/null 2>&1
+}
+
+# Check if MongoDB is already running
 MONGODB_RUNNING=false
-if is_running mongod; then
-    # Test if it's actually responding
-    if mongosh mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1 || mongo mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
-        echo -e "${GREEN}   ✓ MongoDB already running and responding${NC}"
-        MONGODB_RUNNING=true
-    else
-        echo "   ⚠ MongoDB process found but not responding, restarting..."
-        sudo pkill mongod >/dev/null 2>&1
-        sleep 2
-    fi
+if test_mongodb; then
+    echo -e "${GREEN}   ✓ MongoDB already running and responding${NC}"
+    MONGODB_RUNNING=true
 fi
 
 if [ "$MONGODB_RUNNING" = false ]; then
-    # Ensure directories exist
-    sudo mkdir -p /var/log/mongodb /var/lib/mongodb >/dev/null 2>&1
-    sudo chown -R mongodb:mongodb /var/log/mongodb /var/lib/mongodb >/dev/null 2>&1 || true
+    # Kill any broken MongoDB processes
+    sudo pkill -9 mongod >/dev/null 2>&1 || true
+    sleep 1
     
-    # Start MongoDB
-    echo "   Starting MongoDB..."
-    sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb >/dev/null 2>&1
-    sleep 4
-    
-    # Check if MongoDB is actually running and responding
-    if is_running mongod; then
-        # Test connection with retries
-        for i in {1..5}; do
-            sleep 1
-            if mongosh mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1 || mongo mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
-                echo -e "${GREEN}   ✓ MongoDB started and responding${NC}"
+    # Try Docker first (most reliable, works on all CPUs)
+    if command -v docker >/dev/null 2>&1; then
+        echo "   Starting MongoDB via Docker..."
+        sudo systemctl start docker >/dev/null 2>&1 || true
+        # Stop any existing MongoDB container
+        sudo docker stop mongodb >/dev/null 2>&1 || true
+        sudo docker rm mongodb >/dev/null 2>&1 || true
+        # Start MongoDB in Docker
+        if sudo docker run -d -p 27017:27017 --name mongodb mongo:latest >/dev/null 2>&1; then
+            sleep 4
+            if test_mongodb; then
+                echo -e "${GREEN}   ✓ MongoDB started via Docker${NC}"
                 MONGODB_RUNNING=true
-                break
             fi
-        done
-        
-        if [ "$MONGODB_RUNNING" = false ]; then
-            echo "   ⚠ MongoDB started but not responding yet (may need more time)"
         fi
-    else
-        echo "   ✗ MongoDB failed to start"
-        echo "   Check logs: sudo tail -20 /var/log/mongodb/mongod.log"
-        exit 1
+    fi
+    
+    # If Docker didn't work, try systemctl (but don't use broken mongod binary)
+    if [ "$MONGODB_RUNNING" = false ] && ! command -v docker >/dev/null 2>&1; then
+        echo "   Installing Docker for MongoDB..."
+        sudo apt install -y docker.io >/dev/null 2>&1 || true
+        sudo systemctl start docker >/dev/null 2>&1 || true
+        if sudo docker run -d -p 27017:27017 --name mongodb mongo:latest >/dev/null 2>&1; then
+            sleep 4
+            if test_mongodb; then
+                echo -e "${GREEN}   ✓ MongoDB started via Docker (auto-installed)${NC}"
+                MONGODB_RUNNING=true
+            fi
+        fi
+    fi
+    
+    if [ "$MONGODB_RUNNING" = false ]; then
+        echo -e "${YELLOW}   ⚠ MongoDB not available, but continuing anyway${NC}"
+        echo "   Backend will handle MongoDB connection retries"
     fi
 fi
 echo ""
@@ -123,9 +132,9 @@ if [ ! -d "node_modules" ]; then
     echo -e "${GREEN}   ✓ Dependencies installed${NC}"
 fi
 
-# Verify MongoDB is accessible before starting backend
+# Verify MongoDB is accessible before starting backend (skip if mongosh is broken)
 echo "   Verifying MongoDB connection..."
-if mongosh mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1 || mongo mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
+if python3 -c "from pymongo import MongoClient; MongoClient('mongodb://127.0.0.1:27017', serverSelectionTimeoutMS=2000).admin.command('ping')" >/dev/null 2>&1; then
     echo -e "${GREEN}   ✓ MongoDB is accessible${NC}"
 else
     echo "   ⚠ MongoDB may not be fully ready, but continuing..."
