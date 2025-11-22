@@ -86,6 +86,8 @@ cd "$SCRIPT_DIR/backend" || exit 1
 
 if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
+    # Set USE_ML_MODELS=false to use rule-based detection only
+    export USE_ML_MODELS=false
     python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 &
     PREDICTION_PID=$!
     sleep 2

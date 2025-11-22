@@ -217,8 +217,11 @@ cd "$SCRIPT_DIR/backend" || exit 1
 pkill -f "prediction_service.py" >/dev/null 2>&1 || true
 sleep 1
 
-if [ -f "venv/bin/activate" ] && [ -f "binary_attack_model.pkl" ] && [ -f "multiclass_attack_model.pkl" ]; then
+# Start prediction service - works with or without ML models (uses rule-based detection)
+if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
+    # Set USE_ML_MODELS=false to disable ML models (rule-based only)
+    export USE_ML_MODELS=false
     nohup python3 prediction_service.py > /tmp/ids-prediction.log 2>&1 </dev/null &
     PREDICTION_PID=$!
     disown $PREDICTION_PID 2>/dev/null || true

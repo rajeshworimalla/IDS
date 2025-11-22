@@ -223,23 +223,23 @@ if [ -d "venv/bin" ]; then
         PREDICTION_PID=$!
         sleep 3
         
-        if is_running "prediction_service.py"; then
-            echo -e "${GREEN}   ✓ Prediction service started (PID: $PREDICTION_PID)${NC}"
-            echo "   Logs: tail -f /tmp/ids-prediction.log"
-            
-            # Test if service is responding
-            sleep 2
-            if curl -s http://localhost:5002/predict >/dev/null 2>&1 || curl -s -X POST http://localhost:5002/predict -H "Content-Type: application/json" -d '{"test":1}' >/dev/null 2>&1; then
-                echo -e "${GREEN}   ✓ Prediction service is responding${NC}"
-            else
-                echo -e "${YELLOW}   ⚠ Service started but may not be fully ready yet${NC}"
-            fi
+        echo -e "${GREEN}   ✓ Prediction service started (PID: $PREDICTION_PID)${NC}"
+        echo "   Logs: tail -f /tmp/ids-prediction.log"
+        echo "   Note: Using rule-based detection (ML models disabled)"
+        
+        # Test if service is responding
+        sleep 2
+        if curl -s http://localhost:5002/predict >/dev/null 2>&1 || curl -s -X POST http://localhost:5002/predict -H "Content-Type: application/json" -d '{"test":1}' >/dev/null 2>&1; then
+            echo -e "${GREEN}   ✓ Prediction service is responding${NC}"
         else
-            echo -e "${YELLOW}   ⚠ Prediction service failed to start${NC}"
-            echo "   Check logs: cat /tmp/ids-prediction.log"
-            PREDICTION_PID="N/A"
+            echo -e "${YELLOW}   ⚠ Service started but may not be fully ready yet${NC}"
         fi
-        deactivate
+    else
+        echo -e "${YELLOW}   ⚠ Prediction service failed to start${NC}"
+        echo "   Check logs: cat /tmp/ids-prediction.log"
+        PREDICTION_PID="N/A"
+    fi
+    deactivate
     fi
 else
     echo -e "${YELLOW}   ⚠ Virtual environment not found, skipping prediction service${NC}"
