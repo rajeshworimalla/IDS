@@ -563,256 +563,257 @@ def predict():
                         '_id': packet.get('_id', '') if isinstance(packet, dict) else ''
                     }
 
-            # ULTRA SHARP: Get attack detection BEFORE preprocessing (needed for override logic)
-            source_ip = packet.get('start_ip', '')
-            dest_ip = packet.get('end_ip', '')
-            attack_detection = None
-            if source_ip and dest_ip:
-                try:
-                    attack_detection = comprehensive_detector.analyze_packet(packet)
-                except Exception as e:
-                    print(f"⚠️ Error in attack detector (override logic): {e}")
-                    attack_detection = None  # Continue without detector
-            
-            # Preprocess packet (this also uses attack_detection internally for feature enhancement)
-            try:
-                features = preprocess_packet(packet)
-                # Additional safety check - ensure features are valid
-                if features is None or features.empty:
-                    print("⚠️ Warning: Empty features DataFrame, using defaults")
-                    # Create minimal valid features
-                    features = pd.DataFrame([{col: 0 for col in features.columns if hasattr(features, 'columns')}])
-            except Exception as e:
-                print(f"❌ CRITICAL: Error preprocessing packet: {e}")
-                import traceback
-                traceback.print_exc()
-                # Return error but don't crash - return a default prediction
-                return jsonify({
-                    'packet_id': packet.get('_id', ''),
-                    'binary_prediction': 'benign',
-                    'attack_type': 'normal',
-                    'confidence': {'binary': 0.5, 'multiclass': 0.5},
-                    'attack_type_probabilities': {
-                        'normal': 1.0,
-                        'dos': 0.0,
-                        'probe': 0.0,
-                        'r2l': 0.0,
-                        'u2r': 0.0,
-                        'brute_force': 0.0
-                    },
-                    'error': f'Error preprocessing packet: {str(e)}'
-                }), 200  # Return 200 so backend doesn't crash, but include error in response
-            
-            # Get predictions (with comprehensive error handling)
-            # If ML models are disabled, skip ML prediction and use only rule-based detection
-            if not USE_ML_MODELS or binary_model is None or multiclass_model is None:
-                print("🔍 Using rule-based detection only (ML models disabled)")
-                # Use rule-based detection results from comprehensive_detector
-                if attack_detection and isinstance(attack_detection, dict):
-                    # Use detector results directly - THIS IS THE MAIN DETECTION LOGIC
-                    is_malicious = attack_detection.get('is_malicious', False)
-                    detected_type = attack_detection.get('attack_type', 'normal')
-                    detected_confidence = float(attack_detection.get('confidence', 0) or 0)
-                    
-                    # Set labels based on detector results
-                    binary_label = 'malicious' if is_malicious else 'benign'
-                    attack_type = detected_type  # Always use detector's attack type
-                    
-                    # Set confidence based on detector confidence
-                    if is_malicious:
-                        binary_confidence = max(0.7, detected_confidence)  # At least 70% if malicious
-                        multiclass_confidence = max(0.7, detected_confidence)
-                    else:
-                        binary_confidence = max(0.3, 1.0 - detected_confidence)  # Higher confidence if definitely normal
-                        multiclass_confidence = max(0.5, 1.0 - detected_confidence)
-                    
-                    print(f"🔍 Rule-based detection: {attack_type} (malicious: {is_malicious}, confidence: {detected_confidence:.2f})")
-                else:
-                    # Fallback if detector didn't run
-                    print("⚠️ Warning: Rule-based detector didn't run, using defaults")
-                    binary_label = 'benign'
-                    attack_type = 'normal'
-                    binary_confidence = 0.5
-                    multiclass_confidence = 0.5
-            else:
-                try:
-                    # Validate features before prediction
-                    if features is None or features.empty:
-                        raise ValueError("Features DataFrame is empty or None")
-                    
-                    # Ensure features have the right shape
-                    if len(features) == 0:
-                        raise ValueError("Features DataFrame has no rows")
-                    
-                    # Ensure all feature values are finite
-                    features_clean = features.fillna(0).replace([np.inf, -np.inf], 0)
-                    
-                    print("🤖 Making binary prediction with ML model...")
+                # ULTRA SHARP: Get attack detection BEFORE preprocessing (needed for override logic)
+                source_ip = packet.get('start_ip', '')
+                dest_ip = packet.get('end_ip', '')
+                attack_detection = None
+                if source_ip and dest_ip:
                     try:
-                        binary_pred = binary_model.predict(features_clean)[0]
-                        print(f"Binary prediction: {binary_pred}")
+                        attack_detection = comprehensive_detector.analyze_packet(packet)
                     except Exception as e:
-                        print(f"⚠️ Error in binary prediction: {e}")
-                        binary_pred = 0  # Default to benign
-                    
-                    print("🤖 Making multiclass prediction with ML model...")
-                    try:
-                        multiclass_pred = multiclass_model.predict(features_clean)[0]
-                        print(f"Multiclass prediction: {multiclass_pred}")
-                    except Exception as e:
-                        print(f"⚠️ Error in multiclass prediction: {e}")
-                        multiclass_pred = 0  # Default to normal
-                    
-                    # Map predictions to labels (6 attack types: normal, dos, probe, r2l, u2r, brute_force)
-                    binary_label = 'malicious' if binary_pred == 1 else 'benign'
-                    attack_type = {
-                        0: 'normal',
-                        1: 'dos',
-                        2: 'probe',
-                        3: 'r2l',
-                        4: 'u2r',
-                        5: 'brute_force'  # 6th attack type
-                    }.get(multiclass_pred, 'unknown')
-                    
-                    # Get confidence scores BEFORE override logic (so override can boost them)
-                    binary_confidence = 0.5
-                    multiclass_confidence = 0.5
-                    
-                    try:
-                        binary_proba = binary_model.predict_proba(features_clean)[0]
-                        if len(binary_proba) > 1:
-                            binary_confidence = float(binary_proba[1])  # Probability of malicious
-                        else:
-                            binary_confidence = float(binary_proba[0])
-                    except Exception as e:
-                        print(f"⚠️ Error getting binary confidence: {e}")
-                        binary_confidence = 0.5
-
-                    try:
-                        multiclass_proba = multiclass_model.predict_proba(features_clean)[0]
-                        if multiclass_pred < len(multiclass_proba):
-                            multiclass_confidence = float(multiclass_proba[multiclass_pred])
-                        else:
-                            multiclass_confidence = float(max(multiclass_proba))  # Use max probability
-                    except Exception as e:
-                        print(f"⚠️ Error getting multiclass confidence: {e}")
-                        multiclass_confidence = 0.5
-                except Exception as e:
-                    print(f"⚠️ Error in ML prediction, falling back to rule-based: {e}")
-                    binary_label = 'benign'
-                    attack_type = 'normal'
-                    binary_confidence = 0.5
-                    multiclass_confidence = 0.5
+                        print(f"⚠️ Error in attack detector (override logic): {e}")
+                        attack_detection = None  # Continue without detector
                 
-                # ULTRA SHARP: Comprehensive attack detection override - ALWAYS TRUST DETECTORS
-                # Detectors are rule-based and extremely accurate - they override ML completely
-                if attack_detection and isinstance(attack_detection, dict):
-                    try:
-                        detected_attack_type = attack_detection.get('attack_type', 'unknown')
+                # Preprocess packet (this also uses attack_detection internally for feature enhancement)
+                try:
+                    features = preprocess_packet(packet)
+                    # Additional safety check - ensure features are valid
+                    if features is None or features.empty:
+                        print("⚠️ Warning: Empty features DataFrame, using defaults")
+                        # Create minimal valid features
+                        features = pd.DataFrame([{col: 0 for col in features.columns if hasattr(features, 'columns')}])
+                except Exception as e:
+                    print(f"❌ CRITICAL: Error preprocessing packet: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Return error but don't crash - return a default prediction
+                    results.append({
+                        'packet_id': packet.get('_id', ''),
+                        'binary_prediction': 'benign',
+                        'attack_type': 'normal',
+                        'confidence': {'binary': 0.5, 'multiclass': 0.5},
+                        'attack_type_probabilities': {
+                            'normal': 1.0,
+                            'dos': 0.0,
+                            'probe': 0.0,
+                            'r2l': 0.0,
+                            'u2r': 0.0,
+                            'brute_force': 0.0
+                        },
+                        'error': f'Error preprocessing packet: {str(e)}'
+                    })
+                    continue  # Skip rest of processing for this packet
+            
+                # Get predictions (with comprehensive error handling)
+                # If ML models are disabled, skip ML prediction and use only rule-based detection
+                if not USE_ML_MODELS or binary_model is None or multiclass_model is None:
+                    print("🔍 Using rule-based detection only (ML models disabled)")
+                    # Use rule-based detection results from comprehensive_detector
+                    if attack_detection and isinstance(attack_detection, dict):
+                        # Use detector results directly - THIS IS THE MAIN DETECTION LOGIC
+                        is_malicious = attack_detection.get('is_malicious', False)
+                        detected_type = attack_detection.get('attack_type', 'normal')
                         detected_confidence = float(attack_detection.get('confidence', 0) or 0)
-                        is_detector_malicious = attack_detection.get('is_malicious', False)
-                    except Exception as e:
-                        print(f"⚠️ Error extracting attack detection data: {e}")
-                        detected_attack_type = 'unknown'
-                        detected_confidence = 0.0
-                        is_detector_malicious = False
-                    
-                    # CRITICAL: If detector found ANY attack, ALWAYS use detector's attack_type
-                    # This ensures we always show the correct attack type (dos, probe, brute_force, etc.)
-                    if is_detector_malicious and detected_attack_type and detected_attack_type != 'normal':
-                        print(f"🚨 DETECTOR OVERRIDE: Using detector attack_type: {detected_attack_type} "
-                              f"(detector confidence: {detected_confidence:.2f})")
-                        attack_type = detected_attack_type  # ALWAYS use detector's attack type
-                    
-                    # ULTRA SHARP RULE 1: If detector says attack, ALWAYS mark as malicious
-                    # Even if ML says benign, detector is more reliable for known patterns
-                    if is_detector_malicious:
-                        print(f"🚨 ULTRA SHARP: ATTACK DETECTED for {source_ip}: {detected_attack_type} "
-                              f"(detector confidence: {detected_confidence:.2f}, ML binary: {binary_label})")
                         
-                        # COMPLETE OVERRIDE: Detector wins, no questions asked
-                        binary_label = 'malicious'
-                        # CRITICAL: Always use detector's attack_type, never use ML's "normal"
-                        if detected_attack_type and detected_attack_type != 'normal':
-                            attack_type = detected_attack_type
-                        elif attack_type == 'normal':
-                            # If detector says attack but type is unclear, use unknown_attack
-                            attack_type = 'unknown_attack'
+                        # Set labels based on detector results
+                        binary_label = 'malicious' if is_malicious else 'benign'
+                        attack_type = detected_type  # Always use detector's attack type
                         
-                        # ULTRA SHARP: Boost confidence aggressively based on detector confidence
-                        if detected_confidence >= 0.8:
-                            # Very high detector confidence = extremely high ML confidence
-                            binary_confidence = max(0.95, detected_confidence)  # Minimum 95%
-                            multiclass_confidence = max(0.90, detected_confidence)  # Minimum 90%
-                        elif detected_confidence >= 0.6:
-                            # High detector confidence = high ML confidence
-                            binary_confidence = max(0.85, detected_confidence)  # Minimum 85%
-                            multiclass_confidence = max(0.80, detected_confidence)  # Minimum 80%
-                        elif detected_confidence >= 0.4:
-                            # Moderate detector confidence = moderate-high ML confidence
-                            binary_confidence = max(0.75, detected_confidence)  # Minimum 75%
-                            multiclass_confidence = max(0.70, detected_confidence)
+                        # Set confidence based on detector confidence
+                        if is_malicious:
+                            binary_confidence = max(0.7, detected_confidence)  # At least 70% if malicious
+                            multiclass_confidence = max(0.7, detected_confidence)
                         else:
-                            # Low detector confidence but still detected = moderate ML confidence
-                            binary_confidence = max(binary_confidence, detected_confidence + 0.2)
-                            multiclass_confidence = max(multiclass_confidence, detected_confidence + 0.15)
+                            binary_confidence = max(0.3, 1.0 - detected_confidence)  # Higher confidence if definitely normal
+                            multiclass_confidence = max(0.5, 1.0 - detected_confidence)
                         
-                        # Log specific attack details with ULTRA SHARP precision (with safety checks)
+                        print(f"🔍 Rule-based detection: {attack_type} (malicious: {is_malicious}, confidence: {detected_confidence:.2f})")
+                    else:
+                        # Fallback if detector didn't run
+                        print("⚠️ Warning: Rule-based detector didn't run, using defaults")
+                        binary_label = 'benign'
+                        attack_type = 'normal'
+                        binary_confidence = 0.5
+                        multiclass_confidence = 0.5
+                else:
+                    try:
+                        # Validate features before prediction
+                        if features is None or features.empty:
+                            raise ValueError("Features DataFrame is empty or None")
+                        
+                        # Ensure features have the right shape
+                        if len(features) == 0:
+                            raise ValueError("Features DataFrame has no rows")
+                        
+                        # Ensure all feature values are finite
+                        features_clean = features.fillna(0).replace([np.inf, -np.inf], 0)
+                        
+                        print("🤖 Making binary prediction with ML model...")
                         try:
-                            if detected_attack_type == 'probe':
-                                ps_features = attack_detection.get('port_scan_features', {})
-                                print(f"  🔍 PORT SCAN: {ps_features.get('unique_ports', 0)} unique ports, "
-                                      f"{ps_features.get('packets_per_second', 0):.2f} pps, "
-                                      f"score: {ps_features.get('port_scan_score', 0):.2f}, "
-                                      f"sequential: {ps_features.get('sequential_score', 0):.2f}")
-                            elif detected_attack_type == 'dos':
-                                dos_features = attack_detection.get('dos_features', {})
-                                print(f"  💥 DoS ATTACK: {dos_features.get('packets_per_second', 0):.2f} pps, "
-                                      f"{dos_features.get('packet_count', 0)} packets, "
-                                      f"score: {dos_features.get('dos_score', 0):.2f}, "
-                                      f"SYN packets: {dos_features.get('syn_packets', 0)}")
-                            elif detected_attack_type == 'r2l':
-                                r2l_features = attack_detection.get('r2l_features', {})
-                                print(f"  🚪 R2L ATTACK: {r2l_features.get('failed_logins', 0)} failed logins, "
-                                      f"{r2l_features.get('privilege_attempts', 0)} privilege attempts, "
-                                      f"score: {r2l_features.get('r2l_score', 0):.2f}")
-                            elif detected_attack_type == 'u2r':
-                                u2r_features = attack_detection.get('u2r_features', {})
-                                print(f"  ⚠️ U2R ATTACK: {u2r_features.get('root_commands', 0)} root commands, "
-                                      f"{u2r_features.get('setuid_attempts', 0)} setuid attempts, "
-                                      f"score: {u2r_features.get('u2r_score', 0):.2f}")
-                            elif detected_attack_type == 'brute_force':
-                                bf_features = attack_detection.get('brute_force_features', {})
-                                print(f"  🔨 BRUTE FORCE: {bf_features.get('failed_attempts', 0)} failed logins, "
-                                      f"{bf_features.get('login_attempts', 0)} total attempts, "
-                                      f"score: {bf_features.get('brute_force_score', 0):.2f}")
-                            elif detected_attack_type == 'unknown_attack':
-                                print(f"  ⚠️ UNKNOWN ATTACK TYPE - but definitely malicious!")
-                                # Boost confidence for unknown attacks - detector found something
-                                binary_confidence = max(0.80, binary_confidence)  # Minimum 80%
-                                multiclass_confidence = max(0.75, multiclass_confidence)  # Minimum 75%
+                            binary_pred = binary_model.predict(features_clean)[0]
+                            print(f"Binary prediction: {binary_pred}")
                         except Exception as e:
-                            print(f"⚠️ Error logging attack details: {e}")
+                            print(f"⚠️ Error in binary prediction: {e}")
+                            binary_pred = 0  # Default to benign
+                        
+                        print("🤖 Making multiclass prediction with ML model...")
+                        try:
+                            multiclass_pred = multiclass_model.predict(features_clean)[0]
+                            print(f"Multiclass prediction: {multiclass_pred}")
+                        except Exception as e:
+                            print(f"⚠️ Error in multiclass prediction: {e}")
+                            multiclass_pred = 0  # Default to normal
+                        
+                        # Map predictions to labels (6 attack types: normal, dos, probe, r2l, u2r, brute_force)
+                        binary_label = 'malicious' if binary_pred == 1 else 'benign'
+                        attack_type = {
+                            0: 'normal',
+                            1: 'dos',
+                            2: 'probe',
+                            3: 'r2l',
+                            4: 'u2r',
+                            5: 'brute_force'  # 6th attack type
+                        }.get(multiclass_pred, 'unknown')
+                        
+                        # Get confidence scores BEFORE override logic (so override can boost them)
+                        binary_confidence = 0.5
+                        multiclass_confidence = 0.5
+                        
+                        try:
+                            binary_proba = binary_model.predict_proba(features_clean)[0]
+                            if len(binary_proba) > 1:
+                                binary_confidence = float(binary_proba[1])  # Probability of malicious
+                            else:
+                                binary_confidence = float(binary_proba[0])
+                        except Exception as e:
+                            print(f"⚠️ Error getting binary confidence: {e}")
+                            binary_confidence = 0.5
+
+                        try:
+                            multiclass_proba = multiclass_model.predict_proba(features_clean)[0]
+                            if multiclass_pred < len(multiclass_proba):
+                                multiclass_confidence = float(multiclass_proba[multiclass_pred])
+                            else:
+                                multiclass_confidence = float(max(multiclass_proba))  # Use max probability
+                        except Exception as e:
+                            print(f"⚠️ Error getting multiclass confidence: {e}")
+                            multiclass_confidence = 0.5
+                    except Exception as e:
+                        print(f"⚠️ Error in ML prediction, falling back to rule-based: {e}")
+                        binary_label = 'benign'
+                        attack_type = 'normal'
+                        binary_confidence = 0.5
+                        multiclass_confidence = 0.5
                     
-                    # ULTRA SHARP RULE 2: Even if ML says benign but detector says attack, TRUST DETECTOR
-                    # This handles cases where ML model hasn't learned the pattern yet
-                    elif binary_label == 'benign' and is_detector_malicious:
-                        print(f"⚠️ ULTRA SHARP OVERRIDE: ML said benign but detector found attack - "
-                              f"TRUSTING DETECTOR! (detector confidence: {detected_confidence:.2f})")
-                        binary_label = 'malicious'
-                        attack_type = detected_attack_type
-                        # Aggressively boost confidence - detector is more reliable
-                        binary_confidence = max(0.80, detected_confidence + 0.15)  # Minimum 80%
-                        multiclass_confidence = max(0.75, detected_confidence + 0.10)  # Minimum 75%
-                    
-                    # ULTRA SHARP RULE 3: If detector has moderate confidence (>0.3) but ML says benign,
-                    # still boost ML confidence significantly
-                    elif binary_label == 'benign' and detected_confidence > 0.3:
-                        print(f"🔍 ULTRA SHARP: Detector has moderate confidence ({detected_confidence:.2f}) "
-                              f"but ML says benign - boosting ML confidence")
-                        # Boost ML confidence but don't override label (let ML decide with better features)
-                        binary_confidence = max(binary_confidence, detected_confidence * 0.8)
-                        multiclass_confidence = max(multiclass_confidence, detected_confidence * 0.75)
+                    # ULTRA SHARP: Comprehensive attack detection override - ALWAYS TRUST DETECTORS
+                    # Detectors are rule-based and extremely accurate - they override ML completely
+                    if attack_detection and isinstance(attack_detection, dict):
+                        try:
+                            detected_attack_type = attack_detection.get('attack_type', 'unknown')
+                            detected_confidence = float(attack_detection.get('confidence', 0) or 0)
+                            is_detector_malicious = attack_detection.get('is_malicious', False)
+                        except Exception as e:
+                            print(f"⚠️ Error extracting attack detection data: {e}")
+                            detected_attack_type = 'unknown'
+                            detected_confidence = 0.0
+                            is_detector_malicious = False
+                        
+                        # CRITICAL: If detector found ANY attack, ALWAYS use detector's attack_type
+                        # This ensures we always show the correct attack type (dos, probe, brute_force, etc.)
+                        if is_detector_malicious and detected_attack_type and detected_attack_type != 'normal':
+                            print(f"🚨 DETECTOR OVERRIDE: Using detector attack_type: {detected_attack_type} "
+                                  f"(detector confidence: {detected_confidence:.2f})")
+                            attack_type = detected_attack_type  # ALWAYS use detector's attack type
+                        
+                        # ULTRA SHARP RULE 1: If detector says attack, ALWAYS mark as malicious
+                        # Even if ML says benign, detector is more reliable for known patterns
+                        if is_detector_malicious:
+                            print(f"🚨 ULTRA SHARP: ATTACK DETECTED for {source_ip}: {detected_attack_type} "
+                                  f"(detector confidence: {detected_confidence:.2f}, ML binary: {binary_label})")
+                            
+                            # COMPLETE OVERRIDE: Detector wins, no questions asked
+                            binary_label = 'malicious'
+                            # CRITICAL: Always use detector's attack_type, never use ML's "normal"
+                            if detected_attack_type and detected_attack_type != 'normal':
+                                attack_type = detected_attack_type
+                            elif attack_type == 'normal':
+                                # If detector says attack but type is unclear, use unknown_attack
+                                attack_type = 'unknown_attack'
+                            
+                            # ULTRA SHARP: Boost confidence aggressively based on detector confidence
+                            if detected_confidence >= 0.8:
+                                # Very high detector confidence = extremely high ML confidence
+                                binary_confidence = max(0.95, detected_confidence)  # Minimum 95%
+                                multiclass_confidence = max(0.90, detected_confidence)  # Minimum 90%
+                            elif detected_confidence >= 0.6:
+                                # High detector confidence = high ML confidence
+                                binary_confidence = max(0.85, detected_confidence)  # Minimum 85%
+                                multiclass_confidence = max(0.80, detected_confidence)  # Minimum 80%
+                            elif detected_confidence >= 0.4:
+                                # Moderate detector confidence = moderate-high ML confidence
+                                binary_confidence = max(0.75, detected_confidence)  # Minimum 75%
+                                multiclass_confidence = max(0.70, detected_confidence)
+                            else:
+                                # Low detector confidence but still detected = moderate ML confidence
+                                binary_confidence = max(binary_confidence, detected_confidence + 0.2)
+                                multiclass_confidence = max(multiclass_confidence, detected_confidence + 0.15)
+                            
+                            # Log specific attack details with ULTRA SHARP precision (with safety checks)
+                            try:
+                                if detected_attack_type == 'probe':
+                                    ps_features = attack_detection.get('port_scan_features', {})
+                                    print(f"  🔍 PORT SCAN: {ps_features.get('unique_ports', 0)} unique ports, "
+                                          f"{ps_features.get('packets_per_second', 0):.2f} pps, "
+                                          f"score: {ps_features.get('port_scan_score', 0):.2f}, "
+                                          f"sequential: {ps_features.get('sequential_score', 0):.2f}")
+                                elif detected_attack_type == 'dos':
+                                    dos_features = attack_detection.get('dos_features', {})
+                                    print(f"  💥 DoS ATTACK: {dos_features.get('packets_per_second', 0):.2f} pps, "
+                                          f"{dos_features.get('packet_count', 0)} packets, "
+                                          f"score: {dos_features.get('dos_score', 0):.2f}, "
+                                          f"SYN packets: {dos_features.get('syn_packets', 0)}")
+                                elif detected_attack_type == 'r2l':
+                                    r2l_features = attack_detection.get('r2l_features', {})
+                                    print(f"  🚪 R2L ATTACK: {r2l_features.get('failed_logins', 0)} failed logins, "
+                                          f"{r2l_features.get('privilege_attempts', 0)} privilege attempts, "
+                                          f"score: {r2l_features.get('r2l_score', 0):.2f}")
+                                elif detected_attack_type == 'u2r':
+                                    u2r_features = attack_detection.get('u2r_features', {})
+                                    print(f"  ⚠️ U2R ATTACK: {u2r_features.get('root_commands', 0)} root commands, "
+                                          f"{u2r_features.get('setuid_attempts', 0)} setuid attempts, "
+                                          f"score: {u2r_features.get('u2r_score', 0):.2f}")
+                                elif detected_attack_type == 'brute_force':
+                                    bf_features = attack_detection.get('brute_force_features', {})
+                                    print(f"  🔨 BRUTE FORCE: {bf_features.get('failed_attempts', 0)} failed logins, "
+                                          f"{bf_features.get('login_attempts', 0)} total attempts, "
+                                          f"score: {bf_features.get('brute_force_score', 0):.2f}")
+                                elif detected_attack_type == 'unknown_attack':
+                                    print(f"  ⚠️ UNKNOWN ATTACK TYPE - but definitely malicious!")
+                                    # Boost confidence for unknown attacks - detector found something
+                                    binary_confidence = max(0.80, binary_confidence)  # Minimum 80%
+                                    multiclass_confidence = max(0.75, multiclass_confidence)  # Minimum 75%
+                            except Exception as e:
+                                print(f"⚠️ Error logging attack details: {e}")
+                        
+                        # ULTRA SHARP RULE 2: Even if ML says benign but detector says attack, TRUST DETECTOR
+                        # This handles cases where ML model hasn't learned the pattern yet
+                        elif binary_label == 'benign' and is_detector_malicious:
+                            print(f"⚠️ ULTRA SHARP OVERRIDE: ML said benign but detector found attack - "
+                                  f"TRUSTING DETECTOR! (detector confidence: {detected_confidence:.2f})")
+                            binary_label = 'malicious'
+                            attack_type = detected_attack_type
+                            # Aggressively boost confidence - detector is more reliable
+                            binary_confidence = max(0.80, detected_confidence + 0.15)  # Minimum 80%
+                            multiclass_confidence = max(0.75, detected_confidence + 0.10)  # Minimum 75%
+                        
+                        # ULTRA SHARP RULE 3: If detector has moderate confidence (>0.3) but ML says benign,
+                        # still boost ML confidence significantly
+                        elif binary_label == 'benign' and detected_confidence > 0.3:
+                            print(f"🔍 ULTRA SHARP: Detector has moderate confidence ({detected_confidence:.2f}) "
+                                  f"but ML says benign - boosting ML confidence")
+                            # Boost ML confidence but don't override label (let ML decide with better features)
+                            binary_confidence = max(binary_confidence, detected_confidence * 0.8)
+                            multiclass_confidence = max(multiclass_confidence, detected_confidence * 0.75)
 
                 # Get probabilities for all attack types (6 types: normal, dos, probe, r2l, u2r, brute_force)
                 attack_type_probs = {}
