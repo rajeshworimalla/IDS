@@ -8,7 +8,7 @@ const api: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
-  timeout: 10000, // 10 seconds timeout
+  timeout: 30000, // 30 seconds timeout (increased for blocking operations that need DNS resolution)
   withCredentials: true, // Important for CORS
   xsrfCookieName: 'XSRF-TOKEN',
   xsrfHeaderName: 'X-XSRF-TOKEN'

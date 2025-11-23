@@ -63,7 +63,7 @@ export const blockIP = async (req: Request, res: Response) => {
       
       let doc;
       try {
-        // Add timeout to MongoDB operation
+        // Add timeout to MongoDB operation (3 seconds - should be fast)
         doc = await Promise.race([
           BlockedIP.findOneAndUpdate(
             { user: req.user._id, ip },
@@ -71,7 +71,7 @@ export const blockIP = async (req: Request, res: Response) => {
             { new: true, upsert: true }
           ),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('MongoDB operation timeout')), 5000)
+            setTimeout(() => reject(new Error('MongoDB operation timeout')), 3000)
           )
         ]) as any;
       } catch (dbErr: any) {
@@ -122,28 +122,47 @@ export const blockIP = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid host' });
     }
 
-    // Resolve both A and AAAA records - get ALL IPs for the domain
+    // Resolve both A and AAAA records - get ALL IPs for the domain (with timeout)
     let allIPs: string[] = [];
     try {
-      // Use resolve4 and resolve6 to get ALL IPs (not just one)
-      const [ipv4Addrs, ipv6Addrs] = await Promise.allSettled([
+      // Add timeout to DNS resolution (5 seconds max)
+      const dnsTimeout = 5000;
+      const dnsPromise = Promise.allSettled([
         dns.resolve4(host),
         dns.resolve6(host)
       ]);
       
-      if (ipv4Addrs.status === 'fulfilled') {
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('DNS resolution timeout')), dnsTimeout)
+      );
+      
+      const [ipv4Addrs, ipv6Addrs] = await Promise.race([
+        dnsPromise,
+        timeoutPromise
+      ]) as PromiseSettledResult<string[][]>[];
+      
+      if (ipv4Addrs && ipv4Addrs.status === 'fulfilled') {
         allIPs.push(...ipv4Addrs.value);
       }
-      if (ipv6Addrs.status === 'fulfilled') {
+      if (ipv6Addrs && ipv6Addrs.status === 'fulfilled') {
         allIPs.push(...ipv6Addrs.value);
       }
       
-      // Fallback to lookup if resolve fails (for some edge cases)
+      // Fallback to lookup if resolve fails (with timeout)
       if (allIPs.length === 0) {
-        const looked = await dns.lookup(host, { all: true });
-        allIPs = looked
-          .filter(a => a && a.address)
-          .map(a => a.address);
+        try {
+          const lookupPromise = dns.lookup(host, { all: true });
+          const lookupTimeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('DNS lookup timeout')), 3000)
+          );
+          const looked = await Promise.race([lookupPromise, lookupTimeout]) as any;
+          allIPs = looked
+            .filter((a: any) => a && a.address)
+            .map((a: any) => a.address);
+        } catch (lookupErr) {
+          // If lookup also fails, continue with empty list
+          console.warn(`DNS lookup failed for ${host}:`, lookupErr);
+        }
       }
     } catch (e: any) {
       return res.status(400).json({ error: `Could not resolve domain: ${host} - ${e?.message || String(e)}` });
@@ -179,7 +198,7 @@ export const blockIP = async (req: Request, res: Response) => {
       try {
         let doc;
         try {
-          // Add timeout to MongoDB operation
+          // Add timeout to MongoDB operation (3 seconds - should be fast)
           doc = await Promise.race([
             BlockedIP.findOneAndUpdate(
               { user: req.user._id, ip: addr },
@@ -187,7 +206,7 @@ export const blockIP = async (req: Request, res: Response) => {
               { new: true, upsert: true }
             ),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('MongoDB operation timeout')), 5000)
+              setTimeout(() => reject(new Error('MongoDB operation timeout')), 3000)
             )
           ]) as any;
         } catch (dbErr: any) {
