@@ -83,30 +83,68 @@ echo ""
 
 # Step 2: Start MongoDB
 echo "2. Starting MongoDB..."
-if ps aux | grep -q "[m]ongod"; then
-    echo -e "${GREEN}   ✅ MongoDB is already running${NC}"
-else
-    echo "   Starting MongoDB..."
-    if systemctl start mongod 2>/dev/null || sudo systemctl start mongod 2>/dev/null; then
-        sleep 2
-        if ps aux | grep -q "[m]ongod"; then
-            echo -e "${GREEN}   ✅ MongoDB started${NC}"
-        else
-            echo -e "${YELLOW}   ⚠ MongoDB may not have started (check manually)${NC}"
+
+# Function to test MongoDB connection (avoids calling broken mongosh)
+test_mongodb() {
+    # Use Python to test connection (more reliable than mongosh)
+    python3 -c "from pymongo import MongoClient; MongoClient('mongodb://127.0.0.1:27017', serverSelectionTimeoutMS=1000).admin.command('ping')" >/dev/null 2>&1
+}
+
+# Check if MongoDB is already running
+MONGODB_RUNNING=false
+if test_mongodb; then
+    echo -e "${GREEN}   ✅ MongoDB already running and responding${NC}"
+    MONGODB_RUNNING=true
+fi
+
+if [ "$MONGODB_RUNNING" = false ]; then
+    # Kill any broken MongoDB processes
+    sudo pkill -9 mongod >/dev/null 2>&1 || true
+    sleep 1
+    
+    # Try Docker first (most reliable, works on all CPUs)
+    if command -v docker >/dev/null 2>&1; then
+        echo "   Starting MongoDB via Docker..."
+        sudo systemctl start docker >/dev/null 2>&1 || true
+        # Stop any existing MongoDB container
+        sudo docker stop mongodb >/dev/null 2>&1 || true
+        sudo docker rm mongodb >/dev/null 2>&1 || true
+        # Start MongoDB in Docker (use 4.4 for CPUs without AVX support)
+        if sudo docker run -d -p 27017:27017 --name mongodb mongo:4.4 >/dev/null 2>&1; then
+            sleep 4
+            if test_mongodb; then
+                echo -e "${GREEN}   ✅ MongoDB started via Docker${NC}"
+                MONGODB_RUNNING=true
+            fi
         fi
-    else
-        # Try manual start
-        mkdir -p ~/data/db 2>/dev/null
-        mongod --fork --logpath /tmp/mongod.log --dbpath ~/data/db 2>/dev/null && \
-            echo -e "${GREEN}   ✅ MongoDB started manually${NC}" || \
-            echo -e "${RED}   ❌ MongoDB failed to start${NC}"
+    fi
+    
+    # If Docker didn't work, try systemctl (but don't use broken mongod binary)
+    if [ "$MONGODB_RUNNING" = false ] && ! command -v docker >/dev/null 2>&1; then
+        echo "   Installing Docker for MongoDB..."
+        sudo apt install -y docker.io >/dev/null 2>&1 || true
+        sudo systemctl start docker >/dev/null 2>&1 || true
+        if sudo docker run -d -p 27017:27017 --name mongodb mongo:4.4 >/dev/null 2>&1; then
+            sleep 4
+            if test_mongodb; then
+                echo -e "${GREEN}   ✅ MongoDB started via Docker (auto-installed)${NC}"
+                MONGODB_RUNNING=true
+            fi
+        fi
+    fi
+    
+    if [ "$MONGODB_RUNNING" = false ]; then
+        echo -e "${YELLOW}   ⚠ MongoDB not available, but continuing anyway${NC}"
+        echo "   Backend will handle MongoDB connection retries"
     fi
 fi
 
 # Verify MongoDB
 sleep 1
-if ps aux | grep -q "[m]ongod"; then
-    echo -e "${GREEN}   ✅ MongoDB verified running${NC}"
+if test_mongodb; then
+    echo -e "${GREEN}   ✅ MongoDB verified (responding to connections)${NC}"
+elif sudo docker ps | grep -q mongodb; then
+    echo -e "${YELLOW}   ⚠ MongoDB container running but not responding yet${NC}"
 else
     echo -e "${RED}   ❌ MongoDB is NOT running${NC}"
 fi
