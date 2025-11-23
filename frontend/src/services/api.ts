@@ -8,7 +8,7 @@ const api: AxiosInstance = axios.create({
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
-  timeout: 30000, // 30 seconds timeout (increased for blocking operations that need DNS resolution)
+  timeout: 120000, // 120 seconds timeout (increased for blocking operations that need DNS resolution and firewall operations)
   withCredentials: true, // Important for CORS
   xsrfCookieName: 'XSRF-TOKEN',
   xsrfHeaderName: 'X-XSRF-TOKEN'
@@ -47,10 +47,13 @@ api.interceptors.response.use(
       window.location.href = '/login';
     }
     
-    // Handle network errors
+    // Handle network errors (timeout, no connection, etc.)
     if (!error.response) {
       console.error('Network Error:', error);
-      return Promise.reject(new Error('Network error occurred. Please check your connection.'));
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        return Promise.reject(new Error('Request timed out. The blocking operation may be taking longer than expected. Please wait and try again.'));
+      }
+      return Promise.reject(new Error('Network error occurred. Please check your connection and ensure the backend server is running.'));
     }
     
     // Handle other errors

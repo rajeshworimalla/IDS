@@ -1,6 +1,7 @@
 import { FC, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Navbar from '../components/Navbar';
+import SystemStatusNotification from '../components/SystemStatusNotification';
 import { ipBlockService, BlockedIP, BlockPolicy } from '../services/ipBlockService';
 import { formatDate } from '../utils/dateUtils';
 import '../styles/Blocker.css';
@@ -9,6 +10,9 @@ const Blocker: FC = () => {
   const [activeTab, setActiveTab] = useState<'overview'|'blocked'|'policies'|'websites'>('overview');
   const [blocked, setBlocked] = useState<BlockedIP[]>([]);
   const [loading, setLoading] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [systemStatus, setSystemStatus] = useState<'idle' | 'blocking' | 'resetting' | 'resuming' | 'processing'>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const [newIP, setNewIP] = useState('');
@@ -38,9 +42,13 @@ const Blocker: FC = () => {
       setLoading(true);
       setError(null);
       const list = await ipBlockService.getBlockedIPs();
-      setBlocked(list);
+      setBlocked(list || []);
     } catch (e: any) {
-      setError(e?.message || 'Failed to fetch blocked IPs');
+      console.error('Error fetching blocked IPs:', e);
+      const errorMsg = e?.response?.data?.error || e?.message || 'Failed to fetch blocked IPs';
+      setError(errorMsg);
+      // Don't crash - set empty array as fallback
+      setBlocked([]);
     } finally {
       setLoading(false);
     }
@@ -81,16 +89,47 @@ const Blocker: FC = () => {
   }, [blocked]);
 
   const handleBlock = async () => {
-    if (!newIP) return;
+    if (!newIP || blocking) return;
     try {
       setError(null);
-      await ipBlockService.blockIP(newIP, newReason || undefined);
+      setBlocking(true);
+      setSystemStatus('blocking');
+      
+      // Show blocking notification
+      const result = await ipBlockService.blockIP(newIP, newReason || undefined);
+      
+      // Update database by refreshing the list
+      try {
+        await fetchBlocked();
+      } catch (fetchErr) {
+        console.error('Error refreshing blocked list:', fetchErr);
+        // Continue even if refresh fails - the block still happened
+      }
+      
       setNewIP('');
       setNewReason('');
-      await fetchBlocked();
       setActiveTab('blocked');
+      
+      // Show success message if blocking was successful
+      if (result.applied) {
+        setError(null);
+        setSystemStatus('idle');
+      } else if (result.error) {
+        setError(result.error || 'Blocking may have partially failed');
+        setSystemStatus('idle');
+      } else {
+        setSystemStatus('idle');
+      }
     } catch (e: any) {
-      setError(e?.message || 'Failed to block IP');
+      console.error('Block error:', e);
+      const errorMsg = e?.response?.data?.error || e?.message || 'Failed to block IP. Please check your connection and try again.';
+      setError(errorMsg);
+      setSystemStatus('idle');
+      // Don't crash - continue normally
+    } finally {
+      setBlocking(false);
+      // Ensure status is reset after a delay
+      setTimeout(() => setSystemStatus('idle'), 500);
     }
   };
 
@@ -98,10 +137,28 @@ const Blocker: FC = () => {
     const ok = window.confirm(`Unblock ${ip}?`);
     if (!ok) return;
     try {
+      setUnblocking(ip);
+      setSystemStatus('processing');
+      setError(null);
+      
       await ipBlockService.unblockIP(ip);
-      await fetchBlocked();
+      
+      // Update database by refreshing the list
+      try {
+        await fetchBlocked();
+      } catch (fetchErr) {
+        console.error('Error refreshing blocked list after unblock:', fetchErr);
+        // Continue even if refresh fails
+      }
     } catch (e: any) {
-      setError(e?.message || 'Failed to unblock IP');
+      console.error('Unblock error:', e);
+      const errorMsg = e?.response?.data?.error || e?.message || 'Failed to unblock IP';
+      setError(errorMsg);
+      // Don't crash - continue normally
+    } finally {
+      setUnblocking(null);
+      setSystemStatus('idle');
+      setTimeout(() => setSystemStatus('idle'), 500);
     }
   };
 
@@ -238,6 +295,15 @@ const Blocker: FC = () => {
   return (
     <div className="blocker-page">
       <Navbar />
+      <SystemStatusNotification 
+        status={systemStatus} 
+        message={
+          blocking ? '🛡️ Blocking IP address... Please wait.' :
+          unblocking ? '🔄 Unblocking IP address... Please wait.' :
+          systemStatus === 'processing' ? '⚙️ Processing request... Please wait.' :
+          undefined
+        }
+      />
       <motion.main className="blocker-content" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={springy}>
         <motion.div className="blocker-header" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...springy, delay: 0.05 }}>
           <h1>Management</h1>
@@ -309,7 +375,9 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                   value={newReason}
                   onChange={(e)=>setNewReason(e.target.value)}
                 />
-                <button className="btn primary" onClick={handleBlock} disabled={!newIP}>Block</button>
+                <button className="btn primary" onClick={handleBlock} disabled={!newIP || blocking}>
+                  {blocking ? 'Blocking...' : 'Block'}
+                </button>
                 <button className="btn" onClick={fetchBlocked} disabled={loading}>Refresh</button>
               </div>
 
