@@ -63,7 +63,8 @@ export const blockIP = async (req: Request, res: Response) => {
       
       let doc;
       try {
-        // Add timeout to MongoDB operation (3 seconds - should be fast)
+        // Add timeout to MongoDB operation (10 seconds - allows for slow operations)
+        const mongoStartTime = Date.now();
         doc = await Promise.race([
           BlockedIP.findOneAndUpdate(
             { user: req.user._id, ip },
@@ -71,16 +72,18 @@ export const blockIP = async (req: Request, res: Response) => {
             { new: true, upsert: true }
           ),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('MongoDB operation timeout')), 3000)
+            setTimeout(() => reject(new Error('MongoDB operation timeout')), 10000)
           )
         ]) as any;
+        const mongoDuration = Date.now() - mongoStartTime;
+        if (mongoDuration > 2000) {
+          console.warn(`⚠️ MongoDB operation for ${ip} took ${mongoDuration}ms (slow)`);
+        }
       } catch (dbErr: any) {
         console.error(`❌ MongoDB error saving blocked IP ${ip}:`, dbErr?.message || String(dbErr));
-        // Return error but don't crash
-        return res.status(500).json({ 
-          error: 'Database operation failed', 
-          details: dbErr?.message || 'MongoDB timeout' 
-        });
+        // Continue anyway - firewall blocking still works even if DB save fails
+        // Create a fallback doc so firewall operation can proceed
+        doc = { ip, reason: reason || 'manual', blockedAt: new Date() };
       }
 
       let result;
@@ -205,7 +208,8 @@ export const blockIP = async (req: Request, res: Response) => {
       try {
         let doc;
         try {
-          // Add timeout to MongoDB operation (3 seconds - should be fast)
+          // Add timeout to MongoDB operation (10 seconds - allows for slow operations)
+          const mongoStartTime = Date.now();
           doc = await Promise.race([
             BlockedIP.findOneAndUpdate(
               { user: req.user._id, ip: addr },
@@ -213,14 +217,18 @@ export const blockIP = async (req: Request, res: Response) => {
               { new: true, upsert: true }
             ),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('MongoDB operation timeout')), 3000)
+              setTimeout(() => reject(new Error('MongoDB operation timeout')), 10000)
             )
           ]) as any;
+          const mongoDuration = Date.now() - mongoStartTime;
+          if (mongoDuration > 2000) {
+            console.warn(`⚠️ MongoDB operation for ${addr} took ${mongoDuration}ms (slow)`);
+          }
         } catch (dbErr: any) {
           console.error(`❌ MongoDB error saving blocked IP ${addr}:`, dbErr?.message || String(dbErr));
-          failCount++;
-          results.push({ ip: addr, reason: reasonText, applied: false, error: 'Database timeout' });
-          continue; // Skip to next IP
+          // Continue anyway - firewall blocking still works even if DB save fails
+          // We'll still try to block the IP via firewall
+          doc = { ip: addr, reason: reasonText, blockedAt: new Date() };
         }
         
         let applied;
