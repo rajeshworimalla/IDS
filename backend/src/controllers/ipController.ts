@@ -66,7 +66,21 @@ export const blockIP = async (req: Request, res: Response) => {
         { new: true, upsert: true }
       );
 
-      const result = await firewall.blockIP(ip);
+      let result;
+      try {
+        result = await firewall.blockIP(ip);
+      } catch (e: any) {
+        console.error(`❌ Error calling firewall.blockIP for ${ip}:`, e);
+        // Still save to DB even if firewall fails
+        return res.status(201).json({ 
+          ip: doc.ip, 
+          reason: doc.reason, 
+          blockedAt: doc.blockedAt, 
+          applied: false, 
+          error: e?.message || 'Firewall operation failed' 
+        });
+      }
+      
       if ('applied' in result && result.applied) {
         try {
           const { notifyEvent } = await import('../services/aggregator');
@@ -151,7 +165,15 @@ export const blockIP = async (req: Request, res: Response) => {
           { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
           { new: true, upsert: true }
         );
-        const applied = await firewall.blockIP(addr);
+        
+        let applied;
+        try {
+          applied = await firewall.blockIP(addr);
+        } catch (firewallErr: any) {
+          console.error(`⚠️ Firewall error blocking ${addr}:`, firewallErr?.message || String(firewallErr));
+          applied = { applied: false, error: firewallErr?.message || 'Firewall operation failed' };
+        }
+        
         if ((applied as any).applied !== false) {
           successCount++;
           results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: (applied as any).method });
@@ -167,6 +189,7 @@ export const blockIP = async (req: Request, res: Response) => {
         failCount++;
         console.error(`Failed to block IP ${addr}:`, err);
         results.push({ ip: addr, reason: reasonText, applied: false, error: err?.message || String(err) });
+        // Don't crash - continue with next IP
       }
     }
 

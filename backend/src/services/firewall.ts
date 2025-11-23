@@ -25,8 +25,22 @@ let bins: Bins = {
   conntrack: null,
 };
 
-async function run(cmd: string, args: string[]) {
-  await execFileAsync(cmd, args);
+async function run(cmd: string, args: string[], timeout: number = 10000) {
+  try {
+    // Add timeout to prevent hanging operations
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      await execFileAsync(cmd, args, { signal: controller.signal as any });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch (e: any) {
+    // Don't throw - log and return error info
+    console.error(`Firewall command failed: ${cmd} ${args.join(' ')}`, e?.message || String(e));
+    throw e; // Re-throw but with better error message
+  }
 }
 
 async function tryRun(cmd: string, args: string[]) {
@@ -254,30 +268,60 @@ export const firewall = {
   },
 
   async blockIP(ip: string, opts?: { ttlSeconds?: number }): Promise<{ applied: boolean; method: 'ipset-v4' | 'ipset-v6' | 'iptables-v4' | 'iptables-v6'; } | { applied: false; error: string } > {
-    await ensureBins();
-    const version = isIP(ip);
-    if (version === 0) {
-      return { applied: false, error: 'Invalid IP' };
-    }
     try {
-      if (bins.ipset) {
-        await this.ensureBaseRules();
-        if (version === 4) {
-          await ipsetAdd(ip, false, opts?.ttlSeconds);
-          await flushConntrack(ip, false);
-          return { applied: true, method: 'ipset-v4' };
-        } else {
-          await ipsetAdd(ip, true, opts?.ttlSeconds);
-          await flushConntrack(ip, true);
-          return { applied: true, method: 'ipset-v6' };
-        }
+      await ensureBins();
+      const version = isIP(ip);
+      if (version === 0) {
+        return { applied: false, error: 'Invalid IP' };
       }
-      // Fallback to raw iptables rules (no per-element TTL available)
-      await iptablesCheckOrAdd(ip, version === 6);
-      await flushConntrack(ip, version === 6);
-      return { applied: true, method: (version === 6 ? 'iptables-v6' : 'iptables-v4') };
+      
+      try {
+        if (bins.ipset) {
+          try {
+            await this.ensureBaseRules();
+          } catch (e: any) {
+            console.warn('⚠️ Error ensuring base rules (continuing anyway):', e?.message || String(e));
+            // Continue - rules might already exist
+          }
+          
+          if (version === 4) {
+            try {
+              await ipsetAdd(ip, false, opts?.ttlSeconds);
+              await flushConntrack(ip, false).catch(() => {}); // Optional, don't fail if it errors
+              return { applied: true, method: 'ipset-v4' };
+            } catch (e: any) {
+              console.error(`⚠️ Error blocking IPv4 ${ip} with ipset:`, e?.message || String(e));
+              // Fall through to iptables fallback
+            }
+          } else {
+            try {
+              await ipsetAdd(ip, true, opts?.ttlSeconds);
+              await flushConntrack(ip, true).catch(() => {}); // Optional
+              return { applied: true, method: 'ipset-v6' };
+            } catch (e: any) {
+              console.error(`⚠️ Error blocking IPv6 ${ip} with ipset:`, e?.message || String(e));
+              // Fall through to iptables fallback
+            }
+          }
+        }
+        
+        // Fallback to raw iptables rules (no per-element TTL available)
+        try {
+          await iptablesCheckOrAdd(ip, version === 6);
+          await flushConntrack(ip, version === 6).catch(() => {}); // Optional
+          return { applied: true, method: (version === 6 ? 'iptables-v6' : 'iptables-v4') };
+        } catch (e: any) {
+          console.error(`⚠️ Error blocking IP ${ip} with iptables:`, e?.message || String(e));
+          return { applied: false, error: e?.message || String(e) };
+        }
+      } catch (e: any) {
+        console.error(`⚠️ Error in blockIP for ${ip}:`, e?.message || String(e));
+        return { applied: false, error: e?.message || String(e) };
+      }
     } catch (e: any) {
-      return { applied: false, error: e?.message || String(e) };
+      console.error(`❌ CRITICAL: Error in blockIP for ${ip}:`, e);
+      // Don't crash - return error instead
+      return { applied: false, error: e?.message || 'Failed to block IP' };
     }
   },
 
