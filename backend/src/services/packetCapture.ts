@@ -232,9 +232,17 @@ export class PacketCaptureService {
       }
 
       try {
-        const raw = this.buffer.slice(0, nbytes);
+        // CRITICAL FIX: Create a COPY of the buffer instead of slice (prevents memory corruption)
+        // slice() shares memory which can cause corruption when buffer is reused
+        const raw = Buffer.from(this.buffer.subarray(0, nbytes));
         console.log(`Processing packet of ${raw.length} bytes`);
-        this.processPacket(raw);
+        
+        // Process asynchronously to prevent blocking and allow buffer reuse
+        setImmediate(() => {
+          this.processPacket(raw).catch(err => {
+            console.error('Error in async packet processing:', err);
+          });
+        });
       } catch (err) {
         const error = err as Error;
         console.error('Error processing packet:', error);
@@ -396,6 +404,13 @@ export class PacketCaptureService {
         // Log the error and return early
         if (dbError.message && dbError.message.includes('duplicate')) {
           console.warn('⚠️ Duplicate packet detected, skipping');
+        }
+        // Clean up memory before returning
+        if (raw && typeof raw === 'object') {
+          // Force garbage collection hint
+          if (global.gc) {
+            global.gc();
+          }
         }
         return; // Exit early - can't process without DB save
       }
