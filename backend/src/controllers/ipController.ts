@@ -194,8 +194,14 @@ export const blockIP = async (req: Request, res: Response) => {
     let successCount = 0;
     let failCount = 0;
     
+    // Limit to first 20 IPs to prevent timeout (most domains don't have more)
+    const ipsToBlock = uniq.slice(0, 20);
+    if (uniq.length > 20) {
+      console.warn(`⚠️ Domain ${host} resolved to ${uniq.length} IPs, blocking first 20 only`);
+    }
+    
     // Block ALL IPs for the domain (in case DNS blocking fails or IPs change)
-    for (const addr of uniq) {
+    for (const addr of ipsToBlock) {
       try {
         let doc;
         try {
