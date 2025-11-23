@@ -306,6 +306,25 @@ export class PacketCaptureService {
       return; // Skip invalid packets
     }
     
+    // MEMORY PROTECTION: Limit packet processing rate to prevent memory corruption
+    const MAX_PACKETS_PER_SECOND = 50; // Limit to 50 packets/second
+    const PACKET_RATE_LIMIT_KEY = 'packet_rate_limit';
+    const rateLimitData = (global as any)[PACKET_RATE_LIMIT_KEY] || { count: 0, resetTime: Date.now() };
+    
+    // Reset counter every second
+    if (Date.now() - rateLimitData.resetTime > 1000) {
+      rateLimitData.count = 0;
+      rateLimitData.resetTime = Date.now();
+    }
+    
+    // Skip if rate limit exceeded
+    if (rateLimitData.count >= MAX_PACKETS_PER_SECOND) {
+      return; // Skip this packet to prevent memory overload
+    }
+    
+    rateLimitData.count++;
+    (global as any)[PACKET_RATE_LIMIT_KEY] = rateLimitData;
+    
     // PACKET SAMPLING: Only skip packets if queue is VERY full (emergency mode)
     // This prevents backend from being overwhelmed while still detecting attacks
     const EMERGENCY_QUEUE_THRESHOLD = 100; // Only sample when queue is very full
