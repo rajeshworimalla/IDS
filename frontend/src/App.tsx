@@ -11,6 +11,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Blocker from './pages/Blocker'
 import AttackAlertModal from './components/AttackAlertModal'
+import SystemStatusNotification from './components/SystemStatusNotification'
 import { io, Socket } from 'socket.io-client'
 import './App.css'
 
