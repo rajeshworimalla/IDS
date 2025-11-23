@@ -53,7 +53,7 @@ async function run(cmd: string, args: string[], timeout: number = 10000) {
 
 async function tryRun(cmd: string, args: string[]) {
   try {
-    await execFileAsync(cmd, args);
+    await execFileAsync(cmd, args, { timeout: 5000 });
     return true;
   } catch {
     return false;
@@ -135,8 +135,9 @@ async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
   if (ttlSeconds && ttlSeconds > 0) {
     args.push('timeout', String(ttlSeconds));
   }
-  console.log(`[FIREWALL] Executing: ${bins.ipset} ${args.join(' ')}`);
-  await run(bins.ipset, args);
+  console.log(`[FIREWALL] Executing: sudo ${bins.ipset} ${args.join(' ')}`);
+  // Use sudo for ipset commands (requires root privileges)
+  await run('sudo', [bins.ipset, ...args]);
   console.log(`[FIREWALL] ✓ Successfully executed ipset add for ${ip}`);
 }
 
@@ -149,30 +150,31 @@ async function ipsetDel(ip: string, v6 = false) {
 async function iptablesCheckOrAdd(ip: string, v6 = false) {
   const bin = v6 ? bins.ip6tables : bins.iptables;
   if (!bin) throw new Error((v6 ? 'ip6tables' : 'iptables') + ' not available');
-  // INPUT rule
-  if (!(await tryRun(bin, ['-C', 'INPUT', v6 ? '-s' : '-s', ip, '-j', 'DROP']))) {
-    await run(bin, ['-I', 'INPUT', '-s', ip, '-j', 'DROP']);
+  // INPUT rule - use sudo
+  if (!(await tryRun('sudo', [bin, '-C', 'INPUT', '-s', ip, '-j', 'DROP']))) {
+    await run('sudo', [bin, '-I', 'INPUT', '-s', ip, '-j', 'DROP']);
   }
-  // OUTPUT rule
-  if (!(await tryRun(bin, ['-C', 'OUTPUT', v6 ? '-d' : '-d', ip, '-j', 'DROP']))) {
-    await run(bin, ['-I', 'OUTPUT', '-d', ip, '-j', 'DROP']);
+  // OUTPUT rule - use sudo
+  if (!(await tryRun('sudo', [bin, '-C', 'OUTPUT', '-d', ip, '-j', 'DROP']))) {
+    await run('sudo', [bin, '-I', 'OUTPUT', '-d', ip, '-j', 'DROP']);
   }
-  // FORWARD rules
-  if (!(await tryRun(bin, ['-C', 'FORWARD', '-s', ip, '-j', 'DROP']))) {
-    await run(bin, ['-I', 'FORWARD', '-s', ip, '-j', 'DROP']);
+  // FORWARD rules - use sudo
+  if (!(await tryRun('sudo', [bin, '-C', 'FORWARD', '-s', ip, '-j', 'DROP']))) {
+    await run('sudo', [bin, '-I', 'FORWARD', '-s', ip, '-j', 'DROP']);
   }
-  if (!(await tryRun(bin, ['-C', 'FORWARD', '-d', ip, '-j', 'DROP']))) {
-    await run(bin, ['-I', 'FORWARD', '-d', ip, '-j', 'DROP']);
+  if (!(await tryRun('sudo', [bin, '-C', 'FORWARD', '-d', ip, '-j', 'DROP']))) {
+    await run('sudo', [bin, '-I', 'FORWARD', '-d', ip, '-j', 'DROP']);
   }
 }
 
 async function iptablesDelete(ip: string, v6 = false) {
   const bin = v6 ? bins.ip6tables : bins.iptables;
   if (!bin) return;
-  await run(bin, ['-D', 'INPUT', '-s', ip, '-j', 'DROP']).catch(() => {});
-  await run(bin, ['-D', 'OUTPUT', '-d', ip, '-j', 'DROP']).catch(() => {});
-  await run(bin, ['-D', 'FORWARD', '-s', ip, '-j', 'DROP']).catch(() => {});
-  await run(bin, ['-D', 'FORWARD', '-d', ip, '-j', 'DROP']).catch(() => {});
+  // Use sudo for iptables commands
+  await run('sudo', [bin, '-D', 'INPUT', '-s', ip, '-j', 'DROP']).catch(() => {});
+  await run('sudo', [bin, '-D', 'OUTPUT', '-d', ip, '-j', 'DROP']).catch(() => {});
+  await run('sudo', [bin, '-D', 'FORWARD', '-s', ip, '-j', 'DROP']).catch(() => {});
+  await run('sudo', [bin, '-D', 'FORWARD', '-d', ip, '-j', 'DROP']).catch(() => {});
 }
 
 // DNS blocking via /etc/hosts using sudo script

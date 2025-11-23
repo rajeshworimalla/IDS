@@ -220,21 +220,25 @@ export const blockIP = async (req: Request, res: Response) => {
       return res.status(400).json({ error: `No A/AAAA records found for ${host}` });
     }
     
-    console.log(`Resolved ${host} to ${uniq.length} IP address(es): ${uniq.join(', ')}`);
+    console.log(`[IP_CONTROLLER] 🌐 Resolved ${host} to ${uniq.length} IP address(es): ${uniq.join(', ')}`);
 
     const reasonText = reason && reason.trim().length > 0 ? reason : `domain: ${host}`;
 
     // CRITICAL: Block domain via /etc/hosts FIRST (prevents DNS resolution)
+    // NOTE: This does NOT save to database - only blocks DNS resolution
     let hostsBlocked = false;
     try {
       const domainBlockResult = await firewall.blockDomain(host);
       if ((domainBlockResult as any).applied) {
         hostsBlocked = (domainBlockResult as any).hostsBlocked || false;
-        console.log(`✅ DNS blocked for ${host} via /etc/hosts: ${hostsBlocked}`);
+        console.log(`[IP_CONTROLLER] ✅ DNS blocked for ${host} via /etc/hosts: ${hostsBlocked}`);
       }
     } catch (e: any) {
-      console.warn(`⚠️ Failed to block domain ${host} via /etc/hosts: ${e?.message || String(e)}`);
+      console.warn(`[IP_CONTROLLER] ⚠️ Failed to block domain ${host} via /etc/hosts: ${e?.message || String(e)}`);
     }
+    
+    // IMPORTANT: We will ONLY save the resolved IP addresses to the database, NOT the domain name
+    console.log(`[IP_CONTROLLER] 📝 Will save ${uniq.length} IP address(es) to database (NOT the domain name)`);
 
     const results: any[] = [];
     let successCount = 0;
@@ -247,8 +251,16 @@ export const blockIP = async (req: Request, res: Response) => {
     }
     
     // Block ALL IPs for the domain (in case DNS blocking fails or IPs change)
+    // IMPORTANT: Only save the actual IP addresses, NOT the domain name
     for (const addr of ipsToBlock) {
       try {
+        // Validate that addr is actually an IP, not a domain name
+        if (isIP(addr) === 0) {
+          console.warn(`[IP_CONTROLLER] ⚠️ Skipping invalid IP: ${addr} (not a valid IP address)`);
+          continue; // Skip invalid IPs
+        }
+        
+        console.log(`[IP_CONTROLLER] 💾 Saving IP ${addr} to database for domain ${host}`);
         let doc;
         try {
           // Add timeout to MongoDB operation (10 seconds - allows for slow operations)
@@ -265,10 +277,13 @@ export const blockIP = async (req: Request, res: Response) => {
           ]) as any;
           const mongoDuration = Date.now() - mongoStartTime;
           if (mongoDuration > 2000) {
-            console.warn(`⚠️ MongoDB operation for ${addr} took ${mongoDuration}ms (slow)`);
+            console.warn(`[IP_CONTROLLER] ⚠️ MongoDB operation for ${addr} took ${mongoDuration}ms (slow)`);
+          }
+          if (doc && doc._id) {
+            console.log(`[IP_CONTROLLER] ✅ Saved IP ${addr} to database with ID: ${doc._id}`);
           }
         } catch (dbErr: any) {
-          console.error(`❌ MongoDB error saving blocked IP ${addr}:`, dbErr?.message || String(dbErr));
+          console.error(`[IP_CONTROLLER] ❌ MongoDB error saving blocked IP ${addr}:`, dbErr?.message || String(dbErr));
           // Continue anyway - firewall blocking still works even if DB save fails
           // We'll still try to block the IP via firewall
           doc = { ip: addr, reason: reasonText, blockedAt: new Date() };
