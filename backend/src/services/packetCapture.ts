@@ -581,41 +581,6 @@ export class PacketCaptureService {
             status: packetToEmit.status
           });
           io.emit('new-packet', packetToEmit);
-          
-          // Emit system status when attack is detected
-          if (packetToEmit.is_malicious || packetToEmit.status === 'critical' || packetToEmit.status === 'medium') {
-            io.emit('system-status', { 
-              type: 'blocking', 
-              message: 'System is blocking the attack... Please wait.' 
-            });
-            
-            // After a delay, emit resetting status
-            setTimeout(() => {
-              if (io) {
-                io.emit('system-status', { 
-                  type: 'resetting', 
-                  message: 'System is resetting and securing network... Please wait.' 
-                });
-              }
-            }, 2000);
-            
-            // After another delay, emit resuming status
-            setTimeout(() => {
-              if (io) {
-                io.emit('system-status', { 
-                  type: 'resuming', 
-                  message: 'System is resuming normal functions... Please wait.' 
-                });
-              }
-            }, 4000);
-            
-            // Finally, return to idle
-            setTimeout(() => {
-              if (io) {
-                io.emit('system-status', { type: 'idle' });
-              }
-            }, 7000);
-          }
         } else {
           console.warn('⚠️ Socket.IO not initialized - packet saved but not broadcast');
         }
@@ -641,26 +606,7 @@ export class PacketCaptureService {
       if (error.stack) {
         console.error('Stack trace:', error.stack);
       }
-      
-      // Emit system status for processing errors (graceful handling)
-      try {
-        const io = getIO();
-        if (io) {
-          io.emit('system-status', { 
-            type: 'processing', 
-            message: 'System is processing attack data... Please wait.' 
-          });
-          setTimeout(() => {
-            if (io) {
-              io.emit('system-status', { type: 'idle' });
-            }
-          }, 2000);
-        }
-      } catch (statusError) {
-        // Ignore status emission errors
-      }
-      
-      // Don't rethrow - continue processing other packets (graceful degradation)
+      // Don't rethrow - continue processing other packets
     }
   }
 
