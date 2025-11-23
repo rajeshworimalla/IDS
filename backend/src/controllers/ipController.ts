@@ -60,11 +60,28 @@ export const blockIP = async (req: Request, res: Response) => {
       const setOnInsert: any = { blockedAt: new Date() };
       const set: any = {};
       if (typeof reason !== 'undefined') set.reason = reason;
-      const doc = await BlockedIP.findOneAndUpdate(
-        { user: req.user._id, ip },
-        { $setOnInsert: setOnInsert, ...(Object.keys(set).length ? { $set: set } : {}) },
-        { new: true, upsert: true }
-      );
+      
+      let doc;
+      try {
+        // Add timeout to MongoDB operation
+        doc = await Promise.race([
+          BlockedIP.findOneAndUpdate(
+            { user: req.user._id, ip },
+            { $setOnInsert: setOnInsert, ...(Object.keys(set).length ? { $set: set } : {}) },
+            { new: true, upsert: true }
+          ),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('MongoDB operation timeout')), 5000)
+          )
+        ]) as any;
+      } catch (dbErr: any) {
+        console.error(`❌ MongoDB error saving blocked IP ${ip}:`, dbErr?.message || String(dbErr));
+        // Return error but don't crash
+        return res.status(500).json({ 
+          error: 'Database operation failed', 
+          details: dbErr?.message || 'MongoDB timeout' 
+        });
+      }
 
       let result;
       try {
@@ -160,11 +177,25 @@ export const blockIP = async (req: Request, res: Response) => {
     // Block ALL IPs for the domain (in case DNS blocking fails or IPs change)
     for (const addr of uniq) {
       try {
-        const doc = await BlockedIP.findOneAndUpdate(
-          { user: req.user._id, ip: addr },
-          { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
-          { new: true, upsert: true }
-        );
+        let doc;
+        try {
+          // Add timeout to MongoDB operation
+          doc = await Promise.race([
+            BlockedIP.findOneAndUpdate(
+              { user: req.user._id, ip: addr },
+              { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
+              { new: true, upsert: true }
+            ),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('MongoDB operation timeout')), 5000)
+            )
+          ]) as any;
+        } catch (dbErr: any) {
+          console.error(`❌ MongoDB error saving blocked IP ${addr}:`, dbErr?.message || String(dbErr));
+          failCount++;
+          results.push({ ip: addr, reason: reasonText, applied: false, error: 'Database timeout' });
+          continue; // Skip to next IP
+        }
         
         let applied;
         try {

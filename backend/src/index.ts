@@ -91,8 +91,12 @@ console.log('Connecting to MongoDB...');
 mongoose.connect(config.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
+  serverSelectionTimeoutMS: 10000, // Increased from 5s to 10s
+  socketTimeoutMS: 30000, // Reduced from 45s to 30s for faster failure
+  connectTimeoutMS: 10000, // Connection timeout
+  maxPoolSize: 10, // Limit connection pool
+  retryWrites: true,
+  retryReads: true,
 } as any)
   .then(async () => {
     console.log('Connected to MongoDB');
