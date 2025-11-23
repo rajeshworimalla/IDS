@@ -50,11 +50,19 @@ export const blockIP = async (req: Request, res: Response) => {
     const { ip, reason } = req.body as { ip?: string; reason?: string };
     if (!ip) return res.status(400).json({ error: 'ip is required' });
 
-    // Prevent blocking localhost (safety)
-    const ipToCheck = String(ip).trim();
-    if (ipToCheck === '127.0.0.1' || ipToCheck === 'localhost' || ipToCheck === '::1' || ipToCheck === '::ffff:127.0.0.1') {
-      console.log(`[IP_CONTROLLER] ❌ Blocked attempt to block localhost: ${ipToCheck}`);
-      return res.status(400).json({ error: 'Cannot block localhost (127.0.0.1) for security reasons' });
+    // Prevent blocking localhost (safety) - comprehensive check
+    const ipToCheck = String(ip).trim().toLowerCase();
+    const localhostPatterns = [
+      '127.0.0.1', 'localhost', '::1', '::ffff:127.0.0.1',
+      '0.0.0.0', '::', '127.', 'localhost.localdomain'
+    ];
+    const isLocalhost = localhostPatterns.some(pattern => 
+      ipToCheck === pattern || ipToCheck.startsWith(pattern + '.') || ipToCheck.startsWith('127.')
+    );
+    
+    if (isLocalhost) {
+      console.log(`[IP_CONTROLLER] ❌ BLOCKED: Attempt to block localhost/system IP: ${ipToCheck}`);
+      return res.status(400).json({ error: 'Cannot block localhost (127.0.0.1) or system IPs for security reasons' });
     }
 
     // If it's a literal IP, block directly

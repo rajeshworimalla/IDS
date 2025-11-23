@@ -280,6 +280,15 @@ export const firewall = {
   async blockIP(ip: string, opts?: { ttlSeconds?: number }): Promise<{ applied: boolean; method: 'ipset-v4' | 'ipset-v6' | 'iptables-v4' | 'iptables-v6'; } | { applied: false; error: string } > {
     console.log(`[FIREWALL] 🔒 Starting blockIP for ${ip}`);
     try {
+      // Safety check: Never block localhost
+      const ipTrimmed = String(ip).trim();
+      if (ipTrimmed === '127.0.0.1' || ipTrimmed === 'localhost' || ipTrimmed === '::1' || 
+          ipTrimmed === '::ffff:127.0.0.1' || ipTrimmed.startsWith('127.') || 
+          ipTrimmed === '0.0.0.0' || ipTrimmed === '::') {
+        console.error(`[FIREWALL] ❌ BLOCKED: Attempt to block localhost/system IP: ${ip}`);
+        return { applied: false, error: 'Cannot block localhost or system IPs for security reasons' };
+      }
+      
       await ensureBins();
       console.log(`[FIREWALL] ✓ Bins available: ipset=${!!bins.ipset}, iptables=${!!bins.iptables}, ip6tables=${!!bins.ip6tables}`);
       const version = isIP(ip);
