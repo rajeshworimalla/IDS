@@ -30,9 +30,11 @@ const App: FC = () => {
     authService.isAuthenticated()
   );
   const [attackAlert, setAttackAlert] = useState<AttackAlert | null>(null);
+  const [systemStatus, setSystemStatus] = useState<'idle' | 'blocking' | 'resetting' | 'resuming' | 'processing'>('idle');
   const shownAlertsRef = useRef<Set<string>>(new Set()); // Track shown alerts to prevent duplicates
   const processingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAlertTimeRef = useRef<number>(0); // Throttle alerts to max 1 per 500ms
+  const systemStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Listen for changes to localStorage and custom events
   useEffect(() => {
@@ -101,6 +103,32 @@ const App: FC = () => {
       // EARLY EXIT: Skip non-malicious packets immediately to prevent UI freeze
       const isCriticalOrMedium = packet.status === 'critical' || packet.status === 'medium';
       const isMalicious = packet.is_malicious === true;
+      
+      // Show system status when attack is detected
+      if (isCriticalOrMedium || isMalicious) {
+        // Set status to blocking
+        setSystemStatus('blocking');
+        
+        // Clear any existing timeout
+        if (systemStatusTimeoutRef.current) {
+          clearTimeout(systemStatusTimeoutRef.current);
+        }
+        
+        // After 2 seconds, show resetting
+        systemStatusTimeoutRef.current = setTimeout(() => {
+          setSystemStatus('resetting');
+          
+          // After another 2 seconds, show resuming
+          systemStatusTimeoutRef.current = setTimeout(() => {
+            setSystemStatus('resuming');
+            
+            // After 3 seconds, return to idle
+            systemStatusTimeoutRef.current = setTimeout(() => {
+              setSystemStatus('idle');
+            }, 3000);
+          }, 2000);
+        }, 2000);
+      }
       
       // Only process malicious/critical packets - skip everything else instantly
       if (!isCriticalOrMedium && !isMalicious) {
@@ -194,11 +222,21 @@ const App: FC = () => {
       console.log('[Alert System] Disconnected from WebSocket');
     });
 
+    // Listen for system status events from backend
+    socket.on('system-status', (status: { type: string; message?: string }) => {
+      if (status.type === 'blocking' || status.type === 'resetting' || status.type === 'resuming' || status.type === 'processing') {
+        setSystemStatus(status.type as any);
+      }
+    });
+
     return () => {
       socket.disconnect();
       // Cleanup timeouts
       if (processingTimeoutRef.current) {
         clearTimeout(processingTimeoutRef.current);
+      }
+      if (systemStatusTimeoutRef.current) {
+        clearTimeout(systemStatusTimeoutRef.current);
       }
     };
   }, [isAuthenticated]);
@@ -210,6 +248,7 @@ const App: FC = () => {
 
   return (
     <>
+      <SystemStatusNotification status={systemStatus} />
       <AttackAlertModal 
         alert={attackAlert} 
         onClose={() => setAttackAlert(null)} 
