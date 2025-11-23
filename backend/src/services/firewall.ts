@@ -26,19 +26,27 @@ let bins: Bins = {
 };
 
 async function run(cmd: string, args: string[], timeout: number = 10000) {
+  const startTime = Date.now();
+  console.log(`[FIREWALL] ▶️ Running: ${cmd} ${args.join(' ')} (timeout: ${timeout}ms)`);
   try {
     // Add timeout to prevent hanging operations
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => {
+      console.error(`[FIREWALL] ⏱️ Command timeout after ${timeout}ms: ${cmd} ${args.join(' ')}`);
+      controller.abort();
+    }, timeout);
     
     try {
       await execFileAsync(cmd, args, { signal: controller.signal as any });
+      const duration = Date.now() - startTime;
+      console.log(`[FIREWALL] ✓ Command completed in ${duration}ms: ${cmd} ${args.join(' ')}`);
     } finally {
       clearTimeout(timeoutId);
     }
   } catch (e: any) {
+    const duration = Date.now() - startTime;
     // Don't throw - log and return error info
-    console.error(`Firewall command failed: ${cmd} ${args.join(' ')}`, e?.message || String(e));
+    console.error(`[FIREWALL] ❌ Command failed after ${duration}ms: ${cmd} ${args.join(' ')}`, e?.message || String(e));
     throw e; // Re-throw but with better error message
   }
 }
@@ -127,7 +135,9 @@ async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
   if (ttlSeconds && ttlSeconds > 0) {
     args.push('timeout', String(ttlSeconds));
   }
+  console.log(`[FIREWALL] Executing: ${bins.ipset} ${args.join(' ')}`);
   await run(bins.ipset, args);
+  console.log(`[FIREWALL] ✓ Successfully executed ipset add for ${ip}`);
 }
 
 async function ipsetDel(ip: string, v6 = false) {
@@ -268,17 +278,23 @@ export const firewall = {
   },
 
   async blockIP(ip: string, opts?: { ttlSeconds?: number }): Promise<{ applied: boolean; method: 'ipset-v4' | 'ipset-v6' | 'iptables-v4' | 'iptables-v6'; } | { applied: false; error: string } > {
+    console.log(`[FIREWALL] 🔒 Starting blockIP for ${ip}`);
     try {
       await ensureBins();
+      console.log(`[FIREWALL] ✓ Bins available: ipset=${!!bins.ipset}, iptables=${!!bins.iptables}, ip6tables=${!!bins.ip6tables}`);
       const version = isIP(ip);
+      console.log(`[FIREWALL] IP version check: ${ip} -> version ${version}`);
       if (version === 0) {
+        console.error(`[FIREWALL] ❌ Invalid IP: ${ip}`);
         return { applied: false, error: 'Invalid IP' };
       }
       
       try {
         if (bins.ipset) {
+          console.log(`[FIREWALL] Using ipset for blocking ${ip}`);
           try {
             await this.ensureBaseRules();
+            console.log(`[FIREWALL] ✓ Base rules ensured`);
           } catch (e: any) {
             console.warn('⚠️ Error ensuring base rules (continuing anyway):', e?.message || String(e));
             // Continue - rules might already exist
@@ -286,8 +302,11 @@ export const firewall = {
           
           if (version === 4) {
             try {
+              console.log(`[FIREWALL] Adding IPv4 ${ip} to ipset...`);
               await ipsetAdd(ip, false, opts?.ttlSeconds);
+              console.log(`[FIREWALL] ✓ Added ${ip} to ipset-v4`);
               await flushConntrack(ip, false).catch(() => {}); // Optional, don't fail if it errors
+              console.log(`[FIREWALL] ✅ Successfully blocked ${ip} via ipset-v4`);
               return { applied: true, method: 'ipset-v4' };
             } catch (e: any) {
               console.error(`⚠️ Error blocking IPv4 ${ip} with ipset:`, e?.message || String(e));
@@ -295,20 +314,28 @@ export const firewall = {
             }
           } else {
             try {
+              console.log(`[FIREWALL] Adding IPv6 ${ip} to ipset...`);
               await ipsetAdd(ip, true, opts?.ttlSeconds);
+              console.log(`[FIREWALL] ✓ Added ${ip} to ipset-v6`);
               await flushConntrack(ip, true).catch(() => {}); // Optional
+              console.log(`[FIREWALL] ✅ Successfully blocked ${ip} via ipset-v6`);
               return { applied: true, method: 'ipset-v6' };
             } catch (e: any) {
               console.error(`⚠️ Error blocking IPv6 ${ip} with ipset:`, e?.message || String(e));
               // Fall through to iptables fallback
             }
           }
+        } else {
+          console.log(`[FIREWALL] ipset not available, using iptables fallback`);
         }
         
         // Fallback to raw iptables rules (no per-element TTL available)
         try {
+          console.log(`[FIREWALL] Using iptables fallback for ${ip} (v${version})`);
           await iptablesCheckOrAdd(ip, version === 6);
+          console.log(`[FIREWALL] ✓ Added iptables rules for ${ip}`);
           await flushConntrack(ip, version === 6).catch(() => {}); // Optional
+          console.log(`[FIREWALL] ✅ Successfully blocked ${ip} via iptables-${version === 6 ? 'v6' : 'v4'}`);
           return { applied: true, method: (version === 6 ? 'iptables-v6' : 'iptables-v4') };
         } catch (e: any) {
           console.error(`⚠️ Error blocking IP ${ip} with iptables:`, e?.message || String(e));

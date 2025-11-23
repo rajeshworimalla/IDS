@@ -44,6 +44,7 @@ export const getBlockedIPs = async (req: Request, res: Response) => {
 };
 
 export const blockIP = async (req: Request, res: Response) => {
+  console.log(`[IP_CONTROLLER] 📥 Block IP request received: ${JSON.stringify(req.body)}`);
   try {
     if (!req.user) return res.status(401).json({ error: 'User not authenticated' });
     const { ip, reason } = req.body as { ip?: string; reason?: string };
@@ -52,11 +53,13 @@ export const blockIP = async (req: Request, res: Response) => {
     // Prevent blocking localhost (safety)
     const ipToCheck = String(ip).trim();
     if (ipToCheck === '127.0.0.1' || ipToCheck === 'localhost' || ipToCheck === '::1' || ipToCheck === '::ffff:127.0.0.1') {
+      console.log(`[IP_CONTROLLER] ❌ Blocked attempt to block localhost: ${ipToCheck}`);
       return res.status(400).json({ error: 'Cannot block localhost (127.0.0.1) for security reasons' });
     }
 
     // If it's a literal IP, block directly
     if (isIP(ip) !== 0) {
+      console.log(`[IP_CONTROLLER] ✓ Valid IP detected: ${ip}, proceeding with blocking...`);
       const setOnInsert: any = { blockedAt: new Date() };
       const set: any = {};
       if (typeof reason !== 'undefined') set.reason = reason;
@@ -88,7 +91,9 @@ export const blockIP = async (req: Request, res: Response) => {
 
       let result;
       try {
+        console.log(`[IP_CONTROLLER] 🔥 Calling firewall.blockIP for ${ip}...`);
         result = await firewall.blockIP(ip);
+        console.log(`[IP_CONTROLLER] 🔥 Firewall result:`, JSON.stringify(result));
       } catch (e: any) {
         console.error(`❌ Error calling firewall.blockIP for ${ip}:`, e);
         // Still save to DB even if firewall fails
@@ -102,12 +107,14 @@ export const blockIP = async (req: Request, res: Response) => {
       }
       
       if ('applied' in result && result.applied) {
+        console.log(`[IP_CONTROLLER] ✅ IP ${ip} successfully blocked via ${(result as any).method}`);
         try {
           const { notifyEvent } = await import('../services/aggregator');
           await notifyEvent('manual_ban', { ip, reason: reason || 'manual', user: req.user._id, method: (result as any).method });
         } catch {}
         return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: result.method });
       }
+      console.error(`[IP_CONTROLLER] ❌ IP ${ip} blocking failed:`, (result as any).error);
       return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: false, error: (result as any).error });
     }
 
