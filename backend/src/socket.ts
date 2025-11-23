@@ -73,8 +73,8 @@ export function initializeSocket(server: any) {
         credentials: true,
         allowedHeaders: ["Authorization"]
       },
-      pingTimeout: 60000,
-      pingInterval: 25000,
+      pingTimeout: 120000, // 120 seconds - increased for long blocking operations
+      pingInterval: 25000, // 25 seconds
       connectTimeout: 45000,
       transports: ['websocket', 'polling'],
       allowEIO3: true,
