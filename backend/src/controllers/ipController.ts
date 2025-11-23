@@ -22,7 +22,13 @@ export const getBlockedIPs = async (req: Request, res: Response) => {
     if (!req.user) return res.status(401).json({ error: 'User not authenticated' });
 
     const items = await BlockedIP.find({ user: req.user._id }).sort({ blockedAt: -1 });
-    const result = items.map(item => ({ ip: item.ip, reason: item.reason, blockedAt: item.blockedAt }));
+    console.log(`[IP_CONTROLLER] 📋 Found ${items.length} blocked IPs for user ${req.user._id}`);
+    const result = items.map(item => ({ 
+      ip: item.ip, 
+      reason: item.reason, 
+      blockedAt: item.blockedAt,
+      method: 'database' // Default method for DB entries
+    }));
 
     // Merge in active temporary bans from Redis (if available)
     try {
@@ -85,10 +91,16 @@ export const blockIP = async (req: Request, res: Response) => {
           new Promise((_, reject) => 
             setTimeout(() => reject(new Error('MongoDB operation timeout')), 10000)
           )
-        ]) as any;
+        ]        ) as any;
         const mongoDuration = Date.now() - mongoStartTime;
         if (mongoDuration > 2000) {
           console.warn(`⚠️ MongoDB operation for ${ip} took ${mongoDuration}ms (slow)`);
+        }
+        // Verify the document was actually saved
+        if (doc && doc._id) {
+          console.log(`[IP_CONTROLLER] ✅ MongoDB document saved with ID: ${doc._id}`);
+        } else {
+          console.warn(`[IP_CONTROLLER] ⚠️ MongoDB document may not have been saved properly`);
         }
       } catch (dbErr: any) {
         console.error(`❌ MongoDB error saving blocked IP ${ip}:`, dbErr?.message || String(dbErr));
@@ -116,14 +128,30 @@ export const blockIP = async (req: Request, res: Response) => {
       
       if ('applied' in result && result.applied) {
         console.log(`[IP_CONTROLLER] ✅ IP ${ip} successfully blocked via ${(result as any).method}`);
+        console.log(`[IP_CONTROLLER] 📝 Saved to DB: ip=${doc.ip}, reason=${doc.reason}, blockedAt=${doc.blockedAt}`);
         try {
           const { notifyEvent } = await import('../services/aggregator');
           await notifyEvent('manual_ban', { ip, reason: reason || 'manual', user: req.user._id, method: (result as any).method });
         } catch {}
-        return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: result.method });
+        // Return the saved document with method
+        return res.status(201).json({ 
+          ip: doc.ip, 
+          reason: doc.reason, 
+          blockedAt: doc.blockedAt, 
+          applied: true, 
+          method: (result as any).method || 'firewall' 
+        });
       }
       console.error(`[IP_CONTROLLER] ❌ IP ${ip} blocking failed:`, (result as any).error);
-      return res.status(201).json({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: false, error: (result as any).error });
+      // Still return the DB document even if firewall failed
+      return res.status(201).json({ 
+        ip: doc.ip, 
+        reason: doc.reason, 
+        blockedAt: doc.blockedAt, 
+        applied: false, 
+        error: (result as any).error,
+        method: 'none'
+      });
     }
 
     // Otherwise, treat input as a hostname/domain and resolve to IPs

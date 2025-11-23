@@ -97,10 +97,14 @@ const Blocker: FC = () => {
       
       // Show blocking notification
       const result = await ipBlockService.blockIP(newIP, newReason || undefined);
+      console.log('Block result:', result);
       
-      // Update database by refreshing the list
+      // Update database by refreshing the list - wait a bit for DB to sync
       try {
+        // Small delay to ensure DB write is complete
+        await new Promise(resolve => setTimeout(resolve, 500));
         await fetchBlocked();
+        console.log('Blocked list refreshed after blocking');
       } catch (fetchErr) {
         console.error('Error refreshing blocked list:', fetchErr);
         // Continue even if refresh fails - the block still happened
