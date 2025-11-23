@@ -127,32 +127,33 @@ export const blockIP = async (req: Request, res: Response) => {
     try {
       // Add timeout to DNS resolution (5 seconds max)
       const dnsTimeout = 5000;
-      const dnsPromise = Promise.allSettled([
-        dns.resolve4(host),
-        dns.resolve6(host)
-      ]);
       
-      const timeoutPromise = new Promise((_, reject) => 
+      // Create timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => 
         setTimeout(() => reject(new Error('DNS resolution timeout')), dnsTimeout)
       );
       
-      const [ipv4Addrs, ipv6Addrs] = await Promise.race([
-        dnsPromise,
+      // Race DNS resolution against timeout
+      const dnsResult = await Promise.race([
+        Promise.allSettled([
+          dns.resolve4(host),
+          dns.resolve6(host)
+        ]),
         timeoutPromise
-      ]) as PromiseSettledResult<string[][]>[];
+      ]) as PromiseSettledResult<string[]>[];
       
-      if (ipv4Addrs && ipv4Addrs.status === 'fulfilled') {
-        allIPs.push(...ipv4Addrs.value);
+      if (dnsResult[0] && dnsResult[0].status === 'fulfilled') {
+        allIPs.push(...dnsResult[0].value);
       }
-      if (ipv6Addrs && ipv6Addrs.status === 'fulfilled') {
-        allIPs.push(...ipv6Addrs.value);
+      if (dnsResult[1] && dnsResult[1].status === 'fulfilled') {
+        allIPs.push(...dnsResult[1].value);
       }
       
       // Fallback to lookup if resolve fails (with timeout)
       if (allIPs.length === 0) {
         try {
           const lookupPromise = dns.lookup(host, { all: true });
-          const lookupTimeout = new Promise((_, reject) => 
+          const lookupTimeout = new Promise<never>((_, reject) => 
             setTimeout(() => reject(new Error('DNS lookup timeout')), 3000)
           );
           const looked = await Promise.race([lookupPromise, lookupTimeout]) as any;
