@@ -76,7 +76,7 @@ const EventsLog: FC = () => {
     fetchPackets();
   }, []);
 
-  // Initialize socket connection
+  // Initialize socket connection and auto-start scanning
   useEffect(() => {
     const token = authService.getToken();
     if (!token) {
@@ -100,7 +100,10 @@ const EventsLog: FC = () => {
     socket.on('connect', () => {
       console.log('Socket connected successfully');
       setSocket(socket);
-      // Don't automatically set scanning to true on connect
+      // Auto-start scanning when connected
+      console.log('Auto-starting packet capture...');
+      setScanningState('starting');
+      socket.emit('start-scanning', { token });
     });
 
     socket.on('connect_error', (error) => {
