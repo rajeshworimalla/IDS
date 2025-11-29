@@ -96,21 +96,29 @@ async function ensureIptablesSetRules(v6 = false) {
   const bin = v6 ? bins.ip6tables : bins.iptables;
   if (!bin) throw new Error((v6 ? 'ip6tables' : 'iptables') + ' not available');
   const setName = v6 ? 'ids6_blocklist' : 'ids_blocklist';
-  // INPUT src in set
+  
+  // INPUT src in set (blocks incoming from blocked IPs)
   if (!(await tryRun(bin, ['-C', 'INPUT', '-m', 'set', '--match-set', setName, 'src', '-j', 'DROP']))) {
     await run(bin, ['-I', 'INPUT', '-m', 'set', '--match-set', setName, 'src', '-j', 'DROP']);
+    console.log(`[FIREWALL] Added INPUT rule for ${setName}`);
   }
-  // OUTPUT dst in set
+  
+  // OUTPUT dst in set (blocks outgoing to blocked IPs) - THIS IS KEY FOR DOMAIN BLOCKING
   if (!(await tryRun(bin, ['-C', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']))) {
     await run(bin, ['-I', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
+    console.log(`[FIREWALL] Added OUTPUT rule for ${setName} (this blocks outgoing connections)`);
   }
+  
   // FORWARD src in set
   if (!(await tryRun(bin, ['-C', 'FORWARD', '-m', 'set', '--match-set', setName, 'src', '-j', 'DROP']))) {
     await run(bin, ['-I', 'FORWARD', '-m', 'set', '--match-set', setName, 'src', '-j', 'DROP']);
+    console.log(`[FIREWALL] Added FORWARD src rule for ${setName}`);
   }
+  
   // FORWARD dst in set
   if (!(await tryRun(bin, ['-C', 'FORWARD', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']))) {
     await run(bin, ['-I', 'FORWARD', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
+    console.log(`[FIREWALL] Added FORWARD dst rule for ${setName}`);
   }
 }
 
