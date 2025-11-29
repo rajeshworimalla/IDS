@@ -58,8 +58,9 @@ const EventsLog: FC = () => {
 
         if (response.ok) {
           const data = await response.json();
-          console.log(`Received ${data.length} packets from backend`);
-          setPackets(data);
+          // Limit initial load to last 300 packets for performance
+          const limitedData = data.slice(0, 300);
+          setPackets(limitedData);
         } else {
           const error = await response.text();
           console.error('Failed to fetch packets:', error);
@@ -122,16 +123,15 @@ const EventsLog: FC = () => {
     });
 
     socket.on('new-packet', (packet) => {
-      console.log('Received new packet via WebSocket:', packet);
       setPackets(prev => {
         // Check if packet already exists to avoid duplicates
         const exists = prev.some(p => p._id === packet._id);
         if (exists) {
-          console.log('Packet already exists, skipping duplicate');
           return prev;
         }
-        console.log('Adding new packet to list');
-        return [packet, ...prev];
+        // Limit displayed packets to last 300 for performance (still captures all to DB)
+        const updated = [packet, ...prev];
+        return updated.slice(0, 300);
       });
     });
 
@@ -187,7 +187,9 @@ const EventsLog: FC = () => {
         }
       });
       const data = await response.json();
-      setPackets(data);
+      // Limit displayed results for performance
+      const limitedData = data.slice(0, 500);
+      setPackets(limitedData);
     } catch (error) {
       console.error('Error filtering packets:', error);
     }
@@ -207,7 +209,9 @@ const EventsLog: FC = () => {
         }
       });
       const data = await response.json();
-      setPackets(data);
+      // Limit displayed results for performance
+      const limitedData = data.slice(0, 500);
+      setPackets(limitedData);
     } catch (error) {
       console.error('Error searching packets:', error);
     }
@@ -422,7 +426,9 @@ const EventsLog: FC = () => {
         </div>
         
         <div className="pagination-controls">
-          <div className="records-info">Showing 1-10 of {packets.length}</div>
+          <div className="records-info">
+            Showing {packets.length} most recent packets (all packets are captured to database)
+          </div>
           <div className="pagination-buttons">
             <motion.button
               className="pagination-btn"

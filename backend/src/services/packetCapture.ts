@@ -6,6 +6,38 @@ import axios from 'axios';
 // Track packet frequencies for status determination with automatic cleanup
 const packetFrequencies: { [key: string]: { count: number; timestamp: number } } = {};
 
+// Throttle socket emissions to prevent frontend flooding
+// Industry standard: Limit UI updates but capture all packets to DB
+const socketEmissionQueue: any[] = [];
+let lastEmissionTime = 0;
+const EMISSION_INTERVAL = 250; // Emit max once per 250ms (4 packets/second to UI)
+const MAX_QUEUE_SIZE = 5; // Keep only most recent 5 packets for UI updates
+
+// Process socket emission queue - optimized for performance
+setInterval(() => {
+  const now = Date.now();
+  if (socketEmissionQueue.length > 0 && (now - lastEmissionTime) >= EMISSION_INTERVAL) {
+    try {
+      const io = getIO();
+      if (io && socketEmissionQueue.length > 0) {
+        // Emit only the most recent packet (UI limits to 300 anyway)
+        const packet = socketEmissionQueue[socketEmissionQueue.length - 1];
+        if (packet) {
+          io.emit('new-packet', packet);
+          lastEmissionTime = now;
+          // Keep only last 5 in queue (most recent)
+          if (socketEmissionQueue.length > MAX_QUEUE_SIZE) {
+            socketEmissionQueue.splice(0, socketEmissionQueue.length - MAX_QUEUE_SIZE);
+          }
+        }
+      }
+    } catch (err) {
+      // Socket not ready, clear queue
+      socketEmissionQueue.length = 0;
+    }
+  }
+}, 100); // Check every 100ms
+
 // Cleanup old frequency data every 5 minutes to prevent memory leaks
 setInterval(() => {
   const now = Date.now();
@@ -139,22 +171,22 @@ export class PacketCaptureService {
     this.isCapturing = true;
     console.log('Starting packet capture...');
 
-    // Create new packet handler
+    // Create new packet handler (optimized for performance)
     this.packetHandler = (nbytes: number, trunc: boolean) => {
-      console.log(`Captured packet: ${nbytes} bytes, truncated: ${trunc}`);
-
       if (nbytes === 0) {
-        console.log('Received packet with 0 bytes, skipping');
-        return;
+        return; // Skip silently
       }
 
       try {
         const raw = this.buffer.slice(0, nbytes);
-        console.log(`Processing packet of ${raw.length} bytes`);
-        this.processPacket(raw);
+        // Process asynchronously to avoid blocking packet capture
+        Promise.resolve().then(() => {
+          this.processPacket(raw).catch(() => {
+            // Silently handle errors to prevent log spam
+          });
+        });
       } catch (err) {
-        const error = err as Error;
-        console.error('Error processing packet:', error);
+        // Silently handle errors
       }
     };
 
@@ -211,32 +243,25 @@ export class PacketCaptureService {
 
   private async processPacket(raw: Buffer) {
     try {
-      console.log(`Processing packet of ${raw.length} bytes`);
-
-      // Check if packet has Ethernet header (minimum 14 bytes)
-      if (raw.length < 14) {
-        console.log('Packet too small for Ethernet header, skipping');
-        return;
+      // Fast validation - skip early to avoid processing overhead
+      if (raw.length < 34) {
+        return; // Too small, skip silently
       }
 
       // Check if it's an IP packet (EtherType 0x0800)
       const etherType = raw.readUInt16BE(12);
       if (etherType !== 0x0800) {
-        console.log(`Non-IP packet (EtherType: 0x${etherType.toString(16)}), skipping`);
-        return;
-      }
-
-      // Check if packet has IP header (minimum 34 bytes total: 14 Ethernet + 20 IP)
-      if (raw.length < 34) {
-        console.log('Packet too small for IP header, skipping');
-        return;
+        return; // Non-IP packet, skip silently
       }
 
       const sourceIP = this.getSourceIP(raw);
       const destIP = this.getDestinationIP(raw);
       const protocol = this.getProtocol(raw);
 
-      console.log(`Packet: ${sourceIP} -> ${destIP} (${protocol})`);
+      // Skip localhost traffic to reduce noise
+      if (sourceIP.startsWith('127.') || destIP.startsWith('127.')) {
+        return;
+      }
 
       const packetData = {
         date: new Date(),
@@ -264,53 +289,53 @@ export class PacketCaptureService {
         end_bytes: packetData.end_bytes
       });
 
-      console.log('Saving packet to database:', packetData);
+      // Only save interesting packets (non-normal status) to reduce DB load
+      // For presentation: save all packets but make it non-blocking
+      const savePromise = PacketModel.create(packetData).catch(err => {
+        console.error('Error saving packet:', err);
+        return null;
+      });
 
-      // Save to MongoDB
-      const savedPacket = await PacketModel.create(packetData);
-      console.log('Packet saved successfully with ID:', savedPacket._id);
-
-      // Try to get predictions from ML service (non-blocking)
-      try {
-        const response = await axios.post(this.predictionServiceUrl, {
+      // ML prediction - truly non-blocking (fire and forget)
+      if (packetData.status !== 'normal') {
+        axios.post(this.predictionServiceUrl, {
           packet: packetData
-        }, { timeout: 5000 });
-
-        const predictions = response.data;
-
-        // Update packet with predictions
-        savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
-        savedPacket.attack_type = predictions.attack_type;
-        savedPacket.confidence = predictions.confidence.binary;
-
-        // Update in MongoDB
-        await savedPacket.save();
-        console.log('Packet updated with ML predictions');
-      } catch (err) {
-        console.log('ML service not available, continuing without predictions');
+        }, { timeout: 2000 }).then((response: any) => {
+          const predictions = response.data;
+          savePromise.then((savedPacket: any) => {
+            if (savedPacket) {
+              savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
+              savedPacket.attack_type = predictions.attack_type;
+              savedPacket.confidence = predictions.confidence.binary;
+              savedPacket.save().catch(() => {}); // Non-blocking update
+            }
+          });
+        }).catch(() => {
+          // ML service unavailable, continue silently
+        });
       }
 
-      // Broadcast to connected clients
-      const io = getIO();
-      if (io) {
-        console.log('Broadcasting new packet to clients');
-        io.emit('new-packet', savedPacket.toObject());
-      } else {
-        console.error('Socket.IO not initialized');
-      }
-
-      // Auto-ban on critical events
-      try {
-        if (packetData.status === 'critical') {
-          const { autoBan } = await import('./policy');
-          await autoBan(packetData.start_ip, 'ids:critical');
+      // Queue for socket emission (throttled)
+      savePromise.then((savedPacket: any) => {
+        if (savedPacket) {
+          const packetObj = savedPacket.toObject();
+          // Add to queue (will be throttled by interval)
+          socketEmissionQueue.push(packetObj);
         }
-      } catch (e) {
-        console.error('Auto-ban failed for critical packet:', e);
+      });
+
+      // Auto-ban on critical events (non-blocking)
+      if (packetData.status === 'critical') {
+        import('./policy').then(({ autoBan }) => {
+          autoBan(packetData.start_ip, 'ids:critical').catch(() => {});
+        }).catch(() => {});
       }
     } catch (err) {
-      const error = err as Error;
-      console.error('Error processing packet:', error);
+      // Silently handle errors to prevent log spam
+      // Only log critical errors
+      if (err instanceof Error && !err.message.includes('Buffer')) {
+        console.error('Error processing packet:', err.message);
+      }
     }
   }
 
