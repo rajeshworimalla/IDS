@@ -19,14 +19,23 @@ let bins: Bins = {
 };
 
 async function run(cmd: string, args: string[]) {
-  await execFileAsync(cmd, args);
+  // Backend runs with sudo, so we can run commands directly
+  try {
+    await execFileAsync(cmd, args);
+  } catch (error: any) {
+    console.error(`[FIREWALL] Command failed: ${cmd} ${args.join(' ')}`);
+    console.error(`[FIREWALL] Error:`, error?.message || error);
+    throw error;
+  }
 }
 
 async function tryRun(cmd: string, args: string[]) {
   try {
+    // Backend runs with sudo, so we can run commands directly
     await execFileAsync(cmd, args);
     return true;
-  } catch {
+  } catch (error: any) {
+    // Silently fail for check commands (expected when rule doesn't exist)
     return false;
   }
 }
@@ -163,24 +172,33 @@ export const firewall = {
       return { applied: false, error: 'Invalid IP' };
     }
     try {
+      console.log(`[FIREWALL] Blocking IP: ${ip} (IPv${version})`);
       if (bins.ipset) {
         await this.ensureBaseRules();
         if (version === 4) {
           await ipsetAdd(ip, false, opts?.ttlSeconds);
           await flushConntrack(ip, false);
+          console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v4`);
           return { applied: true, method: 'ipset-v4' };
         } else {
           await ipsetAdd(ip, true, opts?.ttlSeconds);
           await flushConntrack(ip, true);
+          console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v6`);
           return { applied: true, method: 'ipset-v6' };
         }
       }
       // Fallback to raw iptables rules (no per-element TTL available)
+      if (!bins.iptables && !bins.ip6tables) {
+        return { applied: false, error: 'Neither ipset nor iptables available' };
+      }
       await iptablesCheckOrAdd(ip, version === 6);
       await flushConntrack(ip, version === 6);
+      console.log(`[FIREWALL] ✓ Blocked ${ip} via iptables-${version === 6 ? 'v6' : 'v4'}`);
       return { applied: true, method: (version === 6 ? 'iptables-v6' : 'iptables-v4') };
     } catch (e: any) {
-      return { applied: false, error: e?.message || String(e) };
+      const errorMsg = e?.message || String(e);
+      console.error(`[FIREWALL] ✗ Failed to block ${ip}:`, errorMsg);
+      return { applied: false, error: errorMsg };
     }
   },
 
