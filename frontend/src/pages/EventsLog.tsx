@@ -450,15 +450,7 @@ const EventsLog: FC = () => {
               >
                 Start Scanning
               </motion.button>
-            ) : scanningState === 'starting' ? (
-              <motion.button
-                className="pagination-btn primary"
-                disabled
-                style={{ opacity: 0.6 }}
-              >
-                Starting...
-              </motion.button>
-            ) : scanningState === 'scanning' ? (
+            ) : scanningState === 'starting' || scanningState === 'scanning' ? (
               <motion.button
                 className="pagination-btn danger"
                 onClick={handleStopScanning}
