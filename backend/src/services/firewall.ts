@@ -1,8 +1,9 @@
 import { isIP } from 'net';
-import { execFile } from 'child_process';
+import { execFile, exec } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
 
 type Bins = {
   ipset: string | null;
@@ -106,6 +107,19 @@ async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
     args.push('timeout', String(ttlSeconds));
   }
   await run(bins.ipset, args);
+  
+  // Verify the IP was actually added
+  try {
+    const { stdout } = await execAsync(`${bins.ipset} list ${setName}`);
+    if (!stdout.includes(ip)) {
+      throw new Error(`IP ${ip} was not added to ${setName} (verification failed)`);
+    }
+    console.log(`[FIREWALL] Verified ${ip} is in ${setName}`);
+  } catch (verifyError: any) {
+    // If verification fails, the add might have failed
+    console.error(`[FIREWALL] Verification failed for ${ip} in ${setName}:`, verifyError?.message);
+    throw new Error(`Failed to verify IP was added: ${verifyError?.message || verifyError}`);
+  }
 }
 
 async function ipsetDel(ip: string, v6 = false) {
@@ -178,13 +192,37 @@ export const firewall = {
         if (version === 4) {
           await ipsetAdd(ip, false, opts?.ttlSeconds);
           await flushConntrack(ip, false);
-          console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v4`);
-          return { applied: true, method: 'ipset-v4' };
+          
+          // Final verification - check if IP is actually in blocklist
+          try {
+            const { stdout } = await execAsync(`${bins.ipset} list ids_blocklist`);
+            if (stdout.includes(ip)) {
+              console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v4 (verified in blocklist)`);
+              return { applied: true, method: 'ipset-v4' };
+            } else {
+              throw new Error(`IP ${ip} not found in blocklist after add`);
+            }
+          } catch (verifyError: any) {
+            console.error(`[FIREWALL] ✗ Verification failed:`, verifyError?.message);
+            throw verifyError;
+          }
         } else {
           await ipsetAdd(ip, true, opts?.ttlSeconds);
           await flushConntrack(ip, true);
-          console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v6`);
-          return { applied: true, method: 'ipset-v6' };
+          
+          // Final verification
+          try {
+            const { stdout } = await execAsync(`${bins.ipset} list ids6_blocklist`);
+            if (stdout.includes(ip)) {
+              console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v6 (verified in blocklist)`);
+              return { applied: true, method: 'ipset-v6' };
+            } else {
+              throw new Error(`IP ${ip} not found in blocklist after add`);
+            }
+          } catch (verifyError: any) {
+            console.error(`[FIREWALL] ✗ Verification failed:`, verifyError?.message);
+            throw verifyError;
+          }
         }
       }
       // Fallback to raw iptables rules (no per-element TTL available)
