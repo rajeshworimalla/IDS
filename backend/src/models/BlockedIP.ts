@@ -5,6 +5,7 @@ export interface IBlockedIP extends Document {
   ip: string;
   reason?: string;
   blockedAt: Date;
+  method?: string; // Firewall method used: ipset-v4, ipset-v6, iptables-v4, iptables-v6
 }
 
 const BlockedIPSchema = new Schema<IBlockedIP>({
@@ -12,6 +13,7 @@ const BlockedIPSchema = new Schema<IBlockedIP>({
   ip: { type: String, required: true },
   reason: { type: String },
   blockedAt: { type: Date, default: Date.now },
+  method: { type: String }, // Store the firewall method
 });
 
 // Uniqueness per user+ip

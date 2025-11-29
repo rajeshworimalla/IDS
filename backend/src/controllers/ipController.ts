@@ -22,7 +22,7 @@ export const getBlockedIPs = async (req: Request, res: Response) => {
     if (!req.user) return res.status(401).json({ error: 'User not authenticated' });
 
     const items = await BlockedIP.find({ user: req.user._id }).sort({ blockedAt: -1 });
-    const result = items.map(item => ({ ip: item.ip, reason: item.reason, blockedAt: item.blockedAt }));
+    const result = items.map(item => ({ ip: item.ip, reason: item.reason, blockedAt: item.blockedAt, method: item.method }));
 
     // Merge in active temporary bans from Redis (if available)
     try {
@@ -54,13 +54,20 @@ export const blockIP = async (req: Request, res: Response) => {
       const setOnInsert: any = { blockedAt: new Date() };
       const set: any = {};
       if (typeof reason !== 'undefined') set.reason = reason;
+      const result = await firewall.blockIP(ip);
+      const updateData: any = { $setOnInsert: setOnInsert };
+      if (Object.keys(set).length) updateData.$set = set;
+      if ('applied' in result && result.applied && result.method) {
+        if (!updateData.$set) updateData.$set = {};
+        updateData.$set.method = result.method;
+      }
+      
       const doc = await BlockedIP.findOneAndUpdate(
         { user: req.user._id, ip },
-        { $setOnInsert: setOnInsert, ...(Object.keys(set).length ? { $set: set } : {}) },
+        updateData,
         { new: true, upsert: true }
       );
 
-      const result = await firewall.blockIP(ip);
       if ('applied' in result && result.applied) {
         try {
           const { notifyEvent } = await import('../services/aggregator');
@@ -131,12 +138,21 @@ export const blockIP = async (req: Request, res: Response) => {
         const ipVersion = isIP(addr);
         console.log(`[BLOCK] Attempting to block ${addr} (IPv${ipVersion})`);
         
+        const applied = await firewall.blockIP(addr);
+        const updateData: any = {
+          $setOnInsert: { blockedAt: new Date() },
+          $set: { reason: reasonText }
+        };
+        if ((applied as any).applied !== false && (applied as any).method) {
+          updateData.$set.method = (applied as any).method;
+        }
+        
         const doc = await BlockedIP.findOneAndUpdate(
           { user: req.user._id, ip: addr },
-          { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
+          updateData,
           { new: true, upsert: true }
         );
-        const applied = await firewall.blockIP(addr);
+        
         if ((applied as any).applied !== false) {
           successCount++;
           console.log(`[BLOCK] ✓ Successfully blocked ${addr} via ${(applied as any).method}`);
