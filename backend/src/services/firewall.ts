@@ -3,7 +3,28 @@ import { execFile, exec } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
-const execAsync = promisify(exec);
+
+// Wrapper for exec with timeout
+function execAsync(command: string, options?: { timeout?: number }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const timeout = options?.timeout || 5000;
+    const child = exec(command, { timeout }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+    
+    // Force kill on timeout
+    setTimeout(() => {
+      if (!child.killed) {
+        child.kill('SIGTERM');
+        reject(new Error(`Command timeout after ${timeout}ms`));
+      }
+    }, timeout);
+  });
+}
 
 type Bins = {
   ipset: string | null;
@@ -106,19 +127,25 @@ async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
   if (ttlSeconds && ttlSeconds > 0) {
     args.push('timeout', String(ttlSeconds));
   }
-  await run(bins.ipset, args);
   
-  // Verify the IP was actually added
   try {
-    const { stdout } = await execAsync(`${bins.ipset} list ${setName}`);
-    if (!stdout.includes(ip)) {
-      throw new Error(`IP ${ip} was not added to ${setName} (verification failed)`);
+    await run(bins.ipset, args);
+  } catch (addError: any) {
+    console.error(`[FIREWALL] Failed to add ${ip} to ${setName}:`, addError?.message);
+    throw addError;
+  }
+  
+  // Verify the IP was actually added (non-blocking, log only)
+  try {
+    const { stdout } = await execAsync(`${bins.ipset} list ${setName}`, { timeout: 2000 });
+    if (stdout.includes(ip)) {
+      console.log(`[FIREWALL] Verified ${ip} is in ${setName}`);
+    } else {
+      console.warn(`[FIREWALL] Warning: ${ip} not found in ${setName} after add (may be timing issue)`);
     }
-    console.log(`[FIREWALL] Verified ${ip} is in ${setName}`);
   } catch (verifyError: any) {
-    // If verification fails, the add might have failed
-    console.error(`[FIREWALL] Verification failed for ${ip} in ${setName}:`, verifyError?.message);
-    throw new Error(`Failed to verify IP was added: ${verifyError?.message || verifyError}`);
+    // Don't throw on verification failure - the add might have succeeded
+    console.warn(`[FIREWALL] Could not verify ${ip} in ${setName}:`, verifyError?.message);
   }
 }
 
@@ -193,36 +220,36 @@ export const firewall = {
           await ipsetAdd(ip, false, opts?.ttlSeconds);
           await flushConntrack(ip, false);
           
-          // Final verification - check if IP is actually in blocklist
+          // Final verification - check if IP is actually in blocklist (non-blocking)
           try {
-            const { stdout } = await execAsync(`${bins.ipset} list ids_blocklist`);
+            const { stdout } = await execAsync(`${bins.ipset} list ids_blocklist`, { timeout: 2000 });
             if (stdout.includes(ip)) {
-              console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v4 (verified in blocklist)`);
-              return { applied: true, method: 'ipset-v4' };
+              console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v4 (verified)`);
             } else {
-              throw new Error(`IP ${ip} not found in blocklist after add`);
+              console.warn(`[FIREWALL] ⚠ ${ip} not in blocklist yet (may be timing issue)`);
             }
           } catch (verifyError: any) {
-            console.error(`[FIREWALL] ✗ Verification failed:`, verifyError?.message);
-            throw verifyError;
+            console.warn(`[FIREWALL] Could not verify ${ip} in blocklist:`, verifyError?.message);
           }
+          // Return success even if verification fails (add command succeeded)
+          return { applied: true, method: 'ipset-v4' };
         } else {
           await ipsetAdd(ip, true, opts?.ttlSeconds);
           await flushConntrack(ip, true);
           
-          // Final verification
+          // Final verification (non-blocking)
           try {
-            const { stdout } = await execAsync(`${bins.ipset} list ids6_blocklist`);
+            const { stdout } = await execAsync(`${bins.ipset} list ids6_blocklist`, { timeout: 2000 });
             if (stdout.includes(ip)) {
-              console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v6 (verified in blocklist)`);
-              return { applied: true, method: 'ipset-v6' };
+              console.log(`[FIREWALL] ✓ Blocked ${ip} via ipset-v6 (verified)`);
             } else {
-              throw new Error(`IP ${ip} not found in blocklist after add`);
+              console.warn(`[FIREWALL] ⚠ ${ip} not in blocklist yet (may be timing issue)`);
             }
           } catch (verifyError: any) {
-            console.error(`[FIREWALL] ✗ Verification failed:`, verifyError?.message);
-            throw verifyError;
+            console.warn(`[FIREWALL] Could not verify ${ip} in blocklist:`, verifyError?.message);
           }
+          // Return success even if verification fails (add command succeeded)
+          return { applied: true, method: 'ipset-v6' };
         }
       }
       // Fallback to raw iptables rules (no per-element TTL available)

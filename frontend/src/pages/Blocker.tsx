@@ -84,13 +84,24 @@ const Blocker: FC = () => {
     if (!newIP) return;
     try {
       setError(null);
-      await ipBlockService.blockIP(newIP, newReason || undefined);
-      setNewIP('');
-      setNewReason('');
-      await fetchBlocked();
-      setActiveTab('blocked');
+      setLoading(true);
+      const result = await ipBlockService.blockIP(newIP, newReason || undefined);
+      
+      // Check if blocking was actually applied
+      if (result.applied === false) {
+        setError(result.error || 'Failed to apply firewall rules. Check backend logs.');
+      } else {
+        setNewIP('');
+        setNewReason('');
+        await fetchBlocked();
+        setActiveTab('blocked');
+      }
     } catch (e: any) {
-      setError(e?.message || 'Failed to block IP');
+      console.error('Block error:', e);
+      const errorMsg = e?.response?.data?.error || e?.message || 'Network error. Check backend connection.';
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
     }
   };
 

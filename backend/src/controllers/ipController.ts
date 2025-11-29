@@ -164,7 +164,9 @@ export const blockIP = async (req: Request, res: Response) => {
     if (e?.code === 11000) {
       return res.status(200).json({ message: 'Already blocked' });
     }
-    return res.status(500).json({ error: 'Failed to block IP or domain' });
+    const errorMsg = e?.message || String(e) || 'Failed to block IP or domain';
+    console.error('blockIP detailed error:', errorMsg);
+    return res.status(500).json({ error: errorMsg });
   }
 };
 
