@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1400" height="2000" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font-family: Arial, sans-serif; font-size: 24px; font-weight: bold; fill: #1976D2; }
+      .layer-title { font-family: Arial, sans-serif; font-size: 18px; font-weight: bold; fill: #333; }
+      .component { font-family: Arial, sans-serif; font-size: 12px; fill: #000; }
+      .component-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #000; }
+      .label { font-family: Arial, sans-serif; font-size: 10px; fill: #666; }
+      .arrow-label { font-family: Arial, sans-serif; font-size: 11px; fill: #1976D2; font-weight: bold; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333"/>
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="700" y="30" text-anchor="middle" class="title">Firewall with IDS - System Architecture</text>
+  
+  <!-- User Layer -->
+  <rect x="50" y="60" width="1300" height="100" rx="10" fill="#E3F2FD" stroke="#1976D2" stroke-width="2"/>
+  <text x="700" y="85" text-anchor="middle" class="layer-title">User Layer</text>
+  <rect x="200" y="100" width="200" height="50" rx="5" fill="white" stroke="#1976D2" stroke-width="1"/>
+  <text x="300" y="125" text-anchor="middle" class="component-title">Web Browser</text>
+  <text x="300" y="140" text-anchor="middle" class="label">Dashboard Access</text>
+  <rect x="500" y="100" width="200" height="50" rx="5" fill="white" stroke="#1976D2" stroke-width="1"/>
+  <text x="600" y="125" text-anchor="middle" class="component-title">Mobile Device</text>
+  <text x="600" y="140" text-anchor="middle" class="label">(Future)</text>
+  <rect x="800" y="100" width="200" height="50" rx="5" fill="white" stroke="#1976D2" stroke-width="1"/>
+  <text x="900" y="125" text-anchor="middle" class="component-title">Admin Interface</text>
+  <text x="900" y="140" text-anchor="middle" class="label">Security Operations</text>
+  
+  <!-- Arrow User to Frontend -->
+  <path d="M 700 160 L 700 200" stroke="#1976D2" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="720" y="185" class="arrow-label">HTTPS / WebSocket</text>
+  
+  <!-- Frontend Tier -->
+  <rect x="50" y="220" width="1300" height="280" rx="10" fill="#C8E6C9" stroke="#388E3C" stroke-width="2"/>
+  <text x="700" y="250" text-anchor="middle" class="layer-title">Frontend Tier (React 19 + TypeScript + Material-UI)</text>
+  
+  <!-- Frontend Pages -->
+  <rect x="80" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="155" y="295" text-anchor="middle" class="component-title">Dashboard</text>
+  <text x="155" y="315" text-anchor="middle" class="component">• Overview</text>
+  <text x="155" y="330" text-anchor="middle" class="component">• Statistics</text>
+  <text x="155" y="345" text-anchor="middle" class="component">• Alerts</text>
+  <text x="155" y="360" text-anchor="middle" class="component">• Charts</text>
+  
+  <rect x="250" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="325" y="295" text-anchor="middle" class="component-title">Monitoring</text>
+  <text x="325" y="315" text-anchor="middle" class="component">• Real-time</text>
+  <text x="325" y="330" text-anchor="middle" class="component">• Packets</text>
+  <text x="325" y="345" text-anchor="middle" class="component">• Filters</text>
+  <text x="325" y="360" text-anchor="middle" class="component">• WebSocket</text>
+  
+  <rect x="420" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="495" y="295" text-anchor="middle" class="component-title">Activities</text>
+  <text x="495" y="315" text-anchor="middle" class="component">• History</text>
+  <text x="495" y="330" text-anchor="middle" class="component">• Timeline</text>
+  <text x="495" y="345" text-anchor="middle" class="component">• Export</text>
+  <text x="495" y="360" text-anchor="middle" class="component">• Analysis</text>
+  
+  <rect x="590" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="665" y="295" text-anchor="middle" class="component-title">Blocker</text>
+  <text x="665" y="315" text-anchor="middle" class="component">• IP Blocking</text>
+  <text x="665" y="330" text-anchor="middle" class="component">• Domain Block</text>
+  <text x="665" y="345" text-anchor="middle" class="component">• Whitelist</text>
+  <text x="665" y="360" text-anchor="middle" class="component">• Management</text>
+  
+  <rect x="760" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="835" y="295" text-anchor="middle" class="component-title">Settings</text>
+  <text x="835" y="315" text-anchor="middle" class="component">• Policy</text>
+  <text x="835" y="330" text-anchor="middle" class="component">• Thresholds</text>
+  <text x="835" y="345" text-anchor="middle" class="component">• Config</text>
+  
+  <rect x="930" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="1005" y="295" text-anchor="middle" class="component-title">Support</text>
+  <text x="1005" y="315" text-anchor="middle" class="component">• Tickets</text>
+  <text x="1005" y="330" text-anchor="middle" class="component">• Help</text>
+  
+  <rect x="1100" y="270" width="150" height="100" rx="5" fill="white" stroke="#388E3C" stroke-width="1"/>
+  <text x="1175" y="295" text-anchor="middle" class="component-title">Auth</text>
+  <text x="1175" y="315" text-anchor="middle" class="component">• Login</text>
+  <text x="1175" y="330" text-anchor="middle" class="component">• Signup</text>
+  <text x="1175" y="345" text-anchor="middle" class="component">• JWT</text>
+  
+  <!-- Frontend Services -->
+  <rect x="80" y="390" width="300" height="90" rx="5" fill="#E8F5E9" stroke="#388E3C" stroke-width="1"/>
+  <text x="230" y="410" text-anchor="middle" class="component-title">Frontend Services</text>
+  <text x="230" y="430" text-anchor="middle" class="component">• api.ts (REST API Client)</text>
+  <text x="230" y="450" text-anchor="middle" class="component">• auth.ts (JWT Management)</text>
+  <text x="230" y="470" text-anchor="middle" class="component">• Socket.io Client (WebSocket)</text>
+  
+  <!-- Arrow Frontend to Backend -->
+  <path d="M 700 500 L 700 550" stroke="#388E3C" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="720" y="530" class="arrow-label">REST API / WebSocket</text>
+  
+  <!-- Backend Tier -->
+  <rect x="50" y="570" width="1300" height="400" rx="10" fill="#FFF9C4" stroke="#F57F17" stroke-width="2"/>
+  <text x="700" y="600" text-anchor="middle" class="layer-title">Backend Tier (Node.js + TypeScript + Express.js)</text>
+  
+  <!-- Backend Routes -->
+  <rect x="80" y="620" width="280" height="120" rx="5" fill="white" stroke="#F57F17" stroke-width="1"/>
+  <text x="220" y="645" text-anchor="middle" class="component-title">API Routes</text>
+  <text x="220" y="665" text-anchor="middle" class="component">• /api/auth (Login/Signup)</text>
+  <text x="220" y="680" text-anchor="middle" class="component">• /api/packets (Packet Data)</text>
+  <text x="220" y="695" text-anchor="middle" class="component">• /api/ips (IP Management)</text>
+  <text x="220" y="710" text-anchor="middle" class="component">• /api/settings (Config)</text>
+  <text x="220" y="725" text-anchor="middle" class="component">• /api/support (Tickets)</text>
+  <text x="220" y="740" text-anchor="middle" class="component">• /api/events (Attack Events)</text>
+  
+  <!-- Backend Controllers -->
+  <rect x="380" y="620" width="280" height="120" rx="5" fill="white" stroke="#F57F17" stroke-width="1"/>
+  <text x="520" y="645" text-anchor="middle" class="component-title">Controllers</text>
+  <text x="520" y="665" text-anchor="middle" class="component">• authController (JWT Auth)</text>
+  <text x="520" y="680" text-anchor="middle" class="component">• packetController (Packet CRUD)</text>
+  <text x="520" y="695" text-anchor="middle" class="component">• ipController (IP/Domain Block)</text>
+  <text x="520" y="710" text-anchor="middle" class="component">• settingsController (Config)</text>
+  <text x="520" y="725" text-anchor="middle" class="component">• supportController (Tickets)</text>
+  
+  <!-- Backend Services -->
+  <rect x="680" y="620" width="280" height="120" rx="5" fill="white" stroke="#F57F17" stroke-width="1"/>
+  <text x="820" y="645" text-anchor="middle" class="component-title">Core Services</text>
+  <text x="820" y="665" text-anchor="middle" class="component">• packetCapture (libpcap)</text>
+  <text x="820" y="680" text-anchor="middle" class="component">• aggregator (Analysis)</text>
+  <text x="820" y="695" text-anchor="middle" class="component">• firewall (iptables/ipset)</text>
+  <text x="820" y="710" text-anchor="middle" class="component">• blocker (IP/Domain Block)</text>
+  <text x="820" y="725" text-anchor="middle" class="component">• policy (Auto-ban Rules)</text>
+  <text x="820" y="740" text-anchor="middle" class="component">• nginxDeny (Nginx Block)</text>
+  
+  <!-- Backend Middleware & Socket -->
+  <rect x="980" y="620" width="280" height="120" rx="5" fill="white" stroke="#F57F17" stroke-width="1"/>
+  <text x="1120" y="645" text-anchor="middle" class="component-title">Middleware & Socket</text>
+  <text x="1120" y="665" text-anchor="middle" class="component">• auth (JWT Validation)</text>
+  <text x="1120" y="680" text-anchor="middle" class="component">• rateLimit (Redis-based)</text>
+  <text x="1120" y="695" text-anchor="middle" class="component">• Socket.io Server</text>
+  <text x="1120" y="710" text-anchor="middle" class="component">• Real-time Events</text>
+  <text x="1120" y="725" text-anchor="middle" class="component">• WebSocket Auth</text>
+  
+  <!-- Backend Additional Services -->
+  <rect x="80" y="760" width="400" height="90" rx="5" fill="#FFFDE7" stroke="#F57F17" stroke-width="1"/>
+  <text x="280" y="780" text-anchor="middle" class="component-title">Additional Backend Services</text>
+  <text x="280" y="800" text-anchor="middle" class="component">• redis (Caching, Rate Limiting, Temp Bans)</text>
+  <text x="280" y="820" text-anchor="middle" class="component">• Circuit Breaker (Prediction Service Protection)</text>
+  <text x="280" y="840" text-anchor="middle" class="component">• Request Queue (Concurrent Request Management)</text>
+  
+  <!-- Arrow Backend to Prediction -->
+  <path d="M 700 970 L 700 1020" stroke="#F57F17" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="720" y="1000" class="arrow-label">HTTP API (Features)</text>
+  
+  <!-- Prediction Tier -->
+  <rect x="50" y="1040" width="1300" height="300" rx="10" fill="#E1BEE7" stroke="#7B1FA2" stroke-width="2"/>
+  <text x="700" y="1070" text-anchor="middle" class="layer-title">Prediction Tier (Python 3.8+ + Flask + scikit-learn)</text>
+  
+  <!-- Rule-Based Detectors -->
+  <rect x="80" y="1090" width="380" height="230" rx="5" fill="white" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="270" y="1115" text-anchor="middle" class="component-title">Rule-Based Detectors (attack_detectors.py)</text>
+  <rect x="100" y="1130" width="160" height="80" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="180" y="1150" text-anchor="middle" class="component-title">PortScanDetector</text>
+  <text x="180" y="1165" text-anchor="middle" class="component">• 10+ ports/60s</text>
+  <text x="180" y="1180" text-anchor="middle" class="component">• Sequential patterns</text>
+  <text x="180" y="1195" text-anchor="middle" class="component">• Probe attack</text>
+  
+  <rect x="280" y="1130" width="160" height="80" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="360" y="1150" text-anchor="middle" class="component-title">DoSDetector</text>
+  <text x="360" y="1165" text-anchor="middle" class="component">• 100+ packets/sec</text>
+  <text x="360" y="1180" text-anchor="middle" class="component">• SYN flood</text>
+  <text x="360" y="1195" text-anchor="middle" class="component">• UDP flood</text>
+  
+  <rect x="100" y="1230" width="160" height="80" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="180" y="1250" text-anchor="middle" class="component-title">BruteForceDetector</text>
+  <text x="180" y="1265" text-anchor="middle" class="component">• 10+ failures/5min</text>
+  <text x="180" y="1280" text-anchor="middle" class="component">• Login attempts</text>
+  <text x="180" y="1295" text-anchor="middle" class="component">• HTTP/SSH</text>
+  
+  <rect x="280" y="1230" width="160" height="80" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="360" y="1250" text-anchor="middle" class="component-title">R2L/U2R Detectors</text>
+  <text x="360" y="1265" text-anchor="middle" class="component">• Unauthorized access</text>
+  <text x="360" y="1280" text-anchor="middle" class="component">• Privilege escalation</text>
+  <text x="360" y="1295" text-anchor="middle" class="component">• Buffer overflow</text>
+  
+  <!-- ML Models -->
+  <rect x="480" y="1090" width="380" height="230" rx="5" fill="white" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="670" y="1115" text-anchor="middle" class="component-title">Machine Learning Models</text>
+  <rect x="500" y="1130" width="160" height="100" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="580" y="1155" text-anchor="middle" class="component-title">Binary Model</text>
+  <text x="580" y="1175" text-anchor="middle" class="component">• Random Forest</text>
+  <text x="580" y="1190" text-anchor="middle" class="component">• 100% Accuracy</text>
+  <text x="580" y="1205" text-anchor="middle" class="component">• Malicious/Benign</text>
+  <text x="580" y="1220" text-anchor="middle" class="component">• 41 Features</text>
+  
+  <rect x="680" y="1130" width="160" height="100" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="760" y="1155" text-anchor="middle" class="component-title">Multiclass Model</text>
+  <text x="760" y="1175" text-anchor="middle" class="component">• Random Forest</text>
+  <text x="760" y="1190" text-anchor="middle" class="component">• 6 Attack Types</text>
+  <text x="760" y="1205" text-anchor="middle" class="component">• DoS, Probe, R2L</text>
+  <text x="760" y="1220" text-anchor="middle" class="component">• U2R, Brute Force</text>
+  
+  <rect x="500" y="1250" width="340" height="60" rx="3" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="670" y="1275" text-anchor="middle" class="component-title">Attack Classifier</text>
+  <text x="670" y="1295" text-anchor="middle" class="component">Combines Rule-Based + ML Results → Final Attack Type & Confidence</text>
+  
+  <!-- Prediction Service -->
+  <rect x="880" y="1090" width="380" height="230" rx="5" fill="white" stroke="#7B1FA2" stroke-width="1"/>
+  <text x="1070" y="1115" text-anchor="middle" class="component-title">Prediction Service (prediction_service.py)</text>
+  <text x="1070" y="1140" text-anchor="middle" class="component">• Flask REST API</text>
+  <text x="1070" y="1160" text-anchor="middle" class="component">• Feature Extraction</text>
+  <text x="1070" y="1180" text-anchor="middle" class="component">• Model Loading</text>
+  <text x="1070" y="1200" text-anchor="middle" class="component">• Attack Classification</text>
+  <text x="1070" y="1220" text-anchor="middle" class="component">• Confidence Scoring</text>
+  <text x="1070" y="1240" text-anchor="middle" class="component">• Circuit Breaker Support</text>
+  <text x="1070" y="1260" text-anchor="middle" class="component">• Error Handling</text>
+  <text x="1070" y="1280" text-anchor="middle" class="component">• Health Check Endpoint</text>
+  
+  <!-- Arrow Prediction to Firewall -->
+  <path d="M 700 1340 L 700 1390" stroke="#7B1FA2" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="720" y="1370" class="arrow-label">Block Commands</text>
+  
+  <!-- Firewall Layer -->
+  <rect x="50" y="1410" width="1300" height="250" rx="10" fill="#FFCDD2" stroke="#C62828" stroke-width="2"/>
+  <text x="700" y="1440" text-anchor="middle" class="layer-title">Firewall Layer (System Level - Requires Root/Sudo)</text>
+  
+  <rect x="80" y="1460" width="280" height="180" rx="5" fill="white" stroke="#C62828" stroke-width="1"/>
+  <text x="220" y="1485" text-anchor="middle" class="component-title">iptables / ip6tables</text>
+  <text x="220" y="1505" text-anchor="middle" class="component">• INPUT chain (incoming)</text>
+  <text x="220" y="1520" text-anchor="middle" class="component">• OUTPUT chain (outgoing)</text>
+  <text x="220" y="1535" text-anchor="middle" class="component">• FORWARD chain (routed)</text>
+  <text x="220" y="1550" text-anchor="middle" class="component">• Direct IP rules</text>
+  <text x="220" y="1565" text-anchor="middle" class="component">• IPv4 & IPv6 support</text>
+  <text x="220" y="1580" text-anchor="middle" class="component">• Rule persistence</text>
+  <text x="220" y="1595" text-anchor="middle" class="component">• TTL support</text>
+  <text x="220" y="1610" text-anchor="middle" class="component">• Auto-cleanup</text>
+  
+  <rect x="380" y="1460" width="280" height="180" rx="5" fill="white" stroke="#C62828" stroke-width="1"/>
+  <text x="520" y="1485" text-anchor="middle" class="component-title">ipset</text>
+  <text x="520" y="1505" text-anchor="middle" class="component">• ids_blocklist (IPv4)</text>
+  <text x="520" y="1520" text-anchor="middle" class="component">• ids6_blocklist (IPv6)</text>
+  <text x="520" y="1535" text-anchor="middle" class="component">• Hash:IP sets</text>
+  <text x="520" y="1550" text-anchor="middle" class="component">• Timeout support</text>
+  <text x="520" y="1565" text-anchor="middle" class="component">• Efficient bulk blocking</text>
+  <text x="520" y="1580" text-anchor="middle" class="component">• Match set rules</text>
+  <text x="520" y="1595" text-anchor="middle" class="component">• Automatic expiration</text>
+  <text x="520" y="1610" text-anchor="middle" class="component">• Set management</text>
+  
+  <rect x="680" y="1460" width="280" height="180" rx="5" fill="white" stroke="#C62828" stroke-width="1"/>
+  <text x="820" y="1485" text-anchor="middle" class="component-title">/etc/hosts (DNS Blocking)</text>
+  <text x="820" y="1505" text-anchor="middle" class="component">• Domain blocking</text>
+  <text x="820" y="1520" text-anchor="middle" class="component">• 127.0.0.1 entries</text>
+  <text x="820" y="1535" text-anchor="middle" class="component">• 0.0.0.0 entries</text>
+  <text x="820" y="1550" text-anchor="middle" class="component">• Prevents DNS resolution</text>
+  <text x="820" y="1565" text-anchor="middle" class="component">• Works with DNS cache</text>
+  <text x="820" y="1580" text-anchor="middle" class="component">• Sudo script update</text>
+  <text x="820" y="1595" text-anchor="middle" class="component">• IP resolution backup</text>
+  <text x="820" y="1610" text-anchor="middle" class="component">• update-hosts.sh</text>
+  
+  <rect x="980" y="1460" width="280" height="180" rx="5" fill="white" stroke="#C62828" stroke-width="1"/>
+  <text x="1120" y="1485" text-anchor="middle" class="component-title">conntrack</text>
+  <text x="1120" y="1505" text-anchor="middle" class="component">• Connection termination</text>
+  <text x="1120" y="1520" text-anchor="middle" class="component">• Source IP deletion</text>
+  <text x="1120" y="1535" text-anchor="middle" class="component">• Destination IP deletion</text>
+  <text x="1120" y="1550" text-anchor="middle" class="component">• IPv4 & IPv6 support</text>
+  <text x="1120" y="1565" text-anchor="middle" class="component">• Immediate effect</text>
+  <text x="1120" y="1580" text-anchor="middle" class="component">• Existing connections</text>
+  <text x="1120" y="1595" text-anchor="middle" class="component">• Inbound & outbound</text>
+  <text x="1120" y="1610" text-anchor="middle" class="component">• Automatic cleanup</text>
+  
+  <!-- Nginx Integration -->
+  <rect x="80" y="1680" width="1180" height="60" rx="5" fill="#FFEBEE" stroke="#C62828" stroke-width="1"/>
+  <text x="670" y="1705" text-anchor="middle" class="component-title">Nginx Integration (Optional)</text>
+  <text x="670" y="1725" text-anchor="middle" class="component">• nginxDeny service • Deny file management • Automatic Nginx reload • Web server blocking</text>
+  
+  <!-- Arrow Firewall to Network -->
+  <path d="M 700 1740 L 700 1790" stroke="#C62828" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="720" y="1770" class="arrow-label">Network Traffic (Blocked/Allowed)</text>
+  
+  <!-- Network Traffic -->
+  <rect x="500" y="1810" width="400" height="60" rx="10" fill="#BBDEFB" stroke="#1976D2" stroke-width="2"/>
+  <text x="700" y="1840" text-anchor="middle" class="component-title">Network Traffic</text>
+  <text x="700" y="1855" text-anchor="middle" class="component">Blocked / Allowed Based on Firewall Rules</text>
+  
+  <!-- Arrow to Storage -->
+  <path d="M 700 1870 L 700 1920" stroke="#FF9800" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="720" y="1900" class="arrow-label">Store Data</text>
+  
+  <!-- Data Storage Layer -->
+  <rect x="50" y="1940" width="1300" height="200" rx="10" fill="#FFE0B2" stroke="#F57C00" stroke-width="2"/>
+  <text x="700" y="1970" text-anchor="middle" class="layer-title">Data Storage Layer</text>
+  
+  <!-- MongoDB -->
+  <rect x="80" y="1990" width="600" height="130" rx="5" fill="white" stroke="#F57C00" stroke-width="1"/>
+  <text x="380" y="2015" text-anchor="middle" class="component-title">MongoDB (Primary Storage)</text>
+  <rect x="100" y="2030" width="110" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="155" y="2050" text-anchor="middle" class="component-title">Packets</text>
+  <text x="155" y="2065" text-anchor="middle" class="component">• Packet data</text>
+  <text x="155" y="2080" text-anchor="middle" class="component">• Attack types</text>
+  <text x="155" y="2095" text-anchor="middle" class="component">• Timestamps</text>
+  
+  <rect x="230" y="2030" width="110" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="285" y="2050" text-anchor="middle" class="component-title">BlockedIPs</text>
+  <text x="285" y="2065" text-anchor="middle" class="component">• IP addresses</text>
+  <text x="285" y="2080" text-anchor="middle" class="component">• Domains</text>
+  <text x="285" y="2095" text-anchor="middle" class="component">• Block reasons</text>
+  
+  <rect x="360" y="2030" width="110" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="415" y="2050" text-anchor="middle" class="component-title">Users</text>
+  <text x="415" y="2065" text-anchor="middle" class="component">• Auth data</text>
+  <text x="415" y="2080" text-anchor="middle" class="component">• Passwords</text>
+  <text x="415" y="2095" text-anchor="middle" class="component">• Sessions</text>
+  
+  <rect x="490" y="2030" width="110" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="545" y="2050" text-anchor="middle" class="component-title">Settings</text>
+  <text x="545" y="2065" text-anchor="middle" class="component">• Config</text>
+  <text x="545" y="2080" text-anchor="middle" class="component">• Thresholds</text>
+  <text x="545" y="2095" text-anchor="middle" class="component">• Policies</text>
+  
+  <rect x="620" y="2030" width="50" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="645" y="2050" text-anchor="middle" class="component-title">Support</text>
+  <text x="645" y="2065" text-anchor="middle" class="component">Tickets</text>
+  
+  <!-- Redis -->
+  <rect x="700" y="1990" width="600" height="130" rx="5" fill="white" stroke="#F57C00" stroke-width="1"/>
+  <text x="1000" y="2015" text-anchor="middle" class="component-title">Redis (Caching & Real-Time Data)</text>
+  <rect x="720" y="2030" width="120" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="780" y="2050" text-anchor="middle" class="component-title">Rate Limiting</text>
+  <text x="780" y="2065" text-anchor="middle" class="component">• Request counts</text>
+  <text x="780" y="2080" text-anchor="middle" class="component">• Sliding windows</text>
+  <text x="780" y="2095" text-anchor="middle" class="component">• IP buckets</text>
+  
+  <rect x="860" y="2030" width="120" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="920" y="2050" text-anchor="middle" class="component-title">Temp Bans</text>
+  <text x="920" y="2065" text-anchor="middle" class="component">• Active bans</text>
+  <text x="920" y="2080" text-anchor="middle" class="component">• TTL records</text>
+  <text x="920" y="2095" text-anchor="middle" class="component">• Expiration index</text>
+  
+  <rect x="1000" y="2030" width="120" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="1060" y="2050" text-anchor="middle" class="component-title">Sessions</text>
+  <text x="1060" y="2065" text-anchor="middle" class="component">• User sessions</text>
+  <text x="1060" y="2080" text-anchor="middle" class="component">• JWT cache</text>
+  <text x="1060" y="2095" text-anchor="middle" class="component">• Auth data</text>
+  
+  <rect x="1140" y="2030" width="120" height="80" rx="3" fill="#FFF3E0" stroke="#F57C00" stroke-width="1"/>
+  <text x="1200" y="2050" text-anchor="middle" class="component-title">Policy Cache</text>
+  <text x="1200" y="2065" text-anchor="middle" class="component">• Block policies</text>
+  <text x="1200" y="2080" text-anchor="middle" class="component">• Thresholds</text>
+  <text x="1200" y="2095" text-anchor="middle" class="component">• Config cache</text>
+  
+  <!-- Side arrows from Backend to Storage -->
+  <path d="M 220 750 L 155 1990" stroke="#F57F17" stroke-width="2" fill="none" stroke-dasharray="5,5"/>
+  <path d="M 520 750 L 285 1990" stroke="#F57F17" stroke-width="2" fill="none" stroke-dasharray="5,5"/>
+  <path d="M 820 750 L 780 1990" stroke="#F57F17" stroke-width="2" fill="none" stroke-dasharray="5,5"/>
+  <text x="50" y="1370" font-size="10" fill="#666">Store</text>
+  <text x="50" y="1385" font-size="10" fill="#666">Cache</text>
+  
+</svg>
+
+
+
