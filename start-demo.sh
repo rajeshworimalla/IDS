@@ -42,68 +42,96 @@ sudo iptables -C FORWARD -m set --match-set ids_blocklist dst -j DROP >/dev/null
 echo -e "${GREEN}   ✓ Firewall ready${NC}"
 echo ""
 
-# Step 2: Start MongoDB
+# Step 2: Start MongoDB (using Docker)
 echo -e "${YELLOW}[2/8]${NC} Starting MongoDB..."
 
-# Check if MongoDB is already running and accessible
+# Check if Docker MongoDB container is running
 MONGODB_RUNNING=false
-if is_running mongod; then
+if sudo docker ps | grep -q mongodb; then
     # Test if it's actually responding
-    if mongosh mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1 || mongo mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
-        echo -e "${GREEN}   ✓ MongoDB already running and responding${NC}"
+    if timeout 3 nc -zv 127.0.0.1 27017 >/dev/null 2>&1; then
+        echo -e "${GREEN}   ✓ MongoDB container already running${NC}"
         MONGODB_RUNNING=true
     else
-        echo "   ⚠ MongoDB process found but not responding, restarting..."
-        sudo pkill mongod >/dev/null 2>&1
+        echo "   ⚠ MongoDB container found but not responding, restarting..."
+        sudo docker stop mongodb >/dev/null 2>&1
+        sudo docker rm mongodb >/dev/null 2>&1
         sleep 2
     fi
 fi
 
 if [ "$MONGODB_RUNNING" = false ]; then
-    # Ensure directories exist
-    sudo mkdir -p /var/log/mongodb /var/lib/mongodb >/dev/null 2>&1
-    sudo chown -R mongodb:mongodb /var/log/mongodb /var/lib/mongodb >/dev/null 2>&1 || true
+    # Stop system MongoDB if running (it crashes on some systems)
+    sudo systemctl stop mongod >/dev/null 2>&1 || true
+    sudo pkill mongod >/dev/null 2>&1 || true
     
-    # Start MongoDB
-    echo "   Starting MongoDB..."
-    sudo mongod --fork --logpath /var/log/mongodb/mongod.log --dbpath /var/lib/mongodb >/dev/null 2>&1
-    sleep 4
+    # Start MongoDB in Docker (4.4 doesn't require AVX)
+    echo "   Starting MongoDB in Docker..."
+    sudo docker stop mongodb >/dev/null 2>&1
+    sudo docker rm mongodb >/dev/null 2>&1
+    sudo docker run -d -p 127.0.0.1:27017:27017 --name mongodb mongo:4.4 >/dev/null 2>&1
     
-    # Check if MongoDB is actually running and responding
-    if is_running mongod; then
-        # Test connection with retries
-        for i in {1..5}; do
-            sleep 1
-            if mongosh mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1 || mongo mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
-                echo -e "${GREEN}   ✓ MongoDB started and responding${NC}"
-                MONGODB_RUNNING=true
-                break
-            fi
-        done
-        
-        if [ "$MONGODB_RUNNING" = false ]; then
-            echo "   ⚠ MongoDB started but not responding yet (may need more time)"
+    # Wait for MongoDB to start
+    echo "   Waiting for MongoDB to be ready..."
+    sleep 10
+    
+    # Test connection with retries
+    for i in {1..10}; do
+        sleep 2
+        if timeout 3 nc -zv 127.0.0.1 27017 >/dev/null 2>&1; then
+            echo -e "${GREEN}   ✓ MongoDB started and responding${NC}"
+            MONGODB_RUNNING=true
+            break
         fi
-    else
-        echo "   ✗ MongoDB failed to start"
-        echo "   Check logs: sudo tail -20 /var/log/mongodb/mongod.log"
-        exit 1
-    fi
+        if [ $i -eq 10 ]; then
+            echo "   ⚠ MongoDB may still be starting (check: sudo docker logs mongodb)"
+        fi
+    done
 fi
 echo ""
 
 # Step 3: Start Redis
 echo -e "${YELLOW}[3/8]${NC} Starting Redis..."
+
+# Try system Redis first
+REDIS_RUNNING=false
 if is_running redis-server; then
-    echo -e "${GREEN}   ✓ Redis already running${NC}"
-else
-    sudo service redis-server start >/dev/null 2>&1
-    sleep 1
-    if is_running redis-server; then
-        echo -e "${GREEN}   ✓ Redis started${NC}"
+    # Test if it's actually responding
+    if timeout 3 redis-cli ping >/dev/null 2>&1; then
+        echo -e "${GREEN}   ✓ Redis already running and responding${NC}"
+        REDIS_RUNNING=true
     else
-        echo "   ✗ Redis failed to start"
-        exit 1
+        echo "   ⚠ Redis process found but not responding, trying Docker..."
+        sudo systemctl stop redis-server >/dev/null 2>&1
+        sleep 1
+    fi
+fi
+
+if [ "$REDIS_RUNNING" = false ]; then
+    # Try to start system Redis
+    sudo systemctl start redis-server >/dev/null 2>&1
+    sleep 3
+    
+    # Test system Redis
+    if timeout 3 redis-cli ping >/dev/null 2>&1; then
+        echo -e "${GREEN}   ✓ Redis started and responding${NC}"
+        REDIS_RUNNING=true
+    else
+        # Fallback to Docker Redis
+        echo "   Trying Docker Redis..."
+        sudo docker stop redis >/dev/null 2>&1
+        sudo docker rm redis >/dev/null 2>&1
+        sudo docker run -d -p 127.0.0.1:6379:6379 --name redis redis:7 >/dev/null 2>&1 || {
+            echo "   ⚠ Redis may not be fully functional, but continuing..."
+            echo "   App will work with in-memory fallbacks"
+        }
+        sleep 3
+        if timeout 3 sudo docker exec redis redis-cli ping >/dev/null 2>&1; then
+            echo -e "${GREEN}   ✓ Docker Redis started and responding${NC}"
+            REDIS_RUNNING=true
+        else
+            echo "   ⚠ Redis not responding, app will use fallbacks"
+        fi
     fi
 fi
 echo ""
@@ -125,10 +153,10 @@ fi
 
 # Verify MongoDB is accessible before starting backend
 echo "   Verifying MongoDB connection..."
-if mongosh mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1 || mongo mongodb://127.0.0.1:27017 --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
-    echo -e "${GREEN}   ✓ MongoDB is accessible${NC}"
+if timeout 3 nc -zv 127.0.0.1 27017 >/dev/null 2>&1; then
+    echo -e "${GREEN}   ✓ MongoDB port is accessible${NC}"
 else
-    echo "   ⚠ MongoDB may not be fully ready, but continuing..."
+    echo "   ⚠ MongoDB port may not be ready, but continuing..."
 fi
 
 # Kill any existing backend process
@@ -364,6 +392,14 @@ echo "Access from Windows browser:"
 echo "  • Frontend:    http://$WSL_IP:5173"
 echo "  • Backend:     http://$WSL_IP:5001"
 echo "  • Demo Site:   http://$WSL_IP:$DEMO_PORT"
+echo ""
+
+# Try to open browser (if in WSL with Windows integration)
+if command -v cmd.exe >/dev/null 2>&1; then
+    echo "Opening frontend in browser..."
+    cmd.exe /c start http://$WSL_IP:5173 2>/dev/null || true
+fi
+
 echo ""
 echo "To stop everything, press Ctrl+C or run: ./stop-demo.sh"
 echo ""
