@@ -125,9 +125,12 @@ export const blockIP = async (req: Request, res: Response) => {
     let successCount = 0;
     let failCount = 0;
     
-    // Block ALL IPs for the domain
+    // Block ALL IPs for the domain (both IPv4 and IPv6)
     for (const addr of uniq) {
       try {
+        const ipVersion = isIP(addr);
+        console.log(`[BLOCK] Attempting to block ${addr} (IPv${ipVersion})`);
+        
         const doc = await BlockedIP.findOneAndUpdate(
           { user: req.user._id, ip: addr },
           { $setOnInsert: { blockedAt: new Date() }, $set: { reason: reasonText } },
@@ -136,9 +139,11 @@ export const blockIP = async (req: Request, res: Response) => {
         const applied = await firewall.blockIP(addr);
         if ((applied as any).applied !== false) {
           successCount++;
+          console.log(`[BLOCK] ✓ Successfully blocked ${addr} via ${(applied as any).method}`);
           results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: (applied as any).method });
         } else {
           failCount++;
+          console.error(`[BLOCK] ✗ Failed to block ${addr}: ${(applied as any).error}`);
           results.push({ ip: addr, reason: reasonText, applied: false, error: (applied as any).error });
         }
         try {

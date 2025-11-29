@@ -197,8 +197,16 @@ export const firewall = {
     await ensureBins();
     if (bins.ipset) {
       await ensureIpsetSets();
-      if (bins.iptables) await ensureIptablesSetRules(false);
-      if (bins.ip6tables) await ensureIptablesSetRules(true);
+      if (bins.iptables) {
+        await ensureIptablesSetRules(false);
+        console.log('[FIREWALL] IPv4 iptables rules ensured');
+      }
+      if (bins.ip6tables) {
+        await ensureIptablesSetRules(true);
+        console.log('[FIREWALL] IPv6 ip6tables rules ensured');
+      } else {
+        console.warn('[FIREWALL] ip6tables not available - IPv6 blocking may not work');
+      }
     }
   },
 
