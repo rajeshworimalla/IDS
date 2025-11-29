@@ -104,9 +104,16 @@ async function ensureIptablesSetRules(v6 = false) {
   }
   
   // OUTPUT dst in set (blocks outgoing to blocked IPs) - THIS IS KEY FOR DOMAIN BLOCKING
+  // Insert at position 1 to ensure it takes precedence over other rules
   if (!(await tryRun(bin, ['-C', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']))) {
-    await run(bin, ['-I', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
-    console.log(`[FIREWALL] Added OUTPUT rule for ${setName} (this blocks outgoing connections)`);
+    // First, try to remove any existing rule at wrong position
+    await tryRun(bin, ['-D', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
+    // Insert at position 1 (top of chain) to ensure it's checked first
+    await run(bin, ['-I', 'OUTPUT', '1', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
+    console.log(`[FIREWALL] Added OUTPUT rule for ${setName} at position 1 (this blocks outgoing connections)`);
+  } else {
+    // Rule exists, but verify it's at the top
+    console.log(`[FIREWALL] OUTPUT rule for ${setName} already exists`);
   }
   
   // FORWARD src in set
