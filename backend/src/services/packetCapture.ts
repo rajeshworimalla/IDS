@@ -950,6 +950,8 @@ export class PacketCaptureService {
                   } catch (cooldownErr) {
                     // Silently ignore cooldown errors
                   }
+                  // Remove from blocking in progress after cooldown (use global throttle manager)
+                  clearBlockingInProgress(sourceIP);
                 }, 500);
               }
             } catch (emitErr) {
