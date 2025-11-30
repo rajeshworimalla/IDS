@@ -45,8 +45,7 @@ def attack_syn_flood():
     print("\n" + "="*50)
     print("ATTACK: SYN Flood (Should detect 'dos')")
     print("="*50)
-    print(f"Sending SYN packets to {TARGET}:{PORT}...")
-    print("This will create many TCP connections (no root required)")
+    print(f"Sending SYN packets to {TARGET}:{PORT}..."    print("This will create many TCP connections (no root required)")
     print("Press Ctrl+C to stop after 30 seconds")
     
     sockets = []

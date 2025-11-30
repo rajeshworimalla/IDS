@@ -45,13 +45,17 @@ setInterval(() => {
 }, 500); // Check every 500ms (REDUCED frequency for performance)
 
 // Batch DB writes to reduce database load during attacks
-// FIX: More frequent writes to ensure data persistence
+// FIX: More frequent writes to ensure data persistence with crash prevention
 setInterval(() => {
-  const now = Date.now();
-  if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL) {
-    try {
+  try {
+    const now = Date.now();
+    if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL) {
       // Write in smaller batches more frequently
-      const batch = dbWriteQueue.splice(0, MAX_DB_BATCH_SIZE);
+      // REDUCED batch size during high load to prevent crashes
+      const currentQueueSize = dbWriteQueue.length;
+      const batchSize = currentQueueSize > 200 ? 25 : MAX_DB_BATCH_SIZE; // Smaller batches when queue is large
+      const batch = dbWriteQueue.splice(0, batchSize);
+      
       if (batch.length > 0) {
         // Use insertMany for better performance with timeout protection
         PacketModel.insertMany(batch, { ordered: false })
@@ -59,27 +63,40 @@ setInterval(() => {
             // Success - data is persisted
             if (batch.length > 0) {
               // Log occasionally to show progress
-              if (Math.random() < 0.1) { // Log 10% of batches
+              if (Math.random() < 0.05) { // Log 5% of batches (reduced from 10%)
                 console.log(`[PACKET] ✓ Saved ${batch.length} packets to DB (${dbWriteQueue.length} remaining in queue)`);
               }
             }
           })
           .catch(err => {
-            // If batch write fails, try individual writes (non-blocking)
-            console.warn('[PACKET] Batch DB write error, trying individual writes:', (err as Error)?.message);
-            // Try saving all packets individually as fallback
+            // If batch write fails, try saving only critical packets individually (non-blocking)
+            const errorMsg = (err as Error)?.message || String(err);
+            if (!errorMsg.includes('timeout') && !errorMsg.includes('ECONNREFUSED')) {
+              console.warn('[PACKET] Batch DB write error:', errorMsg);
+            }
+            // Only save critical packets individually to prevent overload
             batch.forEach(packet => {
-              PacketModel.create(packet).catch(() => {
-                // Ignore individual failures - already logged batch error
-              });
+              if (packet.status === 'critical') {
+                PacketModel.create(packet).catch(() => {
+                  // Ignore individual failures - already logged batch error
+                });
+              }
             });
+            // Drop non-critical packets if DB is overloaded
+            if (dbWriteQueue.length > 300) {
+              console.warn(`[PACKET] ⚠ DB overloaded, dropping ${batch.length - batch.filter(p => p.status === 'critical').length} non-critical packets`);
+            }
           });
         lastDbWriteTime = now;
       }
-    } catch (err) {
-      console.warn('[PACKET] Error in batch DB write interval:', (err as Error)?.message);
-      // Don't crash - just log and continue
     }
+  } catch (err) {
+    // Prevent interval crashes - log but continue
+    const errorMsg = (err as Error)?.message || String(err);
+    if (!errorMsg.includes('timeout') && !errorMsg.includes('ECONNREFUSED')) {
+      console.warn('[PACKET] Error in batch DB write interval:', errorMsg);
+    }
+    // Don't crash - just log and continue
   }
 }, 500); // Check every 500ms for faster writes
 
@@ -107,6 +124,8 @@ export class PacketCaptureService {
   private mlRateLimiter: Map<string, number> | null = null;
   private localIPs: Set<string> = new Set();
   private firstPacketLogged: boolean = false;
+  private lastPacketTime: number = 0; // Track last packet time for health monitoring
+  private healthCheckInterval: any = null; // NodeJS.Timeout | null
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -286,17 +305,25 @@ export class PacketCaptureService {
         }
         
         // Process asynchronously to avoid blocking packet capture
-        Promise.resolve().then(() => {
-          this.processPacket(raw).catch((err) => {
-            // Log only non-buffer errors to prevent spam
-            if (err instanceof Error && !err.message.includes('Buffer')) {
-              console.warn('[PACKET] Error processing packet:', err.message);
+        // Use setTimeout(0) for better performance and crash prevention
+        setTimeout(() => {
+          try {
+            this.processPacket(raw).catch((err) => {
+              // Log only non-buffer errors to prevent spam
+              if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout')) {
+                // Only log occasionally to prevent log spam during attacks
+                if (Math.random() < 0.01) { // Log 1% of errors
+                  console.warn('[PACKET] Error processing packet:', err.message);
+                }
+              }
+            });
+          } catch (syncErr) {
+            // Prevent synchronous errors from crashing
+            if (syncErr instanceof Error && !syncErr.message.includes('Buffer')) {
+              console.warn('[PACKET] Synchronous error in packet handler:', syncErr.message);
             }
-          });
-        }).catch((err) => {
-          // Prevent promise chain crashes
-          console.warn('[PACKET] Error in promise chain:', err);
-        });
+          }
+        }, 0);
       } catch (err) {
         // Prevent handler crashes - log only critical errors
         if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('slice')) {
@@ -318,6 +345,32 @@ export class PacketCaptureService {
 
     // Generate some test network traffic to verify capture is working
     this.generateTestTraffic();
+    
+    // Start health monitoring to detect if capture stops
+    this.startHealthMonitoring();
+  }
+  
+  private startHealthMonitoring() {
+    // Check every 30 seconds if we're still receiving packets
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+    
+    this.healthCheckInterval = setInterval(() => {
+      try {
+        const now = Date.now();
+        const timeSinceLastPacket = now - this.lastPacketTime;
+        
+        // If we haven't received packets in 2 minutes and capture should be running, log warning
+        if (this.isCapturing && this.lastPacketTime > 0 && timeSinceLastPacket > 120000) {
+          console.warn('[PACKET] ⚠ No packets received in 2 minutes - capture may have stopped');
+          // Don't auto-restart - let user restart manually to avoid loops
+        }
+      } catch (err) {
+        // Don't crash on health check errors
+        console.warn('[PACKET] Health check error:', err);
+      }
+    }, 30000); // Check every 30 seconds
   }
 
   stopCapture() {
@@ -327,6 +380,12 @@ export class PacketCaptureService {
     }
 
     this.isCapturing = false;
+    
+    // Stop health monitoring
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
     console.log('Stopping packet capture...');
 
     try {
@@ -400,6 +459,9 @@ export class PacketCaptureService {
         return;
       }
 
+      // Update last packet time for health monitoring
+      this.lastPacketTime = Date.now();
+      
       // Log first few packets to verify capture is working (debugging)
       if (!this.firstPacketLogged) {
         console.log(`📦 First packet captured! Source: ${sourceIP} → Dest: ${destIP} Protocol: ${protocol}`);
@@ -440,8 +502,9 @@ export class PacketCaptureService {
       if (shouldSaveToDB) {
         dbWriteQueue.push(packetData);
         
-        // Limit queue size to prevent memory issues
-        if (dbWriteQueue.length > 1000) {
+        // Limit queue size to prevent memory issues and crashes during attacks
+        // REDUCED from 1000 to 500 to prevent memory exhaustion
+        if (dbWriteQueue.length > 500) {
           // Remove oldest normal packets first (never remove critical)
           const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
           if (normalIndex !== -1) {
@@ -452,7 +515,11 @@ export class PacketCaptureService {
             if (mediumIndex !== -1) {
               dbWriteQueue.splice(mediumIndex, 1);
             } else {
-              dbWriteQueue.shift(); // Last resort: remove oldest
+              // Last resort: remove oldest (but log if we're dropping critical)
+              const removed = dbWriteQueue.shift();
+              if (removed && removed.status === 'critical') {
+                console.warn('[PACKET] ⚠ Dropped critical packet from queue (queue full)');
+              }
             }
           }
         }
@@ -926,10 +993,34 @@ export class PacketCaptureService {
     const packetSize = packetData.start_bytes || 0;
     const status = packetData.status || 'normal';
     
-    // If status is critical, we know it's an attack - classify it
-    if (status === 'critical') {
-      // High frequency ICMP = Ping flood (ICMP flood attack)
-      if (protocol === 'ICMP') {
+    // PRIORITY 1: Port scan detection (check FIRST before DoS)
+    // Port scans = many small TCP packets (typically < 100 bytes)
+    // This is the most common attack type and should be detected first
+    if (protocol === 'TCP') {
+      // Port scan: moderate-high frequency + small packets
+      if (frequency >= 10 && packetSize < 150) {
+        // Very high frequency small packets = aggressive port scan
+        if (frequency > 50 && packetSize < 100) {
+          return 'port_scan';
+        }
+        // Moderate frequency small packets = stealth port scan
+        if (frequency >= 10 && packetSize < 150) {
+          return 'port_scan';
+        }
+      }
+      // High frequency large packets = DoS/DDoS (not port scan)
+      if (frequency > 50 && packetSize >= 150) {
+        return frequency > 200 ? 'ddos' : 'dos';
+      }
+      // Very high frequency regardless of size = DoS
+      if (frequency > 200) {
+        return 'ddos';
+      }
+    }
+    
+    // PRIORITY 2: ICMP attacks
+    if (protocol === 'ICMP') {
+      if (status === 'critical') {
         if (frequency > 30) {
           return 'ping_flood'; // More specific than ping_sweep
         } else if (frequency > 20) {
@@ -937,55 +1028,31 @@ export class PacketCaptureService {
         }
         return 'icmp_flood'; // Default for critical ICMP
       }
-      
-      // High frequency TCP = DoS/DDoS
-      if (protocol === 'TCP' && frequency > 50) {
-        return frequency > 200 ? 'ddos' : 'dos';
+      // For non-critical
+      if (frequency > 20) {
+        return frequency > 30 ? 'ping_flood' : 'ping_sweep';
       }
-      
-      // High frequency UDP = DoS
-      if (protocol === 'UDP' && frequency > 100) {
+    }
+    
+    // PRIORITY 3: UDP attacks
+    if (protocol === 'UDP') {
+      if (frequency > 100) {
         return 'dos';
       }
-      
-      // Many small packets = Port scan
-      if (frequency > 30 && packetSize < 100) {
+      // UDP port scan (less common but possible)
+      if (frequency > 20 && packetSize < 100) {
         return 'port_scan';
       }
-      
-      // Many packets to multiple ports = Probe
-      if (frequency > 20 && protocol === 'TCP') {
-        return 'probe';
-      }
-      
-      // Default for critical status
-      return 'critical_traffic';
     }
     
-    // For non-critical, use lower thresholds
-    // High frequency TCP = DoS/DDoS
-    if (protocol === 'TCP' && frequency > 50) {
-      return frequency > 200 ? 'ddos' : 'dos';
-    }
-    
-    // High frequency UDP = DoS
-    if (protocol === 'UDP' && frequency > 100) {
-      return 'dos';
-    }
-    
-    // High frequency ICMP = Ping flood/sweep
-    if (protocol === 'ICMP' && frequency > 20) {
-      return frequency > 30 ? 'ping_flood' : 'ping_sweep';
-    }
-    
-    // Many small packets = Port scan
-    if (frequency > 30 && packetSize < 100) {
-      return 'port_scan';
-    }
-    
-    // Many packets to multiple ports = Probe
-    if (frequency > 20 && protocol === 'TCP') {
+    // PRIORITY 4: Generic probe detection (for TCP that didn't match above)
+    if (protocol === 'TCP' && frequency > 20 && status === 'critical') {
       return 'probe';
+    }
+    
+    // Default classifications
+    if (status === 'critical') {
+      return 'critical_traffic';
     }
     
     return 'suspicious_traffic';

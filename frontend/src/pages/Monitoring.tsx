@@ -51,6 +51,8 @@ const Monitoring: FC = () => {
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blockedError, setBlockedError] = useState<string | null>(null);
   const [blockSuccess, setBlockSuccess] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false); // Pause auto-refresh when examining alerts
+  const isPausedRef = useRef(false); // Ref to track pause state for socket callbacks
   const socketRef = useRef<Socket | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isVisibleRef = useRef(true);
@@ -210,13 +212,16 @@ const Monitoring: FC = () => {
         // });
 
         socket.on('intrusion-detected', () => {
-          // Always refresh for intrusions, even if tab is hidden
-          fetchData().catch((err: any) => {
-            console.warn('[Monitoring] Error refreshing on intrusion:', err);
-          });
-          loadBlockedIPs().catch((err: any) => {
-            console.warn('[Monitoring] Error loading blocked IPs on intrusion:', err);
-          });
+          // Only refresh for intrusions if not paused (user examining alerts)
+          // Use ref to get the latest pause state
+          if (isVisibleRef.current && !isPausedRef.current) {
+            fetchData().catch((err: any) => {
+              console.warn('[Monitoring] Error refreshing on intrusion:', err);
+            });
+            loadBlockedIPs().catch((err: any) => {
+              console.warn('[Monitoring] Error loading blocked IPs on intrusion:', err);
+            });
+          }
         });
 
         socketRef.current = socket;
@@ -230,8 +235,8 @@ const Monitoring: FC = () => {
     // Sync with Dashboard polling interval for consistency
     try {
       refreshIntervalRef.current = setInterval(() => {
-        // Only poll when tab is visible
-        if (isVisibleRef.current) {
+        // Only poll when tab is visible AND not paused (user examining alerts)
+        if (isVisibleRef.current && !isPausedRef.current) {
           fetchData().catch((err: any) => {
             console.warn('[Monitoring] Polling refresh error:', err);
           });
@@ -273,7 +278,21 @@ const Monitoring: FC = () => {
   }, [filters.severity, filters.status, filters.dateRange, filters.sourceIP, filters.destinationIP]);
 
   const handleToggleExpand = (id: string) => {
-    setExpandedAlertId(expandedAlertId === id ? null : id);
+    const newExpandedId = expandedAlertId === id ? null : id;
+    setExpandedAlertId(newExpandedId);
+    // Auto-pause when expanding an alert, auto-resume when collapsing
+    const shouldPause = newExpandedId !== null;
+    setIsPaused(shouldPause);
+    isPausedRef.current = shouldPause;
+    // When collapsing (resuming), fetch latest data to catch up on missed alerts
+    if (!shouldPause) {
+      fetchData().catch((err: any) => {
+        console.warn('[Monitoring] Error fetching data on alert collapse:', err);
+      });
+      loadBlockedIPs().catch((err: any) => {
+        console.warn('[Monitoring] Error loading blocked IPs on alert collapse:', err);
+      });
+    }
   };
 
   const handleFilterToggle = (type: 'severity' | 'status', value: string) => {
@@ -357,6 +376,8 @@ const Monitoring: FC = () => {
 
   const handleOpenBlockedIPs = async () => {
     setShowBlockedIPs(true);
+    setIsPaused(true); // Pause auto-refresh when viewing blocked IPs
+    isPausedRef.current = true;
     await loadBlockedIPs();
   };
 
@@ -471,6 +492,26 @@ const Monitoring: FC = () => {
           <div className="header-row">
             <h1>Monitoring & Activities</h1>
             <div className="header-actions">
+              <button
+                className={`pause-button ${isPaused ? 'paused' : ''}`}
+                onClick={() => {
+                  const newPaused = !isPaused;
+                  setIsPaused(newPaused);
+                  isPausedRef.current = newPaused;
+                  // When resuming, immediately fetch latest data to catch up on missed alerts
+                  if (!newPaused) {
+                    fetchData().catch((err: any) => {
+                      console.warn('[Monitoring] Error fetching data on resume:', err);
+                    });
+                    loadBlockedIPs().catch((err: any) => {
+                      console.warn('[Monitoring] Error loading blocked IPs on resume:', err);
+                    });
+                  }
+                }}
+                title={isPaused ? 'Resume auto-refresh and fetch latest data' : 'Pause auto-refresh'}
+              >
+                {isPaused ? '▶️ Resume' : '⏸️ Pause'}
+              </button>
               <button
                 className="view-blocked-button"
                 onClick={handleOpenBlockedIPs}
@@ -776,11 +817,33 @@ const Monitoring: FC = () => {
           </div>
         {/* Blocked IPs Modal */}
         {showBlockedIPs && (
-          <div className="modal-backdrop" onClick={() => setShowBlockedIPs(false)}>
+          <div className="modal-backdrop" onClick={() => {
+            setShowBlockedIPs(false);
+            setIsPaused(false); // Resume auto-refresh when closing modal
+            isPausedRef.current = false;
+            // Fetch latest data when closing modal to catch up on missed alerts
+            fetchData().catch((err: any) => {
+              console.warn('[Monitoring] Error fetching data on modal close:', err);
+            });
+            loadBlockedIPs().catch((err: any) => {
+              console.warn('[Monitoring] Error loading blocked IPs on modal close:', err);
+            });
+          }}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>Blocked IPs</h3>
-                <button className="modal-close" onClick={() => setShowBlockedIPs(false)}>✕</button>
+                <button className="modal-close" onClick={() => {
+                  setShowBlockedIPs(false);
+                  setIsPaused(false); // Resume auto-refresh when closing modal
+                  isPausedRef.current = false;
+                  // Fetch latest data when closing modal to catch up on missed alerts
+                  fetchData().catch((err: any) => {
+                    console.warn('[Monitoring] Error fetching data on modal close:', err);
+                  });
+                  loadBlockedIPs().catch((err: any) => {
+                    console.warn('[Monitoring] Error loading blocked IPs on modal close:', err);
+                  });
+                }}>✕</button>
               </div>
               <div className="modal-body">
                 {blockedLoading && <p>Loading...</p>}

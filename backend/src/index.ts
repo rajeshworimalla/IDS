@@ -16,6 +16,30 @@ import { initializeSocket } from './socket';
 // Load environment variables
 dotenv.config();
 
+// CRITICAL: Global error handlers to prevent crashes during attacks
+process.on('uncaughtException', (error: Error) => {
+  console.error('❌ UNCAUGHT EXCEPTION - Backend will continue running:', error);
+  console.error('Stack:', error.stack);
+  // Don't exit - keep the server running
+});
+
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  console.error('❌ UNHANDLED REJECTION - Backend will continue running:', reason);
+  // Don't exit - keep the server running
+});
+
+// Handle SIGTERM gracefully
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  process.exit(0);
+});
+
+// Handle SIGINT gracefully
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  process.exit(0);
+});
+
 // Set environment variables from config if not already set
 process.env.JWT_SECRET = process.env.JWT_SECRET || config.JWT_SECRET;
 process.env.MONGODB_URI = process.env.MONGODB_URI || config.MONGODB_URI;
