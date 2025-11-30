@@ -92,9 +92,9 @@ const Monitoring: FC = () => {
       
       try {
         const results = await Promise.allSettled([
-          packetService.getAlerts(apiFilters),
-          packetService.getAlertStats(apiFilters)
-        ]);
+        packetService.getAlerts(apiFilters),
+        packetService.getAlertStats(apiFilters)
+      ]);
         
         if (results[0].status === 'fulfilled' && Array.isArray(results[0].value)) {
           alertsData = results[0].value;
@@ -311,7 +311,7 @@ const Monitoring: FC = () => {
       setBlockedError(null);
       const list = await ipBlockService.getBlockedIPs();
       if (Array.isArray(list)) {
-        setBlockedIPs(list);
+      setBlockedIPs(list);
       }
     } catch (e) {
       console.warn('Error fetching blocked IPs:', e);
@@ -440,7 +440,7 @@ const Monitoring: FC = () => {
                 ) : (
                   <span>🔄 Refresh</span>
                 )}
-              </motion.button>
+              </button>
             </div>
           </div>
           <div className="monitoring-stats">
