@@ -11,8 +11,9 @@ const packetFrequencies: { [key: string]: { count: number; timestamp: number } }
 // Industry standard: Limit UI updates but capture all packets to DB
 const socketEmissionQueue: any[] = [];
 let lastEmissionTime = 0;
-const EMISSION_INTERVAL = 2000; // Emit max once per 2000ms (0.5 packets/second to UI) - INCREASED to reduce lag
+const EMISSION_INTERVAL = 10000; // Emit max once per 10 seconds - DISABLED for performance (only intrusions update)
 const MAX_QUEUE_SIZE = 1; // Keep only most recent packet for UI updates - REDUCED for performance
+const DISABLE_NORMAL_PACKET_EMISSIONS = true; // Disable normal packet emissions to reduce lag
 
 // Batch DB writes to reduce database load during attacks
 const dbWriteQueue: any[] = [];

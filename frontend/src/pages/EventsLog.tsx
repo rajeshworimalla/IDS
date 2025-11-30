@@ -74,6 +74,17 @@ const EventsLog: FC = () => {
     };
 
     fetchPackets();
+    
+    // Set up polling to refresh packets every 30 seconds (instead of real-time updates)
+    const pollInterval = setInterval(() => {
+      if (!document.hidden) { // Only poll when tab is visible
+        fetchPackets().catch(() => {});
+      }
+    }, 30000); // 30 seconds
+    
+    return () => {
+      clearInterval(pollInterval);
+    };
   }, []);
 
   // Initialize socket connection and auto-start scanning
@@ -130,50 +141,21 @@ const EventsLog: FC = () => {
       }
     });
 
-    // PERFORMANCE: Throttle packet updates to prevent UI lag during attacks
-    let packetUpdateTimeout: NodeJS.Timeout | null = null;
-    const pendingPackets: any[] = [];
+    // PERFORMANCE: DISABLED real-time packet updates to eliminate lag
+    // UI will fetch data from DB via polling instead (every 30 seconds)
+    // Only intrusion alerts are received in real-time via 'intrusion-detected' event
     
-    socket.on('new-packet', (packet) => {
-      try {
-        if (!packet || typeof packet !== 'object') {
-          console.warn('[EventsLog] Invalid packet data:', packet);
-          return;
-        }
-        
-        // Only queue interesting packets (skip normal during high traffic)
-        if (packet.status !== 'normal' || pendingPackets.length < 10) {
-          pendingPackets.push(packet);
-        }
-        
-        // Debounce updates: only update UI every 5 seconds during high traffic to reduce lag
-        if (packetUpdateTimeout) {
-          clearTimeout(packetUpdateTimeout);
-        }
-        
-        packetUpdateTimeout = setTimeout(() => {
-          if (pendingPackets.length > 0) {
-            setPackets(prev => {
-              try {
-                const updated = [...pendingPackets, ...prev];
-                // Limit displayed packets to last 100 for performance (further reduced to reduce lag)
-                const limited = updated.slice(0, 100);
-                // Clear pending packets
-                pendingPackets.length = 0;
-                return limited;
-              } catch (err) {
-                console.warn('[EventsLog] Error updating packets:', err);
-                return prev; // Return previous state on error
-              }
-            });
-          }
-          packetUpdateTimeout = null;
-        }, 5000); // Update every 5 seconds to reduce lag significantly
-      } catch (err) {
-        console.warn('[EventsLog] Error processing new packet:', err);
-        // Don't crash, just log
+    // Set up polling to fetch packets from DB instead of real-time updates
+    const fetchInterval = setInterval(() => {
+      // Only fetch if tab is visible
+      if (!document.hidden) {
+        fetchPackets().catch(() => {});
       }
-    });
+    }, 30000); // Fetch every 30 seconds
+    
+    return () => {
+      clearInterval(fetchInterval);
+    };
 
     socket.on('error', (error) => {
       console.warn('[EventsLog] Socket error:', error);
