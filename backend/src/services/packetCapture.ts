@@ -305,22 +305,34 @@ export class PacketCaptureService {
         }
         
         // Process asynchronously to avoid blocking packet capture
-        // Use setTimeout(0) for better performance and crash prevention
+        // CRITICAL: Use setTimeout(0) and wrap in Promise.resolve to ensure errors don't stop capture
         setTimeout(() => {
-          try {
-            this.processPacket(raw).catch((err) => {
+          // Use Promise.resolve to ensure errors are caught
+          Promise.resolve().then(() => {
+            return this.processPacket(raw);
+          }).catch((err) => {
+            // CRITICAL: This catch must NEVER throw
+            try {
               // Log only non-buffer errors to prevent spam
-              if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout')) {
+              if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout') && !err.message.includes('aborted')) {
                 // Only log occasionally to prevent log spam during attacks
                 if (Math.random() < 0.01) { // Log 1% of errors
-                  console.warn('[PACKET] Error processing packet:', err.message);
+                  console.warn('[PACKET] Error processing packet (non-fatal):', err.message);
                 }
               }
-            });
+            } catch (logErr) {
+              // Even error logging must not crash - silently ignore
+            }
+          });
+          
+          // Also catch synchronous errors
+          try {
+            // processPacket is async, but we catch above
           } catch (syncErr) {
             // Prevent synchronous errors from crashing
-            if (syncErr instanceof Error && !syncErr.message.includes('Buffer')) {
-              console.warn('[PACKET] Synchronous error in packet handler:', syncErr.message);
+            // Silently ignore - packet capture must continue
+            if (syncErr instanceof Error && !syncErr.message.includes('Buffer') && Math.random() < 0.01) {
+              console.warn('[PACKET] Synchronous error in packet handler (non-fatal):', syncErr.message);
             }
           }
         }, 0);
@@ -589,14 +601,16 @@ export class PacketCaptureService {
         
         // Run ML prediction on ALL packets for better attack detection
         // Wrap in try-catch to prevent crashes on HTTP flood or other attacks
-        try {
-          axios.post(this.predictionServiceUrl, {
+        // CRITICAL: Use Promise.resolve().then() to ensure errors don't stop packet processing
+        Promise.resolve().then(() => {
+          return axios.post(this.predictionServiceUrl, {
             packet: packetData
           }, { 
-            timeout: 2000, // Reduced timeout to prevent hanging
+            timeout: 1500, // Further reduced timeout to prevent hanging
             maxRedirects: 0,
-            validateStatus: () => true // Accept any status to prevent throwing
-          }).then((response: any) => {
+            validateStatus: () => true, // Accept any status to prevent throwing
+            signal: AbortSignal.timeout(1500) // Abort after 1.5s
+          } as any).then((response: any) => {
           try {
             if (!response || !response.data) {
               console.warn('[PACKET] Invalid ML response');
