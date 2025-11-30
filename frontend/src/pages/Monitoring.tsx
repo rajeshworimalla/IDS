@@ -1,5 +1,4 @@
-import { FC, useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { FC, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import Navbar from '../components/Navbar';
 import DateRangePicker from '../components/DateRangePicker';
@@ -21,13 +20,12 @@ interface FilterState {
 
 const Monitoring: FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<ThreatAlert[]>([]);
   const [alertStats, setAlertStats] = useState({
     critical: 0,
-    high: 0,
-    medium: 0,
-    low: 0
+    medium: 0
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,9 +60,7 @@ const Monitoring: FC = () => {
   const filterOptions = {
     severity: [
       { value: 'critical', label: 'Critical', color: '#ff4d4f' },
-      { value: 'high', label: 'High', color: '#fa8c16' },
-      { value: 'medium', label: 'Medium', color: '#faad14' },
-      { value: 'low', label: 'Low', color: '#52c41a' }
+      { value: 'medium', label: 'Medium', color: '#faad14' }
     ],
     status: [
       { value: 'active', label: 'Active' },
@@ -83,11 +79,10 @@ const Monitoring: FC = () => {
       
       // Prepare filter parameters for API
       const apiFilters: any = {
-        // Backend defaults to only critical+medium when severity is omitted.
-        // To show results by default, include all severities when none are selected.
+        // Only fetch critical and medium alerts by default
         severity: (currentFilters.severity && currentFilters.severity.length > 0)
           ? currentFilters.severity
-          : ['critical', 'medium', 'low'],
+          : ['critical', 'medium'],
         status: currentFilters.status
       };
       
@@ -109,7 +104,7 @@ const Monitoring: FC = () => {
       
       // Get alerts, stats, and packet stats with filters (with individual error handling)
       let alertsData: ThreatAlert[] = [];
-      let statsData = { critical: 0, high: 0, medium: 0, low: 0 };
+      let statsData = { critical: 0, medium: 0 };
       let packetStatsData = { totalPackets: 0, criticalCount: 0, mediumCount: 0, normalCount: 0 };
       
       try {
@@ -231,7 +226,7 @@ const Monitoring: FC = () => {
       // Continue without socket - polling will still work
     }
 
-    // Set up polling interval to refresh every 120 seconds (minimal updates)
+    // Set up polling interval to refresh every 180 seconds (3 minutes) - REDUCED frequency for performance
     // Sync with Dashboard polling interval for consistency
     try {
       refreshIntervalRef.current = setInterval(() => {
@@ -241,7 +236,7 @@ const Monitoring: FC = () => {
             console.warn('[Monitoring] Polling refresh error:', err);
           });
         }
-      }, 120000); // Increased to 120 seconds (2 minutes) for minimal background updates
+      }, 180000); // Increased to 180 seconds (3 minutes) to reduce load
     } catch (err) {
       console.warn('[Monitoring] Error setting up polling:', err);
     }
@@ -268,10 +263,14 @@ const Monitoring: FC = () => {
     };
   }, []);
   
-  // Re-fetch data when filters change
+  // Re-fetch data when filters change (debounced)
   useEffect(() => {
-    fetchData();
-  }, [filters]);
+    const timeoutId = setTimeout(() => {
+      fetchData();
+    }, 300); // Debounce filter changes
+    
+    return () => clearTimeout(timeoutId);
+  }, [filters.severity, filters.status, filters.dateRange, filters.sourceIP, filters.destinationIP]);
 
   const handleToggleExpand = (id: string) => {
     setExpandedAlertId(expandedAlertId === id ? null : id);
@@ -378,18 +377,34 @@ const Monitoring: FC = () => {
     }
   };
 
-  // Apply client-side search filtering (since search is not handled by API yet)
-  const filteredAlerts = alerts.filter(alert => {
-    const matchesSearch = 
-      searchTerm === '' || 
-      Object.values(alert).some(
-        value => typeof value === 'string' && value.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+  // PERFORMANCE: Memoize filtered alerts to prevent re-computation on every render
+  // Also limit to top 200 alerts to prevent rendering too many items
+  const filteredAlerts = useMemo(() => {
+    if (!alerts || alerts.length === 0) return [];
     
-    return matchesSearch;
-  });
+    let filtered = alerts;
+    
+    // Apply search filter (optimized - only check string fields)
+    if (searchTerm && searchTerm.trim()) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(alert => {
+        // Only check relevant string fields instead of all values
+        return (
+          (alert.source && alert.source.toLowerCase().includes(searchLower)) ||
+          (alert.destination && alert.destination.toLowerCase().includes(searchLower)) ||
+          (alert.type && alert.type.toLowerCase().includes(searchLower)) ||
+          (alert.description && alert.description.toLowerCase().includes(searchLower)) ||
+          (alert.attack_type && alert.attack_type.toLowerCase().includes(searchLower))
+        );
+      });
+    }
+    
+    // Limit to top 200 most recent alerts to prevent rendering lag
+    return filtered.slice(0, 200);
+  }, [alerts, searchTerm]);
 
-  const getAttackTypeLabel = (type: string) => {
+  // PERFORMANCE: Memoize helper functions to prevent recreation on every render
+  const getAttackTypeLabel = useCallback((type: string) => {
     const labels: { [key: string]: string } = {
       'dos': '🚨 Denial of Service',
       'ddos': '🚨 Distributed DoS',
@@ -405,19 +420,17 @@ const Monitoring: FC = () => {
       'unknown': '❓ Unknown Attack'
     };
     return labels[type?.toLowerCase()] || type || 'Unknown Attack';
-  };
+  }, []);
 
-  const getSeverityIcon = (severity: string) => {
+  const getSeverityIcon = useCallback((severity: string) => {
     switch (severity) {
       case 'critical': return '🔴';
-      case 'high': return '🟠';
       case 'medium': return '🟡';
-      case 'low': return '🟢';
       default: return '⚪';
     }
-  };
+  }, []);
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = useCallback((status: string) => {
     switch (status) {
       case 'active': return <span className="status-badge active">Active</span>;
       case 'investigating': return <span className="status-badge investigating">Investigating</span>;
@@ -425,7 +438,7 @@ const Monitoring: FC = () => {
       case 'resolved': return <span className="status-badge resolved">Resolved</span>;
       default: return null;
     }
-  };
+  }, []);
 
   if (isLoading) {
     return (
@@ -486,17 +499,9 @@ const Monitoring: FC = () => {
               <h3>Critical</h3>
               <span className="stat-value">{alertStats.critical}</span>
             </div>
-            <div className="stat-card high">
-              <h3>High</h3>
-              <span className="stat-value">{alertStats.high}</span>
-            </div>
             <div className="stat-card medium">
               <h3>Medium</h3>
               <span className="stat-value">{alertStats.medium}</span>
-            </div>
-            <div className="stat-card low">
-              <h3>Low</h3>
-              <span className="stat-value">{alertStats.low}</span>
             </div>
             <div className="stat-card health">
               <h3>System Health</h3>
@@ -511,9 +516,18 @@ const Monitoring: FC = () => {
               type="text"
               placeholder="Search alerts..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                // Debounce search - no need to fetch, just filter client-side
+                // Filtering is already memoized, so this is instant
+              }}
               className="search-input"
             />
+            {filteredAlerts.length > 0 && (
+              <span className="results-count" style={{ marginLeft: '10px', color: '#888', fontSize: '14px' }}>
+                Showing {filteredAlerts.length} of {alerts.length} alerts
+              </span>
+            )}
           </div>
           
           <div className="filters-container">
@@ -569,10 +583,19 @@ const Monitoring: FC = () => {
                   type="text"
                   placeholder="Filter by source IP..."
                   value={filters.sourceIP}
-                  onChange={(e) => setFilters(prev => ({ ...prev, sourceIP: e.target.value }))}
-                  onBlur={() => fetchData()}
+                  onChange={(e) => {
+                    setFilters(prev => ({ ...prev, sourceIP: e.target.value }));
+                    // Debounce filter changes
+                    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+                    searchTimeoutRef.current = setTimeout(() => {
+                      fetchData();
+                    }, 500);
+                  }}
                   onKeyPress={(e) => {
-                    if (e.key === 'Enter') fetchData();
+                    if (e.key === 'Enter') {
+                      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+                      fetchData();
+                    }
                   }}
                   style={{
                     padding: '8px 12px',
@@ -592,10 +615,19 @@ const Monitoring: FC = () => {
                   type="text"
                   placeholder="Filter by destination IP..."
                   value={filters.destinationIP}
-                  onChange={(e) => setFilters(prev => ({ ...prev, destinationIP: e.target.value }))}
-                  onBlur={() => fetchData()}
+                  onChange={(e) => {
+                    setFilters(prev => ({ ...prev, destinationIP: e.target.value }));
+                    // Debounce filter changes
+                    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+                    searchTimeoutRef.current = setTimeout(() => {
+                      fetchData();
+                    }, 500);
+                  }}
                   onKeyPress={(e) => {
-                    if (e.key === 'Enter') fetchData();
+                    if (e.key === 'Enter') {
+                      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+                      fetchData();
+                    }
                   }}
                   style={{
                     padding: '8px 12px',
@@ -610,18 +642,13 @@ const Monitoring: FC = () => {
           </div>
         </div>
 
-        <AnimatePresence>
-          <div className="alerts-list">
-            {filteredAlerts.length > 0 ? (
-              filteredAlerts.map((alert) => (
-                <motion.div
-                  key={alert._id}
-                  className={`alert-card ${alert.severity} ${expandedAlertId === alert._id ? 'expanded' : ''}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  layout
-                >
+        <div className="alerts-list">
+          {filteredAlerts.length > 0 ? (
+            filteredAlerts.map((alert) => (
+              <div
+                key={alert._id}
+                className={`alert-card ${alert.severity} ${expandedAlertId === alert._id ? 'expanded' : ''}`}
+              >
                   <div className="alert-header" onClick={() => handleToggleExpand(alert._id)}>
                     <div className="alert-icon-container">
                       <span className="alert-icon">{getSeverityIcon(alert.severity)}</span>
@@ -636,24 +663,17 @@ const Monitoring: FC = () => {
                       </div>
                     </div>
                     <div className="alert-actions">
-                      <motion.button
+                      <button
                         className="expand-btn"
-                        animate={{ rotate: expandedAlertId === alert._id ? 180 : 0 }}
+                        style={{ transform: expandedAlertId === alert._id ? 'rotate(180deg)' : 'rotate(0deg)' }}
                       >
                         ▼
-                      </motion.button>
+                      </button>
                     </div>
                   </div>
                   
-                  <AnimatePresence>
-                    {expandedAlertId === alert._id && (
-                      <motion.div 
-                        className="alert-details"
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.15 }}
-                      >
+                  {expandedAlertId === alert._id && (
+                    <div className="alert-details">
                         <div className="detail-group">
                           <div className="detail-item">
                             <span className="detail-label">Source</span>
@@ -688,34 +708,28 @@ const Monitoring: FC = () => {
                         </div>
                         <div className="detail-actions">
                           {alert.status !== 'investigating' && (
-                            <motion.button 
+                            <button 
                               className="action-btn investigate"
                               onClick={() => handleUpdateStatus(alert._id, 'investigating')}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Investigate
-                            </motion.button>
+                            </button>
                           )}
                           {alert.status !== 'mitigated' && (
-                            <motion.button 
+                            <button 
                               className="action-btn mitigate"
                               onClick={() => handleUpdateStatus(alert._id, 'mitigated')}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Mitigate
-                            </motion.button>
+                            </button>
                           )}
                           {alert.status !== 'resolved' && (
-                            <motion.button 
+                            <button 
                               className="action-btn resolve"
                               onClick={() => handleUpdateStatus(alert._id, 'resolved')}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Resolve
-                            </motion.button>
+                            </button>
                           )}
                           {isBlocked(alert.source) ? (
                             <div className="blocked-indicator">
@@ -723,52 +737,43 @@ const Monitoring: FC = () => {
                               <button className="inline-unblock" onClick={(e) => { e.stopPropagation(); handleUnblockIP(alert.source); }}>Unblock</button>
                             </div>
                           ) : (
-                            <motion.button 
+                            <button 
                               className="action-btn block"
                               onClick={(e) => { e.stopPropagation(); handleBlockIP(alert.source); }}
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
                             >
                               Block IP
-                            </motion.button>
+                            </button>
                           )}
                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
+                    </div>
+                  )}
+                </div>
               ))
             ) : (
-              <motion.div 
-                className="no-results"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-              >
+              <div className="no-results">
                 <p>No alerts match your current filters</p>
-                <motion.button 
+                <button 
                   className="reset-btn"
                   onClick={() => {
-                  setFilters({ 
-                    severity: [],
-                    status: [],
-                    dateRange: {
-                      from: new Date(Date.now() - 24 * 60 * 60 * 1000),
-                      to: new Date()
-                    },
-                    sourceIP: '',
-                    destinationIP: ''
-                  });
-                  setSearchTerm('');
+                    setFilters({ 
+                      severity: [],
+                      status: [],
+                      dateRange: {
+                        from: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                        to: new Date()
+                      },
+                      sourceIP: '',
+                      destinationIP: ''
+                    });
+                    setSearchTerm('');
+                    fetchData();
                   }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
                 >
                   Reset Filters
-                </motion.button>
-              </motion.div>
+                </button>
+              </div>
             )}
           </div>
-        </AnimatePresence>
         {/* Blocked IPs Modal */}
         {showBlockedIPs && (
           <div className="modal-backdrop" onClick={() => setShowBlockedIPs(false)}>
