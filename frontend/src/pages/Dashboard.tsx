@@ -233,6 +233,11 @@ const Dashboard: FC = () => {
     };
   }, []);
 
+  // Memoize chart data to prevent unnecessary re-renders
+  const memoizedPieData = useMemo(() => pieData, [pieData]);
+  const memoizedLineData = useMemo(() => lineData, [lineData]);
+  const memoizedBarData = useMemo(() => barData, [barData]);
+
   return (
     <div className="dashboard-page">
       <Navbar />
