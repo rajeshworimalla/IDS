@@ -89,5 +89,6 @@ export async function listActiveTempBans(): Promise<TempBanRecord[]> {
 }
 
 export async function autoBan(ip: string, reason: string): Promise<TempBanRecord> {
+  // This now uses the job queue internally (non-blocking)
   return enforceTempBan(ip, reason);
 }

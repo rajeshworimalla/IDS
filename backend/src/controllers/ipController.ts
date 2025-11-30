@@ -338,16 +338,6 @@ export const unblockIP = async (req: Request, res: Response) => {
       await BlockedIP.deleteOne({ ip }).catch(() => {});
     }
 
-    // Remove from Redis temp bans (for auto-blocked IPs)
-    try {
-      const { removeTempBan } = await import('../services/blocker');
-      await removeTempBan(ip);
-      console.log(`[UNBLOCK] Removed ${ip} from Redis temp bans`);
-    } catch (redisErr) {
-      console.warn(`[UNBLOCK] Could not remove from Redis (may not be temp banned):`, redisErr);
-      // Continue - not all IPs are in Redis
-    }
-
     // Clear throttle entries for this IP (global throttle manager - works even if capture isn't active)
     // This allows new alerts to be emitted if the IP attacks again
     try {
@@ -359,21 +349,20 @@ export const unblockIP = async (req: Request, res: Response) => {
       // Continue - not critical, but log the error
     }
 
-    // Remove from firewall
-    const result = await firewall.unblockIP(ip);
-    
-    if ((result as any).removed !== false) {
-      console.log(`[UNBLOCK] Successfully unblocked ${ip}`);
-      return res.json({ message: 'Unblocked successfully', removed: true });
-    } else {
-      console.warn(`[UNBLOCK] Firewall unblock may have failed:`, (result as any).error);
-      // Still return success if DB/Redis cleanup worked
-      return res.json({ 
-        message: 'Unblocked from database and Redis', 
-        removed: true,
-        warning: (result as any).error ? `Firewall removal: ${(result as any).error}` : undefined
-      });
+    // PERFORMANCE: Queue unblocking operation (non-blocking, returns immediately)
+    // Remove from Redis temp bans and firewall in background
+    try {
+      const { removeTempBan } = await import('../services/blocker');
+      await removeTempBan(ip); // This now uses job queue internally
+      console.log(`[UNBLOCK] Queued unblock operation for ${ip}`);
+    } catch (redisErr) {
+      console.warn(`[UNBLOCK] Could not queue unblock (may not be temp banned):`, redisErr);
+      // Continue - not all IPs are in Redis
     }
+
+    // Return success immediately (actual unblocking happens in background)
+    console.log(`[UNBLOCK] Successfully queued unblock for ${ip}`);
+    return res.json({ message: 'Unblock operation queued successfully', removed: true });
   } catch (e) {
     console.error('unblockIP error:', e);
     return res.status(500).json({ error: `Failed to unblock IP: ${(e as any)?.message || String(e)}` });

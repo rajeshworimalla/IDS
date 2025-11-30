@@ -650,170 +650,121 @@ export class PacketCaptureService {
           }
         }
         
-        // Run ML prediction on ALL packets for better attack detection
-        // Wrap in try-catch to prevent crashes on HTTP flood or other attacks
-        // CRITICAL: Use Promise.resolve().then() to ensure errors don't stop packet processing
-        Promise.resolve().then(() => {
-          return axios.post(this.predictionServiceUrl, {
-            packet: packetData
+        // PERFORMANCE: Queue ML prediction to background worker (non-blocking)
+        // This prevents ML service calls from blocking packet capture
+        const { queueMLPrediction } = await import('./jobQueue');
+        // Capture context needed for ML processing
+        const userId = this.userId;
+        const predictionUrl = this.predictionServiceUrl;
+        const isLocalIPFn = (ip: string) => this.isLocalIP(ip);
+        const detectAttackTypeFn = (data: any) => this.detectAttackTypeFromPattern(data);
+        
+        queueMLPrediction(packetData, async (data: any) => {
+          const response = await axios.post(predictionUrl, {
+            packet: data
           }, { 
-            timeout: 1500, // Further reduced timeout to prevent hanging
+            timeout: 1500,
             maxRedirects: 0,
-            validateStatus: () => true // Accept any status to prevent throwing
-          } as any).then((response: any) => {
-          try {
-            if (!response || !response.data) {
-              console.warn('[PACKET] Invalid ML response');
-              return;
-            }
-            
-            const predictions = response.data;
-            console.log(`[PACKET] ML prediction for ${packetData.start_ip}:`, {
-              binary: predictions?.binary_prediction,
-              attack_type: predictions?.attack_type,
-              confidence: predictions?.confidence?.binary || predictions?.confidence
-            });
-            savePromise.then(async (savedPacket: any) => {
-              try {
-                if (!savedPacket) return;
-                
-                const isMalicious = predictions?.binary_prediction === 'malicious';
-                let attackType = predictions?.attack_type || 'unknown';
-                const confidence = predictions?.confidence?.binary || predictions?.confidence || 0;
-                
-                // If status is critical, it's definitely an attack - use pattern detection
-                // Enhanced attack type detection based on packet patterns (fallback if ML doesn't classify)
-                if (packetData.status === 'critical' || attackType === 'unknown' || attackType === 'normal') {
-                  const patternType = this.detectAttackTypeFromPattern(packetData);
-                  // Override with pattern detection if ML didn't classify or status is critical
-                  if (packetData.status === 'critical' || attackType === 'normal' || attackType === 'unknown') {
-                    attackType = patternType;
-                    // If pattern detection found an attack, mark as malicious
-                    if (patternType !== 'suspicious_traffic' && !isMalicious) {
-                      // Update isMalicious based on pattern detection for critical packets
-                      // We'll use a lower confidence for pattern-detected attacks
-                    }
-                  }
-                }
-                
-                // If status is critical or pattern detection found an attack, mark as malicious
-                const shouldBeMalicious = isMalicious || 
-                  (packetData.status === 'critical' && attackType !== 'suspicious_traffic' && attackType !== 'normal');
-                
-                savedPacket.is_malicious = shouldBeMalicious;
-                savedPacket.attack_type = attackType;
-                // Use higher confidence for critical packets detected by pattern
-                const finalConfidence = (packetData.status === 'critical' && !isMalicious) 
-                  ? Math.max(confidence, 0.7) // Minimum 70% for critical pattern-detected attacks
-                  : confidence;
-                savedPacket.confidence = finalConfidence;
-                await savedPacket.save().catch(() => {}); // Non-blocking update
-                
-                // Auto-block malicious IPs with high confidence (lowered threshold for faster response)
-                // BUT NEVER block local IP addresses
-                if (isMalicious && confidence > 0.6 && !this.isLocalIP(packetData.start_ip)) {
-                  try {
-                    const { autoBan } = await import('./policy');
-                    const banResult = await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch((err) => {
-                      console.warn('[PACKET] Auto-ban failed:', err);
-                      return null;
-                    });
-                    
-                    // Only emit if blocking actually succeeded
-                    if (banResult) {
-                      console.log(`[PACKET] ✓ Successfully auto-blocked IP: ${packetData.start_ip}`);
-                      
-                      // Emit intrusion alert notification with autoBlocked flag
-                      try {
-                        const io = getIO();
-                        if (io) {
-                          io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                            type: 'intrusion',
-                            severity: 'critical',
-                            ip: packetData.start_ip,
-                            attackType: attackType,
-                            confidence: confidence,
-                            protocol: packetData.protocol,
-                            description: `Intrusion detected: ${attackType} from ${packetData.start_ip}`,
-                            timestamp: new Date().toISOString(),
-                            autoBlocked: true
-                          });
-                          
-                          // Also emit explicit ip-blocked event for Blocker page
-                          io.to(`user_${this.userId}`).emit('ip-blocked', {
-                            ip: packetData.start_ip,
-                            reason: `ML:${attackType} (${Math.round(confidence * 100)}%)`,
-                            method: banResult.methods?.join(', ') || 'firewall',
-                            timestamp: new Date().toISOString()
-                          });
-                        }
-                      } catch (emitErr) {
-                        console.warn('[PACKET] Error emitting intrusion alert:', emitErr);
-                      }
-                    } else {
-                      console.warn(`[PACKET] ⚠ Auto-block failed for IP: ${packetData.start_ip}`);
-                    }
-                  } catch (err) {
-                    console.warn('[PACKET] Error auto-blocking malicious IP:', err);
-                  }
-                }
-                
-              // Emit alert for ANY malicious detection (lowered threshold to catch all attacks)
-              if (isMalicious && confidence > 0.3) {
-                  try {
-                    const io = getIO();
-                    if (io) {
-                      io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                        type: 'intrusion',
-                        severity: packetData.status === 'critical' ? 'critical' : (finalConfidence > 0.8 ? 'critical' : 'high'),
-                        ip: packetData.start_ip,
-                        attackType: attackType,
-                        confidence: finalConfidence,
-                        protocol: packetData.protocol,
-                        description: `Suspicious activity detected: ${attackType} from ${packetData.start_ip}`,
-                        timestamp: new Date().toISOString(),
-                        autoBlocked: confidence > 0.7
-                      });
-                    }
-                  } catch (emitErr) {
-                    console.warn('[PACKET] Error emitting alert:', emitErr);
-                  }
-                }
-              } catch (err) {
-                console.warn('[PACKET] Error processing ML prediction result:', err);
-              }
-            }).catch((err) => {
-              console.warn('[PACKET] Error in savePromise:', err);
-            });
-          } catch (err) {
-            console.warn('[PACKET] Error processing ML response:', err);
+            validateStatus: () => true
+          } as any);
+          
+          if (!response || !response.data) {
+            console.warn('[PACKET] Invalid ML response');
+            return;
           }
-          }).catch((err) => {
-            // ML service unavailable - log but continue (don't crash)
-            // CRITICAL: This catch must NEVER throw or it will stop packet processing
+          
+          const predictions = response.data;
+          const savedPacket = await savePromise;
+          if (!savedPacket) return;
+          
+          const isMalicious = predictions?.binary_prediction === 'malicious';
+          let attackType = predictions?.attack_type || 'unknown';
+          const confidence = predictions?.confidence?.binary || predictions?.confidence || 0;
+          
+          // If status is critical, use pattern detection
+          if (data.status === 'critical' || attackType === 'unknown' || attackType === 'normal') {
+            const patternType = detectAttackTypeFn(data);
+            if (data.status === 'critical' || attackType === 'normal' || attackType === 'unknown') {
+              attackType = patternType;
+            }
+          }
+          
+          const shouldBeMalicious = isMalicious || 
+            (data.status === 'critical' && attackType !== 'suspicious_traffic' && attackType !== 'normal');
+          
+          savedPacket.is_malicious = shouldBeMalicious;
+          savedPacket.attack_type = attackType;
+          const finalConfidence = (data.status === 'critical' && !isMalicious) 
+            ? Math.max(confidence, 0.7)
+            : confidence;
+          savedPacket.confidence = finalConfidence;
+          await savedPacket.save().catch(() => {});
+          
+          // Auto-block malicious IPs (queued, non-blocking)
+          if (isMalicious && confidence > 0.6 && !isLocalIPFn(data.start_ip)) {
             try {
-              const errorCode = (err as any)?.code;
-              const errorMessage = (err as any)?.message || String(err);
+              const { autoBan } = await import('./policy');
+              const banResult = await autoBan(data.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch(() => null);
               
-              // Only log errors occasionally to prevent spam
-              if (Math.random() < 0.01) { // Log 1% of errors
-                if (errorCode === 'ECONNREFUSED') {
-                  console.warn(`[PACKET] ⚠ ML service not available (connection refused) - using pattern detection only`);
-                } else if (errorCode === 'ETIMEDOUT' || errorCode === 'ECONNABORTED') {
-                  // Don't log timeout errors - they're expected during high traffic
-                } else {
-                  // Silently ignore other ML errors to prevent log spam
+              if (banResult) {
+                console.log(`[PACKET] ✓ Queued auto-block for IP: ${data.start_ip}`);
+                const io = getIO();
+                if (io) {
+                  io.to(`user_${userId}`).emit('intrusion-detected', {
+                    type: 'intrusion',
+                    severity: 'critical',
+                    ip: data.start_ip,
+                    attackType: attackType,
+                    confidence: confidence,
+                    protocol: data.protocol,
+                    description: `Intrusion detected: ${attackType} from ${data.start_ip}`,
+                    timestamp: new Date().toISOString(),
+                    autoBlocked: true
+                  });
+                  io.to(`user_${userId}`).emit('ip-blocked', {
+                    ip: data.start_ip,
+                    reason: `ML:${attackType} (${Math.round(confidence * 100)}%)`,
+                    method: banResult.methods?.join(', ') || 'firewall',
+                    timestamp: new Date().toISOString()
+                  });
                 }
               }
-            } catch (logErr) {
-              // Even logging errors must not crash
-              // Silently ignore
+            } catch (err) {
+              console.warn('[PACKET] Error auto-blocking malicious IP:', err);
             }
-          });
-        }).catch((outerErr) => {
-          // CRITICAL: Outer catch to prevent ANY error from stopping packet processing
-          // This should never happen, but if it does, we must continue
-          // Silently ignore - packet processing must continue
+          }
+          
+          // Emit alert for ANY malicious detection
+          if (isMalicious && confidence > 0.3) {
+            try {
+              const io = getIO();
+              if (io) {
+                io.to(`user_${userId}`).emit('intrusion-detected', {
+                  type: 'intrusion',
+                  severity: data.status === 'critical' ? 'critical' : (finalConfidence > 0.8 ? 'critical' : 'high'),
+                  ip: data.start_ip,
+                  attackType: attackType,
+                  confidence: finalConfidence,
+                  protocol: data.protocol,
+                  description: `Suspicious activity detected: ${attackType} from ${data.start_ip}`,
+                  timestamp: new Date().toISOString(),
+                  autoBlocked: confidence > 0.7
+                });
+              }
+            } catch (emitErr) {
+              console.warn('[PACKET] Error emitting alert:', emitErr);
+            }
+          }
+        }).catch((err) => {
+          // Job queue handles retries - just log occasionally
+          if (Math.random() < 0.01) {
+            const errorCode = (err as any)?.code;
+            if (errorCode === 'ECONNREFUSED') {
+              console.warn(`[PACKET] ⚠ ML service not available - using pattern detection only`);
+            } else {
+              console.warn('[PACKET] ML prediction job failed:', (err as Error)?.message);
+            }
+          }
         });
       }
 
