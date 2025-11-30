@@ -811,18 +811,28 @@ export class PacketCaptureService {
       if (packetData.status === 'critical') {
         const sourceIP = packetData.start_ip;
         
-        // CRITICAL: Fast cooldown check FIRST - prevents detection spam
-        // This stops the detection loop from processing the same IP multiple times per second
-        if (isInDetectionCooldown(sourceIP)) {
-          return; // Skip - IP was processed recently (within 2 seconds)
-        }
-        
         // Detect attack type FIRST to allow different attack types to be detected
         const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
         
         // CRITICAL: Check if we've already sent a notification for this attack type
         // ONE notification per attack type per IP (even if IP was blocked previously)
         const alreadyNotifiedForThisAttackType = hasEmittedAlertForAttackType(sourceIP, criticalAttackType);
+        
+        // Check if IP is in grace period (recently manually unblocked)
+        const inGracePeriod = isInGracePeriod(sourceIP);
+        
+        // CRITICAL: Fast cooldown check - but SKIP if:
+        // 1. IP is in grace period (we want to allow notifications after manual unblock)
+        // 2. We haven't notified for this attack type yet (first notification should always go through)
+        // This ensures grace period notifications always get through
+        if (!inGracePeriod && alreadyNotifiedForThisAttackType && isInDetectionCooldown(sourceIP)) {
+          return; // Skip - IP was processed recently (within 2 seconds) AND already notified
+        }
+        
+        // DEBUG: Log grace period status for troubleshooting
+        if (inGracePeriod) {
+          console.log(`[PACKET] 🔍 DEBUG: IP ${sourceIP} is in grace period, allowing notification for ${criticalAttackType}`);
+        }
         
         // CRITICAL: Check if already blocked BEFORE processing
         // This prevents blocking on every packet during a flood attack
@@ -844,9 +854,6 @@ export class PacketCaptureService {
         if (!alreadyNotifiedForThisAttackType) {
           // Haven't sent notification for this attack type yet - send it now
           console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
-          
-          // Check if IP is in grace period (recently manually unblocked)
-          const inGracePeriod = isInGracePeriod(sourceIP);
           
           // WORKER THREAD 5: Notification worker handles alert emission (async)
           const emitCriticalAlert = async (autoBlocked: boolean = false) => {
@@ -885,8 +892,11 @@ export class PacketCaptureService {
               console.log(`[PACKET] 📢 Sending notification for ${sourceIP}: ${criticalAttackType} (first notification for this attack type)`);
             }
             
-            await sendIntrusionAlertWorker(this.userId, alertData).catch(() => {});
+            await sendIntrusionAlertWorker(this.userId, alertData).catch((err: unknown) => {
+              console.error(`[PACKET] ❌ Failed to send notification for ${sourceIP}:`, (err as Error)?.message);
+            });
             markAlertEmitted(sourceIP, criticalAttackType); // Mark as notified for this attack type
+            console.log(`[PACKET] ✅ Notification marked as emitted for ${sourceIP}:${criticalAttackType}`);
           };
           
           // Emit alert immediately (before auto-ban) - async, non-blocking
