@@ -111,6 +111,21 @@ const Blocker: FC = () => {
           });
         });
 
+        // Listen for blocking-complete event (system ready for next attack)
+        socket.on('blocking-complete', (data: { ip: string; message: string }) => {
+          console.log('[Blocker] Blocking complete:', data.message);
+          // Refresh blocked list to show the newly blocked IP
+          fetchBlocked().catch(err => {
+            console.warn('[Blocker] Error refreshing after blocking complete:', err);
+          });
+          // Show a brief status message (you can add a toast notification here if needed)
+          setScanStatus(`✓ IP ${data.ip} blocked. System ready for next attack.`);
+          // Clear status after 3 seconds
+          setTimeout(() => {
+            setScanStatus('');
+          }, 3000);
+        });
+
         socketRef.current = socket;
       }
     } catch (err) {

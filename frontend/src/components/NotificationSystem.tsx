@@ -114,6 +114,28 @@ const NotificationSystem: FC = () => {
         // Don't crash, just log
       });
 
+      // Listen for blocking-complete event (system ready for next attack)
+      socketConnection.on('blocking-complete', (data: { ip: string; message: string }) => {
+        try {
+          console.log('[Notifications] Blocking complete:', data.message);
+          // Show a success notification
+          const successAlert = {
+            type: 'blocking-complete',
+            severity: 'low' as const,
+            ip: data.ip,
+            attackType: 'Blocked',
+            confidence: 1.0,
+            protocol: '',
+            description: data.message,
+            timestamp: new Date().toISOString(),
+            autoBlocked: false
+          };
+          setAlerts(prev => [successAlert, ...prev.slice(0, 4)]);
+        } catch (err) {
+          console.warn('[Notifications] Error processing blocking-complete:', err);
+        }
+      });
+
       socketConnection.on('intrusion-detected', (alert: IntrusionAlert) => {
         try {
           console.log('[Notifications] Intrusion detected:', alert);

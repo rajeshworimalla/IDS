@@ -845,6 +845,23 @@ export class PacketCaptureService {
                       timestamp: new Date().toISOString()
                     });
                     console.log(`[PACKET] ✓ Emitted ip-blocked event for ${packetData.start_ip}`);
+                    
+                    // Emit blocking-complete event after a brief cooldown (1 second)
+                    // This lets the frontend know when it's safe to continue
+                    setTimeout(() => {
+                      try {
+                        if (io) {
+                          io.to(`user_${this.userId}`).emit('blocking-complete', {
+                            ip: packetData.start_ip,
+                            message: `IP ${packetData.start_ip} has been blocked. System ready for next attack.`,
+                            timestamp: new Date().toISOString()
+                          });
+                          console.log(`[PACKET] ✓ Blocking complete for ${packetData.start_ip} - system ready`);
+                        }
+                      } catch (cooldownErr) {
+                        // Silently ignore cooldown errors
+                      }
+                    }, 1000); // 1 second cooldown
                   }
                 } catch (emitErr) {
                   console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
