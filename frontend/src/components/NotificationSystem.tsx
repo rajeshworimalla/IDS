@@ -2,6 +2,7 @@ import { FC, useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { authService } from '../services/auth';
+import { ipBlockService } from '../services/ipBlockService';
 
 interface IntrusionAlert {
   type: string;
@@ -163,24 +164,29 @@ const NotificationSystem: FC = () => {
           // For critical alerts: only show one popup per IP:attackType combination
           // BUT: Always allow grace period notifications (requiresUserDecision) to show
           if (severity === 'critical') {
-            // Grace period notifications should always show (user needs to decide)
-            if (!inGracePeriod && !requiresUserDecision && criticalAlertsShown.current.has(alertKey)) {
+            // DEBUG: Log the alert data to troubleshoot
+            console.log(`[Notifications] DEBUG: Alert data - inGracePeriod: ${inGracePeriod}, requiresUserDecision: ${requiresUserDecision}, alertKey: ${alertKey}`);
+            
+            // Grace period notifications should ALWAYS show (user needs to decide)
+            // Check the actual alert object fields, not just the extracted variables
+            const isGracePeriodAlert = inGracePeriod || requiresUserDecision || alert.inGracePeriod || alert.requiresUserDecision;
+            
+            if (!isGracePeriodAlert && criticalAlertsShown.current.has(alertKey)) {
               console.log(`[Notifications] Skipping duplicate critical alert for ${alertKey}`);
               return; // Don't show another popup for this IP:attackType combination
             }
             
             // Mark this alert as shown (only if not a grace period notification)
             // Grace period notifications can show multiple times if user doesn't respond
-            if (!inGracePeriod && !requiresUserDecision) {
+            if (!isGracePeriodAlert) {
               criticalAlertsShown.current.add(alertKey);
               // Remove from set after 5 minutes to allow new alerts if needed
               setTimeout(() => {
                 criticalAlertsShown.current.delete(alertKey);
               }, 5 * 60 * 1000);
-            }
-            
-            // For grace period notifications, log that we're showing it
-            if (inGracePeriod || requiresUserDecision) {
+            } else {
+              // For grace period notifications, clear from set to allow re-showing
+              criticalAlertsShown.current.delete(alertKey);
               console.log(`[Notifications] Showing grace period notification for ${alertIP}:${attackType} (requires user decision)`);
             }
           }
@@ -198,6 +204,10 @@ const NotificationSystem: FC = () => {
                 confidence: typeof alert.confidence === 'number' ? alert.confidence : 0,
                 severity: severity,
                 timestamp: alert.timestamp || new Date().toISOString(),
+                // Preserve grace period fields
+                inGracePeriod: alert.inGracePeriod || false,
+                requiresUserDecision: alert.requiresUserDecision || false,
+                actionRequired: alert.actionRequired || undefined,
               };
               return [newAlert, ...prev.slice(0, 4)]; // Keep last 5 alerts visible
             } catch (err) {
@@ -479,29 +489,111 @@ const NotificationSystem: FC = () => {
                 {new Date(alert.timestamp).toLocaleString()}
               </div>
 
-              {/* Acknowledge Button */}
-              <motion.button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const alertIndex = alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp);
-                  if (alertIndex !== -1) {
-                    removeAlert(alertIndex);
-                  }
-                }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                style={{
-                  width: '100%',
-                  background: 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  padding: '16px 32px',
-                  fontSize: '18px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(82,196,26,0.4)',
-                  transition: 'all 0.2s',
+              {/* Grace Period Decision Buttons */}
+              {alert.requiresUserDecision && alert.inGracePeriod && (
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{
+                    background: 'rgba(255,193,7,0.1)',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    marginBottom: '16px',
+                    border: '2px solid #ffc107',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#ff9800', marginBottom: '8px' }}>
+                      ⚠️ Action Required
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666' }}>
+                      Do you want to block this IP again?
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <motion.button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await ipBlockService.blockIP(alert.ip, `Re-blocked after grace period: ${alert.attackType}`);
+                          console.log(`[Notifications] Blocked IP ${alert.ip} after user decision`);
+                          const alertIndex = alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp);
+                          if (alertIndex !== -1) {
+                            removeAlert(alertIndex);
+                          }
+                        } catch (err) {
+                          console.error('[Notifications] Error blocking IP:', err);
+                          alert(`Failed to block IP: ${(err as Error)?.message || 'Unknown error'}`);
+                        }
+                      }}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      style={{
+                        flex: 1,
+                        background: 'linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '16px 24px',
+                        fontSize: '16px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(255,77,79,0.4)',
+                      }}
+                    >
+                      🛡️ Block Again
+                    </motion.button>
+                    <motion.button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const alertIndex = alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp);
+                        if (alertIndex !== -1) {
+                          removeAlert(alertIndex);
+                        }
+                        console.log(`[Notifications] User chose not to block IP ${alert.ip}`);
+                      }}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      style={{
+                        flex: 1,
+                        background: 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '16px 24px',
+                        fontSize: '16px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(82,196,26,0.4)',
+                      }}
+                    >
+                      ✓ Don't Block
+                    </motion.button>
+                  </div>
+                </div>
+              )}
+
+              {/* Acknowledge Button (only show if not grace period) */}
+              {!alert.requiresUserDecision && (
+                <motion.button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const alertIndex = alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp);
+                    if (alertIndex !== -1) {
+                      removeAlert(alertIndex);
+                    }
+                  }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  style={{
+                    width: '100%',
+                    background: 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '12px',
+                    padding: '16px 32px',
+                    fontSize: '18px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(82,196,26,0.4)',
+                    transition: 'all 0.2s',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
