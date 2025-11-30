@@ -119,7 +119,7 @@ const App: FC = () => {
         
         {/* Protected routes */}
         <Route path="/dashboard" element={<ProtectedRoute element={<Dashboard />} />} />
-        <Route path="/activities" element={<ProtectedRoute element={<Activities />} />} />
+        <Route path="/activities" element={<ProtectedRoute element={<Navigate to="/monitoring" replace />} />} />
         <Route path="/events" element={<ProtectedRoute element={<EventsLog />} />} />
         <Route path="/monitoring" element={<ProtectedRoute element={<Monitoring />} />} />
         <Route path="/blocker" element={<ProtectedRoute element={<Blocker />} />} />

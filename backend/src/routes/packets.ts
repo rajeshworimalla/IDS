@@ -140,10 +140,20 @@ router.get('/alerts', async (req, res) => {
       return res.status(401).json({ error: 'User not authenticated' });
     }
     
-    const { severity, status, from, to, timeRange } = req.query;
+    const { severity, status, from, to, timeRange, sourceIP, destinationIP } = req.query;
     
     // Build filter query
     const filter: any = { user: req.user._id };
+    
+    // Add source IP filter
+    if (sourceIP && String(sourceIP).trim()) {
+      filter.start_ip = { $regex: String(sourceIP).trim(), $options: 'i' };
+    }
+    
+    // Add destination IP filter
+    if (destinationIP && String(destinationIP).trim()) {
+      filter.end_ip = { $regex: String(destinationIP).trim(), $options: 'i' };
+    }
     
     // Add severity filters
     if (severity) {

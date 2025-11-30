@@ -15,6 +15,8 @@ interface FilterState {
     from: Date | null;
     to: Date | null;
   };
+  sourceIP: string;
+  destinationIP: string;
 }
 
 const Monitoring: FC = () => {
@@ -35,8 +37,17 @@ const Monitoring: FC = () => {
     dateRange: {
       from: new Date(Date.now() - 24 * 60 * 60 * 1000), // 24 hours ago
       to: new Date() // now
-    }
+    },
+    sourceIP: '',
+    destinationIP: ''
   });
+  const [packetStats, setPacketStats] = useState({
+    totalPackets: 0,
+    criticalCount: 0,
+    mediumCount: 0,
+    normalCount: 0
+  });
+  const [systemHealth, setSystemHealth] = useState(100);
   const [showBlockedIPs, setShowBlockedIPs] = useState(false);
   const [blockedIPs, setBlockedIPs] = useState<BlockedIP[]>([]);
   const [blockedLoading, setBlockedLoading] = useState(false);
@@ -86,15 +97,27 @@ const Monitoring: FC = () => {
         apiFilters.to = currentFilters.dateRange.to;
       }
       
-      // Get alerts and stats with filters (with individual error handling)
+      // Add source IP filter
+      if (currentFilters.sourceIP && currentFilters.sourceIP.trim()) {
+        apiFilters.sourceIP = currentFilters.sourceIP.trim();
+      }
+      
+      // Add destination IP filter
+      if (currentFilters.destinationIP && currentFilters.destinationIP.trim()) {
+        apiFilters.destinationIP = currentFilters.destinationIP.trim();
+      }
+      
+      // Get alerts, stats, and packet stats with filters (with individual error handling)
       let alertsData: ThreatAlert[] = [];
       let statsData = { critical: 0, high: 0, medium: 0, low: 0 };
+      let packetStatsData = { totalPackets: 0, criticalCount: 0, mediumCount: 0, normalCount: 0 };
       
       try {
         const results = await Promise.allSettled([
-        packetService.getAlerts(apiFilters),
-        packetService.getAlertStats(apiFilters)
-      ]);
+          packetService.getAlerts(apiFilters),
+          packetService.getAlertStats(apiFilters),
+          packetService.getPacketStats()
+        ]);
         
         if (results[0].status === 'fulfilled' && Array.isArray(results[0].value)) {
           alertsData = results[0].value;
@@ -103,6 +126,10 @@ const Monitoring: FC = () => {
         if (results[1].status === 'fulfilled' && results[1].value) {
           statsData = results[1].value;
         }
+        
+        if (results[2].status === 'fulfilled' && results[2].value) {
+          packetStatsData = results[2].value;
+        }
       } catch (err) {
         console.warn('Error fetching alerts/stats:', err);
         // Continue with empty data rather than crashing
@@ -110,6 +137,13 @@ const Monitoring: FC = () => {
 
       setAlerts(alertsData);
       setAlertStats(statsData);
+      setPacketStats(packetStatsData);
+      
+      // Calculate system health (from Activities page)
+      const total = packetStatsData.totalPackets || 1;
+      const normalPackets = packetStatsData.normalCount;
+      const health = Math.round((normalPackets / total) * 100);
+      setSystemHealth(health);
     } catch (err) {
       console.error('Error in fetchData:', err);
       // Don't show error to user to prevent UI crashes, just log it
@@ -422,7 +456,7 @@ const Monitoring: FC = () => {
 
         <div className="monitoring-header">
           <div className="header-row">
-            <h1>Monitoring</h1>
+            <h1>Monitoring & Activities</h1>
             <div className="header-actions">
               <button
                 className="view-blocked-button"
@@ -444,6 +478,10 @@ const Monitoring: FC = () => {
             </div>
           </div>
           <div className="monitoring-stats">
+            <div className="stat-card total">
+              <h3>Total Events</h3>
+              <span className="stat-value">{packetStats.totalPackets}</span>
+            </div>
             <div className="stat-card critical">
               <h3>Critical</h3>
               <span className="stat-value">{alertStats.critical}</span>
@@ -459,6 +497,10 @@ const Monitoring: FC = () => {
             <div className="stat-card low">
               <h3>Low</h3>
               <span className="stat-value">{alertStats.low}</span>
+            </div>
+            <div className="stat-card health">
+              <h3>System Health</h3>
+              <span className="stat-value">{systemHealth}%</span>
             </div>
           </div>
         </div>
@@ -516,6 +558,52 @@ const Monitoring: FC = () => {
                   fromDate={filters.dateRange?.from || undefined}
                   toDate={filters.dateRange?.to || undefined}
                   onDateChange={handleDateRangeChange}
+                />
+              </div>
+            </div>
+            
+            <div className="filter-group">
+              <h4>Source IP</h4>
+              <div className="filter-options">
+                <input
+                  type="text"
+                  placeholder="Filter by source IP..."
+                  value={filters.sourceIP}
+                  onChange={(e) => setFilters(prev => ({ ...prev, sourceIP: e.target.value }))}
+                  onBlur={() => fetchData()}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') fetchData();
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    width: '200px'
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div className="filter-group">
+              <h4>Destination IP</h4>
+              <div className="filter-options">
+                <input
+                  type="text"
+                  placeholder="Filter by destination IP..."
+                  value={filters.destinationIP}
+                  onChange={(e) => setFilters(prev => ({ ...prev, destinationIP: e.target.value }))}
+                  onBlur={() => fetchData()}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') fetchData();
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    width: '200px'
+                  }}
                 />
               </div>
             </div>
@@ -660,15 +748,17 @@ const Monitoring: FC = () => {
                 <motion.button 
                   className="reset-btn"
                   onClick={() => {
-                    setFilters({ 
-                      severity: [], 
-                      status: [], 
-                      dateRange: {
-                        from: new Date(Date.now() - 24 * 60 * 60 * 1000),
-                        to: new Date()
-                      }
-                    });
-                    setSearchTerm('');
+                  setFilters({ 
+                    severity: [],
+                    status: [],
+                    dateRange: {
+                      from: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                      to: new Date()
+                    },
+                    sourceIP: '',
+                    destinationIP: ''
+                  });
+                  setSearchTerm('');
                   }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
