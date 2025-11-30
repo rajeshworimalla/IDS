@@ -1,111 +1,87 @@
 #!/bin/bash
 
-# Verify why blocking isn't working
+# Script to verify if domain blocking is actually working
 
 echo "========================================="
-echo "Verifying Blocking"
+echo "Domain Blocking Verification"
 echo "========================================="
 echo ""
 
-DOMAIN="facebook.com"
-
-# Step 1: Check what IPs facebook.com resolves to
-echo "[1] DNS Resolution for $DOMAIN:"
-echo "   IPv4:"
-getent hosts $DOMAIN | grep -E "^\S+\s+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | awk '{print "     " $1}'
-echo "   IPv6:"
-getent hosts $DOMAIN | grep -E "^\S+\s+[0-9a-fA-F:]+" | awk '{print "     " $1}'
-echo ""
-
-# Step 2: Check if those IPs are in blocklist
-echo "[2] Checking if resolved IPs are blocked:"
-RESOLVED_IPV4=$(getent hosts $DOMAIN | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -1)
-RESOLVED_IPV6=$(getent hosts $DOMAIN | grep -oE "[0-9a-fA-F:]+" | head -1)
-
-if [ -n "$RESOLVED_IPV4" ]; then
-    if sudo ipset test ids_blocklist "$RESOLVED_IPV4" 2>/dev/null; then
-        echo "   ✓ IPv4 $RESOLVED_IPV4 is in blocklist"
-    else
-        echo "   ✗ IPv4 $RESOLVED_IPV4 is NOT in blocklist (this is the problem!)"
-    fi
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <domain_or_ip>"
+    echo "Example: $0 facebook.com"
+    echo "Example: $0 31.13.64.35"
+    exit 1
 fi
 
-if [ -n "$RESOLVED_IPV6" ]; then
-    if sudo ipset test ids6_blocklist "$RESOLVED_IPV6" 2>/dev/null; then
-        echo "   ✓ IPv6 $RESOLVED_IPV6 is in blocklist"
-    else
-        echo "   ✗ IPv6 $RESOLVED_IPV6 is NOT in blocklist (this is the problem!)"
-    fi
-fi
+TARGET=$1
+
+echo "Checking blocking for: $TARGET"
 echo ""
 
-# Step 3: Check iptables OUTPUT rule
-echo "[3] Checking iptables OUTPUT rule:"
-if sudo iptables -L OUTPUT -n --line-numbers | grep -q "ids_blocklist"; then
-    echo "   ✓ OUTPUT rule exists:"
-    sudo iptables -L OUTPUT -n --line-numbers | grep -B1 -A1 "ids_blocklist"
-    
-    # Check rule position (should be early)
-    RULE_NUM=$(sudo iptables -L OUTPUT -n --line-numbers | grep "ids_blocklist" | head -1 | awk '{print $1}')
-    echo "   Rule is at position: $RULE_NUM"
-    if [ "$RULE_NUM" -gt 5 ]; then
-        echo "   ⚠ WARNING: Rule is too far down! Other rules might allow traffic first"
-        echo "   Fix: Move rule to top: sudo iptables -I OUTPUT 1 -m set --match-set ids_blocklist dst -j DROP"
+# Resolve domain to IPs if it's a domain
+if [[ ! $TARGET =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "[1/5] Resolving domain to IPs..."
+    IPS=$(getent hosts $TARGET | awk '{print $1}' | sort -u)
+    if [ -z "$IPS" ]; then
+        echo "   ✗ Could not resolve $TARGET"
+        exit 1
     fi
+    echo "   ✓ Resolved to: $IPS"
+    FIRST_IP=$(echo $IPS | awk '{print $1}')
 else
-    echo "   ✗ OUTPUT rule NOT FOUND!"
-    echo "   Fix: sudo iptables -I OUTPUT -m set --match-set ids_blocklist dst -j DROP"
+    IPS=$TARGET
+    FIRST_IP=$TARGET
 fi
-echo ""
 
-# Step 4: Check ip6tables OUTPUT rule
-echo "[4] Checking ip6tables OUTPUT rule:"
-if sudo ip6tables -L OUTPUT -n --line-numbers 2>/dev/null | grep -q "ids6_blocklist"; then
-    echo "   ✓ OUTPUT rule exists:"
-    sudo ip6tables -L OUTPUT -n --line-numbers 2>/dev/null | grep -B1 -A1 "ids6_blocklist"
-else
-    echo "   ✗ OUTPUT rule NOT FOUND!"
-    echo "   Fix: sudo ip6tables -I OUTPUT -m set --match-set ids6_blocklist dst -j DROP"
-fi
 echo ""
-
-# Step 5: Test actual blocking
-echo "[5] Testing blocking:"
-if [ -n "$RESOLVED_IPV4" ]; then
-    echo "   Testing ping to $RESOLVED_IPV4..."
-    if timeout 2 ping -c 1 -W 1 "$RESOLVED_IPV4" >/dev/null 2>&1; then
-        echo "   ✗ Ping succeeded (blocking NOT working!)"
+echo "[2/5] Checking if IPs are in ipset blocklist..."
+for IP in $IPS; do
+    if sudo ipset list ids_blocklist | grep -q "$IP"; then
+        echo "   ✓ $IP is in ids_blocklist"
     else
-        echo "   ✓ Ping blocked (blocking IS working)"
+        echo "   ✗ $IP is NOT in ids_blocklist"
     fi
+done
+
+echo ""
+echo "[3/5] Checking iptables OUTPUT rules..."
+OUTPUT_RULES=$(sudo iptables -L OUTPUT -n --line-numbers | grep -E "ids_blocklist|$FIRST_IP")
+if [ -n "$OUTPUT_RULES" ]; then
+    echo "   ✓ Found OUTPUT rules:"
+    echo "$OUTPUT_RULES" | while read line; do
+        echo "     $line"
+    done
+else
+    echo "   ✗ No OUTPUT rules found for $FIRST_IP or ids_blocklist"
 fi
+
+echo ""
+echo "[4/5] Checking OUTPUT chain order (first 5 rules)..."
+sudo iptables -L OUTPUT -n --line-numbers | head -6
 echo ""
 
-# Step 6: Check for conflicting rules
-echo "[6] Checking for conflicting OUTPUT rules:"
-echo "   All OUTPUT rules:"
-sudo iptables -L OUTPUT -n --line-numbers | head -10
-echo ""
+echo "[5/5] Testing connectivity..."
+echo "   Testing ping to $FIRST_IP..."
+if ping -c 1 -W 2 $FIRST_IP >/dev/null 2>&1; then
+    echo "   ✗ PING SUCCEEDED - Blocking is NOT working!"
+    echo "   ⚠ The IP should be blocked but ping went through"
+else
+    echo "   ✓ PING BLOCKED - Blocking is working!"
+fi
 
+echo ""
 echo "========================================="
-echo "Quick Fixes:"
+echo "Summary"
 echo "========================================="
 echo ""
-echo "If blocking isn't working:"
-echo "1. Move OUTPUT rule to top:"
-echo "   sudo iptables -D OUTPUT -m set --match-set ids_blocklist dst -j DROP"
-echo "   sudo iptables -I OUTPUT 1 -m set --match-set ids_blocklist dst -j DROP"
+echo "If ping succeeded but IP is in blocklist:"
+echo "  1. Check if OUTPUT rule is at position 1"
+echo "  2. Check if backend is running with sudo"
+echo "  3. Try: sudo iptables -I OUTPUT 1 -d $FIRST_IP -j DROP"
 echo ""
-echo "2. Ensure ip6tables rule exists:"
-echo "   sudo ip6tables -I OUTPUT -m set --match-set ids6_blocklist dst -j DROP"
+echo "To check all blocked IPs:"
+echo "  sudo ipset list ids_blocklist"
 echo ""
-echo "3. Block the actual IPs that DNS resolves to:"
-if [ -n "$RESOLVED_IPV4" ]; then
-    echo "   sudo ipset add ids_blocklist $RESOLVED_IPV4"
-fi
-if [ -n "$RESOLVED_IPV6" ]; then
-    echo "   sudo ipset add ids6_blocklist $RESOLVED_IPV6"
-fi
-echo ""
-
-
+echo "To check OUTPUT rules:"
+echo "  sudo iptables -L OUTPUT -n --line-numbers"
