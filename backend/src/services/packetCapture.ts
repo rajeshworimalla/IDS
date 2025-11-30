@@ -12,7 +12,8 @@ import {
   isInGracePeriod,
   isAlreadyBlockedForAttackType,
   markBlockedForAttackType,
-  markAlertEmitted
+  markAlertEmitted,
+  hasEmittedAlertForAttackType
 } from './throttleManager';
 
 // Track packet frequencies for status determination with automatic cleanup
@@ -772,43 +773,81 @@ export class PacketCaptureService {
         // Detect attack type FIRST to allow different attack types to be detected
         const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
         
-        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
-        // BUT: Allow different attack types to be detected (track by IP+attackType)
-        const throttleKey = `${sourceIP}:${criticalAttackType}`;
-        const ALERT_THROTTLE_MS = 2000; // 2 seconds between alerts for same IP+attackType
+        // CRITICAL: Check if we've already sent a notification for this attack type
+        // ONE notification per attack type per IP (even if IP was blocked previously)
+        const alreadyNotifiedForThisAttackType = hasEmittedAlertForAttackType(sourceIP, criticalAttackType);
         
-        // Use global throttle manager (persists across capture restarts)
-        if (isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS)) {
-          // Skip - already alerted recently for this IP+attackType combination
-          // But allow different attack types from same IP
-          console.log(`[PACKET] ⏭ Skipping throttled alert for ${throttleKey}`);
-          return; // Don't process this critical packet (already handled)
+        // CRITICAL: For DoS/DDoS attacks, check if already blocked FIRST before processing
+        // This prevents blocking on every packet during a flood attack
+        const isDoSOrDDoS = criticalAttackType === 'dos' || criticalAttackType === 'ddos';
+        
+        // For DoS/DDoS: Check if already blocked BEFORE processing (prevents blocking every packet)
+        // BUT: Still send notification if we haven't notified for this attack type yet
+        let alreadyBlocked = false;
+        if (isDoSOrDDoS) {
+          try {
+            const { redis } = await import('./redis');
+            const tempBanKey = `ids:tempban:${sourceIP}`;
+            const blocked = await redis.get(tempBanKey).catch(() => null);
+            alreadyBlocked = blocked !== null;
+            
+            // If already blocked AND already notified for this attack type, skip everything
+            if (alreadyBlocked && alreadyNotifiedForThisAttackType) {
+              return; // Skip all processing - already blocked and notified
+            }
+            
+            // Also check if already blocked for this attack type
+            if (isAlreadyBlockedForAttackType(sourceIP, criticalAttackType) && alreadyNotifiedForThisAttackType) {
+              return; // Already blocked and notified for this attack type - skip
+            }
+          } catch (redisErr) {
+            // Continue if Redis check fails
+          }
         }
         
-        // Log critical packet detection with throttle info
-        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType}, throttleKey: ${throttleKey})`);
+        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
+        // BUT: Allow different attack types to be detected (track by IP+attackType)
+        // For DoS/DDoS: Use longer throttle window (10 seconds) to prevent spam
+        const throttleKey = `${sourceIP}:${criticalAttackType}`;
+        const ALERT_THROTTLE_MS = isDoSOrDDoS ? 10000 : 2000; // 10 seconds for DoS/DDoS, 2 seconds for others
         
-        // WORKER THREAD 5: Notification worker handles alert emission (async)
-        const emitCriticalAlert = async (autoBlocked: boolean = false) => {
-          const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
-          const alertData = {
-            type: 'intrusion',
-            severity: 'critical',
-            ip: sourceIP,
-            attackType: criticalAttackType,
-            confidence: 0.85, // High confidence for critical status
-            protocol: packetData.protocol,
-            description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
-            timestamp: new Date().toISOString(),
-            autoBlocked: autoBlocked
+        // CRITICAL: Check if we've already sent notification for this attack type
+        // If yes, skip notification but still allow blocking if needed
+        if (alreadyNotifiedForThisAttackType) {
+          // Already sent notification for this attack type - skip notification
+          // But for DoS/DDoS, also skip all processing if already blocked
+          if (isDoSOrDDoS && alreadyBlocked) {
+            return; // Skip everything - already blocked and notified
+          }
+          // For other attacks or if not blocked yet, continue to blocking logic
+        } else {
+          // Haven't sent notification for this attack type yet - send it now
+          // Log critical packet detection with throttle info
+          console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
+          
+          // WORKER THREAD 5: Notification worker handles alert emission (async)
+          const emitCriticalAlert = async (autoBlocked: boolean = false) => {
+            const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
+            const alertData = {
+              type: 'intrusion',
+              severity: 'critical',
+              ip: sourceIP,
+              attackType: criticalAttackType,
+              confidence: 0.85, // High confidence for critical status
+              protocol: packetData.protocol,
+              description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
+              timestamp: new Date().toISOString(),
+              autoBlocked: autoBlocked
+            };
+            console.log(`[PACKET] 📢 Sending notification for ${sourceIP}: ${criticalAttackType} (first notification for this attack type)`);
+            await sendIntrusionAlertWorker(this.userId, alertData).catch(() => {});
+            markAlertEmitted(sourceIP, criticalAttackType); // Mark as notified for this attack type
           };
-          console.log(`[PACKET] 📢 Queuing critical alert for ${sourceIP}:`, criticalAttackType);
-          await sendIntrusionAlertWorker(this.userId, alertData).catch(() => {});
-          markAlertEmitted(sourceIP, criticalAttackType);
-        };
-        
-        // Emit alert immediately (before auto-ban) - async, non-blocking
-        emitCriticalAlert(false).catch(() => {});
+          
+          // Emit alert immediately (before auto-ban) - async, non-blocking
+          // This ensures ONE notification per attack type per IP
+          await emitCriticalAlert(false).catch(() => {});
+        }
         
         // Then try to auto-ban (non-blocking)
         // CRITICAL: Check if already blocked or blocking in progress to prevent duplicate operations
@@ -861,8 +900,8 @@ export class PacketCaptureService {
             // Mark this IP as blocked for this attack type (prevent re-blocking for same attack type)
             markBlockedForAttackType(sourceIP, criticalAttackType);
             
-            // Emit another alert with autoBlocked=true (only once)
-            emitCriticalAlert(true);
+            // Don't emit another alert - we already sent one notification for this attack type above
+            // The notification was sent with autoBlocked=false, and will be updated if needed
             
             // WORKER THREAD 5: Notification worker handles websocket emissions (async)
             const { sendIPBlockedNotificationWorker, sendBlockingCompleteNotificationWorker } = await import('../workers/notificationWorker');
