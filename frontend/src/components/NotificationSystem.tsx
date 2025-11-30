@@ -19,6 +19,7 @@ const NotificationSystem: FC = () => {
   const [alerts, setAlerts] = useState<IntrusionAlert[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const criticalIPsShown = useRef<Set<string>>(new Set()); // Track which critical IPs have been shown
   
   // Create audio element for sound notifications
   useEffect(() => {
@@ -124,6 +125,21 @@ const NotificationSystem: FC = () => {
           }
           
           const severity = alert.severity || 'medium';
+          const alertIP = alert.ip || 'unknown';
+          
+          // For critical alerts: only show one popup per IP address
+          if (severity === 'critical') {
+            if (criticalIPsShown.current.has(alertIP)) {
+              console.log(`[Notifications] Skipping duplicate critical alert for IP: ${alertIP}`);
+              return; // Don't show another popup for this IP
+            }
+            // Mark this IP as shown
+            criticalIPsShown.current.add(alertIP);
+            // Remove from set after 5 minutes to allow new alerts if needed
+            setTimeout(() => {
+              criticalIPsShown.current.delete(alertIP);
+            }, 5 * 60 * 1000);
+          }
           
           // Play sound alert
           playAlertSound(severity);
@@ -133,7 +149,7 @@ const NotificationSystem: FC = () => {
             try {
               const newAlert = {
                 ...alert,
-                ip: alert.ip || 'unknown',
+                ip: alertIP,
                 attackType: alert.attackType || 'unknown',
                 confidence: typeof alert.confidence === 'number' ? alert.confidence : 0,
                 severity: severity,

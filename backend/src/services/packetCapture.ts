@@ -2,6 +2,7 @@ import { Cap } from 'cap';
 import { Packet as PacketModel, IPacket } from '../models/Packet';
 import { getIO } from '../socket';
 import axios from 'axios';
+import os from 'os';
 
 // Track packet frequencies for status determination with automatic cleanup
 const packetFrequencies: { [key: string]: { count: number; timestamp: number } } = {};
@@ -60,6 +61,7 @@ export class PacketCaptureService {
   private packetHandler: ((nbytes: number, trunc: boolean) => void) | null = null;
   private userId: string;
   private mlRateLimiter: Map<string, number> | null = null;
+  private localIPs: Set<string> = new Set();
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -68,8 +70,49 @@ export class PacketCaptureService {
     this.predictionServiceUrl = 'http://127.0.0.1:5002/predict';
     this.userId = userId;
 
+    // Get all local IP addresses to prevent self-blocking
+    this.detectLocalIPs();
+
     // Initialize the capture device
     this.initializeCapture();
+  }
+
+  private detectLocalIPs() {
+    try {
+      const interfaces = os.networkInterfaces();
+      if (interfaces) {
+        for (const name of Object.keys(interfaces)) {
+          const iface = interfaces[name];
+          if (iface) {
+            for (const addr of iface) {
+              if (addr && !addr.internal && addr.family === 'IPv4') {
+                this.localIPs.add(addr.address);
+                console.log(`[PACKET] Detected local IP: ${addr.address}`);
+              }
+            }
+          }
+        }
+      }
+      // Always add localhost variants
+      this.localIPs.add('127.0.0.1');
+      this.localIPs.add('localhost');
+      this.localIPs.add('::1');
+    } catch (err) {
+      console.warn('[PACKET] Error detecting local IPs:', err);
+      // Fallback: at least add localhost
+      this.localIPs.add('127.0.0.1');
+      this.localIPs.add('localhost');
+    }
+  }
+
+  private isLocalIP(ip: string): boolean {
+    if (!ip) return false;
+    // Check exact match
+    if (this.localIPs.has(ip)) return true;
+    // Check localhost variants
+    if (ip.startsWith('127.') || ip === '::1' || ip === 'localhost') return true;
+    // Check if it's in the local IPs set
+    return Array.from(this.localIPs).some(localIP => ip === localIP);
   }
 
   private initializeCapture() {
@@ -372,7 +415,8 @@ export class PacketCaptureService {
                 await savedPacket.save().catch(() => {}); // Non-blocking update
                 
                 // Auto-block malicious IPs with high confidence (lowered threshold for faster response)
-                if (isMalicious && confidence > 0.6) {
+                // BUT NEVER block local IP addresses
+                if (isMalicious && confidence > 0.6 && !this.isLocalIP(packetData.start_ip)) {
                   try {
                     const { autoBan } = await import('./policy');
                     await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch(() => {});
@@ -459,29 +503,34 @@ export class PacketCaptureService {
       // Auto-ban on critical events with notification (non-blocking)
       if (packetData.status === 'critical') {
         import('./policy').then(({ autoBan }) => {
-          autoBan(packetData.start_ip, 'ids:critical').then(() => {
-            try {
-              // Emit critical alert notification
-              const io = getIO();
-              if (io) {
-                io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                  type: 'intrusion',
-                  severity: 'critical',
-                  ip: packetData.start_ip,
-                  attackType: 'critical_traffic',
-                  confidence: 0.9,
-                  protocol: packetData.protocol,
-                  description: `Critical traffic detected from ${packetData.start_ip}. IP automatically blocked.`,
-                  timestamp: new Date().toISOString(),
-                  autoBlocked: true
-                });
+          // Never auto-ban local IP addresses
+          if (!this.isLocalIP(packetData.start_ip)) {
+            autoBan(packetData.start_ip, 'ids:critical').then(() => {
+              try {
+                // Emit critical alert notification
+                const io = getIO();
+                if (io) {
+                  io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                    type: 'intrusion',
+                    severity: 'critical',
+                    ip: packetData.start_ip,
+                    attackType: 'critical_traffic',
+                    confidence: 0.9,
+                    protocol: packetData.protocol,
+                    description: `Critical traffic detected from ${packetData.start_ip}. IP automatically blocked.`,
+                    timestamp: new Date().toISOString(),
+                    autoBlocked: true
+                  });
+                }
+              } catch (emitErr) {
+                console.warn('[PACKET] Error emitting critical alert:', emitErr);
               }
-            } catch (emitErr) {
-              console.warn('[PACKET] Error emitting critical alert:', emitErr);
-            }
-          }).catch((err) => {
-            console.warn('[PACKET] Error auto-banning critical IP:', err);
-          });
+            }).catch((err) => {
+              console.warn('[PACKET] Error auto-banning critical IP:', err);
+            });
+          } else {
+            console.log(`[PACKET] Skipping auto-ban for local IP: ${packetData.start_ip}`);
+          }
         }).catch((err) => {
           console.warn('[PACKET] Error importing policy:', err);
         });
