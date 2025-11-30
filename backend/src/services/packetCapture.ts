@@ -3,6 +3,13 @@ import { Packet as PacketModel, IPacket } from '../models/Packet';
 import { getIO } from '../socket';
 import axios from 'axios';
 import os from 'os';
+import { 
+  isAlertThrottled, 
+  isBlockingInProgress, 
+  setBlockingInProgress, 
+  clearBlockingInProgress,
+  clearThrottleForIP as clearGlobalThrottle
+} from './throttleManager';
 
 // Track packet frequencies for status determination with automatic cleanup
 const packetFrequencies: { [key: string]: { count: number; timestamp: number } } = {};
@@ -126,8 +133,8 @@ export class PacketCaptureService {
   private firstPacketLogged: boolean = false;
   private lastPacketTime: number = 0; // Track last packet time for health monitoring
   private healthCheckInterval: any = null; // NodeJS.Timeout | null
-  private alertThrottle: Map<string, number> = new Map(); // Track last alert time per IP (prevent spam)
-  private blockingInProgress: Set<string> = new Set(); // Track IPs currently being blocked (prevent duplicate blocks)
+  // Use global throttle manager instead of instance-level
+  // This allows throttle to persist across capture restarts
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -826,27 +833,14 @@ export class PacketCaptureService {
         // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
         // BUT: Allow different attack types to be detected (track by IP+attackType)
         const throttleKey = `${sourceIP}:${criticalAttackType}`;
-        const lastAlertTime = this.alertThrottle.get(throttleKey) || 0;
-        const timeSinceLastAlert = now - lastAlertTime;
         const ALERT_THROTTLE_MS = 2000; // 2 seconds between alerts for same IP+attackType
         
-        if (timeSinceLastAlert < ALERT_THROTTLE_MS) {
+        // Use global throttle manager (persists across capture restarts)
+        if (isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS)) {
           // Skip - already alerted recently for this IP+attackType combination
           // But allow different attack types from same IP
+          console.log(`[PACKET] ⏭ Skipping throttled alert for ${throttleKey}`);
           return; // Don't process this critical packet (already handled)
-        }
-        
-        // Update throttle with attack type
-        this.alertThrottle.set(throttleKey, now);
-        
-        // Clean old throttle entries (older than 1 minute)
-        // NOTE: Keys are in format "IP:attackType", not just "IP"
-        if (this.alertThrottle.size > 100) {
-          for (const [throttleKey, alertTime] of this.alertThrottle.entries()) {
-            if (now - alertTime > 60000) {
-              this.alertThrottle.delete(throttleKey);
-            }
-          }
         }
         
         // Log critical packet detection with throttle info
@@ -897,27 +891,24 @@ export class PacketCaptureService {
           const tempBanKey = `ids:tempban:${sourceIP}`;
           return redis.get(tempBanKey).catch(() => null);
         }).then((alreadyBlocked) => {
-          // Skip if already blocked or blocking in progress
-          if (alreadyBlocked || this.blockingInProgress.has(sourceIP)) {
+          // Skip if already blocked or blocking in progress (use global throttle manager)
+          if (alreadyBlocked || isBlockingInProgress(sourceIP)) {
             if (alreadyBlocked) {
               console.log(`[PACKET] ⚠ IP ${sourceIP} already blocked - skipping duplicate block`);
+            } else {
+              console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
             }
             return null; // Skip blocking
           }
           
-          // Mark as blocking in progress
-          this.blockingInProgress.add(sourceIP);
-          
-          // Remove from set after 10 seconds (blocking should complete by then)
-          setTimeout(() => {
-            this.blockingInProgress.delete(sourceIP);
-          }, 10000);
+          // Mark as blocking in progress (use global throttle manager)
+          setBlockingInProgress(sourceIP);
           
           // Import policy and block
           return import('./policy').then(({ autoBan }) => {
             // Never auto-ban local IP addresses
             if (this.isLocalIP(sourceIP)) {
-              this.blockingInProgress.delete(sourceIP);
+              clearBlockingInProgress(sourceIP);
               return null;
             }
             
@@ -969,8 +960,8 @@ export class PacketCaptureService {
           }
         }).catch((err) => {
           // CRITICAL: Errors must not stop packet processing
-          // Remove from blocking in progress on error
-          this.blockingInProgress.delete(sourceIP);
+          // Remove from blocking in progress on error (use global throttle manager)
+          clearBlockingInProgress(sourceIP);
           if (Math.random() < 0.1) { // Log 10% of errors
             console.warn('[PACKET] Error in blocking process (non-fatal):', (err as Error)?.message);
           }
@@ -1285,23 +1276,10 @@ export class PacketCaptureService {
   /**
    * Clear throttle entries for a specific IP address
    * This is called when an IP is manually unblocked to allow new alerts
+   * NOTE: Now uses global throttle manager, so this is just a wrapper
    */
   public clearThrottleForIP(ip: string): void {
-    // Remove all throttle entries for this IP (regardless of attack type)
-    const keysToDelete: string[] = [];
-    for (const throttleKey of this.alertThrottle.keys()) {
-      if (throttleKey.startsWith(`${ip}:`)) {
-        keysToDelete.push(throttleKey);
-      }
-    }
-    keysToDelete.forEach(key => this.alertThrottle.delete(key));
-    
-    // Also remove from blocking in progress
-    this.blockingInProgress.delete(ip);
-    
-    if (keysToDelete.length > 0) {
-      console.log(`[PACKET] 🧹 Cleared ${keysToDelete.length} throttle entries for ${ip}`);
-    }
+    clearGlobalThrottle(ip);
   }
 
   private generateTestTraffic() {
