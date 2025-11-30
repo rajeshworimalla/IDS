@@ -190,33 +190,29 @@ const NotificationSystem: FC = () => {
           const alertKey = `${alertIP}:${attackType}`;
           
           // For critical alerts: only show one popup per IP:attackType combination
-          // BUT: Always allow grace period notifications (requiresUserDecision) to show
+          // Grace period notifications should show, but with throttling to prevent spam
           if (severity === 'critical') {
-            // DEBUG: Log the alert data to troubleshoot
-            console.log(`[Notifications] DEBUG: Alert data - inGracePeriod: ${inGracePeriod}, requiresUserDecision: ${requiresUserDecision}, alertKey: ${alertKey}`);
-            
-            // Grace period notifications should ALWAYS show (user needs to decide)
             // Check the actual alert object fields, not just the extracted variables
             const isGracePeriodAlert = inGracePeriod || requiresUserDecision || alert.inGracePeriod || alert.requiresUserDecision;
             
-            if (!isGracePeriodAlert && criticalAlertsShown.current.has(alertKey)) {
-              console.log(`[Notifications] Skipping duplicate critical alert for ${alertKey}`);
+            // Check if we've already shown this alert recently
+            // For grace period alerts, use shorter timeout (30 seconds) to allow re-showing if user doesn't respond
+            // For normal alerts, use longer timeout (5 minutes) to prevent spam
+            const throttleTimeout = isGracePeriodAlert ? 30 * 1000 : 5 * 60 * 1000;
+            
+            if (criticalAlertsShown.current.has(alertKey)) {
+              console.log(`[Notifications] Skipping duplicate critical alert for ${alertKey} (throttled)`);
               return; // Don't show another popup for this IP:attackType combination
             }
             
-            // Mark this alert as shown (only if not a grace period notification)
-            // Grace period notifications can show multiple times if user doesn't respond
-            if (!isGracePeriodAlert) {
-              criticalAlertsShown.current.add(alertKey);
-              // Remove from set after 5 minutes to allow new alerts if needed
-              setTimeout(() => {
-                criticalAlertsShown.current.delete(alertKey);
-              }, 5 * 60 * 1000);
-            } else {
-              // For grace period notifications, clear from set to allow re-showing
+            // Mark this alert as shown (for both grace period and normal alerts)
+            criticalAlertsShown.current.add(alertKey);
+            console.log(`[Notifications] Showing ${isGracePeriodAlert ? 'grace period' : 'critical'} notification for ${alertIP}:${attackType}`);
+            
+            // Remove from set after timeout to allow new alerts
+            setTimeout(() => {
               criticalAlertsShown.current.delete(alertKey);
-              console.log(`[Notifications] Showing grace period notification for ${alertIP}:${attackType} (requires user decision)`);
-            }
+            }, throttleTimeout);
           }
           
           // Play sound alert

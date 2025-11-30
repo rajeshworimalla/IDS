@@ -821,22 +821,36 @@ export class PacketCaptureService {
         // Check if IP is in grace period (recently manually unblocked)
         const inGracePeriod = isInGracePeriod(sourceIP);
         
+        // THROTTLE: Check throttling BEFORE sending notifications to prevent spam
+        // For grace period notifications, use longer throttle (30 seconds) to prevent spam
+        // For normal notifications, use shorter throttle (10 seconds for DoS/DDoS, 2 seconds for others)
+        const isDoSOrDDoS = criticalAttackType === 'dos' || criticalAttackType === 'ddos';
+        const ALERT_THROTTLE_MS = inGracePeriod ? 30000 : (isDoSOrDDoS ? 10000 : 2000);
+        
+        // Check throttling - skip if already notified recently (even for grace period)
+        if (isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS)) {
+          // Already notified recently - skip to prevent spam
+          if (!isDoSOrDDoS) { // Only log for non-DoS attacks to reduce spam
+            console.log(`[PACKET] ⏭ Skipping throttled alert for ${sourceIP}:${criticalAttackType} (throttle: ${ALERT_THROTTLE_MS}ms)`);
+          }
+          return; // Skip - already notified recently
+        }
+        
         // CRITICAL: Fast cooldown check - but SKIP if:
         // 1. IP is in grace period (we want to allow notifications after manual unblock)
         // 2. We haven't notified for this attack type yet (first notification should always go through)
-        // This ensures grace period notifications always get through
+        // This ensures grace period notifications always get through (but still throttled above)
         if (!inGracePeriod && alreadyNotifiedForThisAttackType && isInDetectionCooldown(sourceIP)) {
           return; // Skip - IP was processed recently (within 2 seconds) AND already notified
         }
         
         // DEBUG: Log grace period status for troubleshooting
         if (inGracePeriod) {
-          console.log(`[PACKET] 🔍 DEBUG: IP ${sourceIP} is in grace period, allowing notification for ${criticalAttackType}`);
+          console.log(`[PACKET] 🔍 DEBUG: IP ${sourceIP} is in grace period, allowing notification for ${criticalAttackType} (throttled: ${ALERT_THROTTLE_MS}ms)`);
         }
         
         // CRITICAL: Check if already blocked BEFORE processing
         // This prevents blocking on every packet during a flood attack
-        const isDoSOrDDoS = criticalAttackType === 'dos' || criticalAttackType === 'ddos';
         
         // Check if already blocked (for all attack types, not just DoS/DDoS)
         let alreadyBlocked = false;
@@ -849,9 +863,10 @@ export class PacketCaptureService {
           // Continue if Redis check fails
         }
         
-        // CRITICAL: Send notification FIRST if we haven't notified for this attack type yet
+        // CRITICAL: Send notification (throttling already checked above)
         // This ensures notifications are sent even if IP is already blocked
-        if (!alreadyNotifiedForThisAttackType) {
+        // But throttling prevents spam
+        {
           // Haven't sent notification for this attack type yet - send it now
           console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
           
@@ -900,7 +915,7 @@ export class PacketCaptureService {
           };
           
           // Emit alert immediately (before auto-ban) - async, non-blocking
-          // This ensures ONE notification per attack type per IP
+          // Throttling already checked above, so this will only send once per throttle window
           await emitCriticalAlert(false).catch(() => {});
         }
         
@@ -912,26 +927,6 @@ export class PacketCaptureService {
         // Also check if already blocked for this attack type
         if (isAlreadyBlockedForAttackType(sourceIP, criticalAttackType) && alreadyNotifiedForThisAttackType) {
           return; // Already blocked and notified for this attack type - skip
-        }
-        
-        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
-        // BUT: Allow different attack types to be detected (track by IP+attackType)
-        // For DoS/DDoS: Use longer throttle window (10 seconds) to prevent spam
-        const throttleKey = `${sourceIP}:${criticalAttackType}`;
-        const ALERT_THROTTLE_MS = isDoSOrDDoS ? 10000 : 2000; // 10 seconds for DoS/DDoS, 2 seconds for others
-        
-        // Use global throttle manager (persists across capture restarts)
-        if (isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS)) {
-          // Skip - already alerted recently for this IP+attackType combination
-          // But allow different attack types from same IP
-          if (!isDoSOrDDoS) { // Only log for non-DoS attacks to reduce spam
-            console.log(`[PACKET] ⏭ Skipping throttled alert for ${throttleKey}`);
-          }
-          // For DoS/DDoS, if already blocked and notified, skip everything
-          if (isDoSOrDDoS && alreadyBlocked) {
-            return; // Skip all processing
-          }
-          // For other attacks, continue to blocking logic (might need to block)
         }
         
         // Then try to auto-ban (non-blocking)
