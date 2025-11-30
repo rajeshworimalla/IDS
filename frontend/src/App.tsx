@@ -15,41 +15,58 @@ import './App.css'
 
 const App: FC = () => {
   // Use state to track authentication status so it updates the UI when it changes
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
-    authService.isAuthenticated()
-  );
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
 
   // Listen for changes to localStorage and custom events
   useEffect(() => {
-    const checkAuthStatus = () => {
-      const authStatus = authService.isAuthenticated();
-      console.log('Auth status changed:', authStatus);
-      setIsAuthenticated(authStatus);
+    const checkAuthStatus = async () => {
+      // First check if token exists
+      const hasToken = authService.isAuthenticated();
+      
+      if (!hasToken) {
+        setIsAuthenticated(false);
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      // Validate token by trying to get current user
+      try {
+        await authService.getCurrentUser();
+        setIsAuthenticated(true);
+      } catch (error) {
+        // Token is invalid, clear it
+        console.log('Token validation failed, clearing auth:', error);
+        authService.clearAuth();
+        setIsAuthenticated(false);
+      } finally {
+        setIsCheckingAuth(false);
+      }
     };
 
     // Check initially
     checkAuthStatus();
 
     // Add event listener for storage changes (in case of multiple tabs)
-    const handleStorageChange = (e: StorageEvent) => {
+    const handleStorageChange = async (e: StorageEvent) => {
       if (e.key === 'token' || e.key === 'user') {
         console.log('Storage change detected for:', e.key);
-        checkAuthStatus();
+        await checkAuthStatus();
       }
     };
 
     // Add event listener for auth changes within the same tab
-    const handleAuthChange = () => {
+    const handleAuthChange = async () => {
       console.log('Auth change event received');
-      checkAuthStatus();
+      await checkAuthStatus();
     };
 
     // Add event listener for logout button clicks as a backup mechanism
-    const handleLogoutClick = (e: MouseEvent) => {
+    const handleLogoutClick = async (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest('.logout-button')) {
         console.log('Logout button click detected');
-        setTimeout(checkAuthStatus, 100);
+        setTimeout(async () => await checkAuthStatus(), 100);
       }
     };
 
@@ -69,6 +86,22 @@ const App: FC = () => {
   const ProtectedRoute = ({ element }: { element: React.ReactElement }) => {
     return isAuthenticated ? element : <Navigate to="/login" replace />;
   };
+
+  // Show loading state while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        fontSize: '18px',
+        color: '#666'
+      }}>
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <Router>
