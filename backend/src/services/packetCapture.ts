@@ -646,32 +646,13 @@ export class PacketCaptureService {
         }
       }
 
-      // PERFORMANCE: Only queue interesting packets for socket emission (skip normal during high traffic)
-      // This prevents UI lag during attacks
-      if (packetData.status !== 'normal' || socketEmissionQueue.length === 0) {
-        savePromise.then((savedPacket: any) => {
-          try {
-            if (savedPacket) {
-              // Use packetData directly (no need to convert from DB object)
-              const packetObj = typeof savedPacket.toObject === 'function' 
-                ? savedPacket.toObject() 
-                : savedPacket;
-              if (packetObj && typeof packetObj === 'object') {
-                // Add to queue (will be throttled by interval)
-                socketEmissionQueue.push(packetObj);
-                // Limit queue size
-                if (socketEmissionQueue.length > MAX_QUEUE_SIZE) {
-                  socketEmissionQueue.shift();
-                }
-              }
-            }
-          } catch (err) {
-            // Silently ignore socket queue errors to prevent crashes
-          }
-        }).catch((err) => {
-          // Silently ignore errors to prevent crashes
-        });
-      }
+      // PERFORMANCE: DISABLED all normal packet emissions to eliminate lag
+      // UI will fetch from DB via polling instead (every 30 seconds)
+      // Only intrusion alerts are emitted in real-time via 'intrusion-detected' event
+      // This code is disabled - no socket emissions for normal packets
+      // if (DISABLE_NORMAL_PACKET_EMISSIONS) {
+      //   // Normal packets: UI polls DB instead
+      // }
 
       // Auto-ban on critical events with notification (non-blocking)
       // CRITICAL: Always emit alerts for critical packets, even if ML doesn't respond
