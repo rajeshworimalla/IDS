@@ -332,6 +332,12 @@ export class PacketCaptureService {
         return;
       }
 
+      // Log first few packets to verify capture is working (debugging)
+      if (!this.firstPacketLogged) {
+        console.log(`📦 First packet captured! Source: ${sourceIP} → Dest: ${destIP} Protocol: ${protocol}`);
+        this.firstPacketLogged = true;
+      }
+
       const packetData = {
         date: new Date(),
         start_ip: sourceIP,
