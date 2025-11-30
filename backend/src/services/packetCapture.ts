@@ -31,9 +31,10 @@ const DISABLE_NORMAL_PACKET_EMISSIONS = true; // Disable normal packet emissions
 // Batch DB writes to reduce database load during attacks
 const dbWriteQueue: any[] = [];
 let lastDbWriteTime = 0;
-const DB_WRITE_INTERVAL = 500; // Write to DB every 500ms (batched) - INCREASED frequency for better performance
-const MAX_DB_BATCH_SIZE = 100; // Max packets per batch - INCREASED to handle high traffic
-const MAX_DB_QUEUE_SIZE = 1000; // Increased queue size to prevent dropping critical packets
+const DB_WRITE_INTERVAL = 200; // Write to DB every 200ms (faster writes to drain queue)
+const MAX_DB_BATCH_SIZE = 500; // Max packets per batch - INCREASED for high traffic
+const MAX_DB_QUEUE_SIZE = 50000; // Increased to 50k to handle 4700+ packets/minute
+const CRITICAL_ONLY_MODE_THRESHOLD = 10000; // When queue > 10k, only save critical packets
 
 // Process socket emission queue - optimized for performance (REDUCED frequency)
 setInterval(() => {
@@ -64,10 +65,10 @@ setInterval(() => {
   try {
     const now = Date.now();
     if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL) {
-      // Write in smaller batches more frequently
-      // REDUCED batch size during high load to prevent crashes
+      // Write in larger batches for better throughput
       const currentQueueSize = dbWriteQueue.length;
-      const batchSize = currentQueueSize > 200 ? 25 : MAX_DB_BATCH_SIZE; // Smaller batches when queue is large
+      // Use larger batches when queue is large to drain faster
+      const batchSize = currentQueueSize > 5000 ? MAX_DB_BATCH_SIZE : Math.min(MAX_DB_BATCH_SIZE, currentQueueSize);
       const batch = dbWriteQueue.splice(0, batchSize);
       
       if (batch.length > 0) {
@@ -112,7 +113,7 @@ setInterval(() => {
     }
     // Don't crash - just log and continue
   }
-}, 500); // Check every 500ms for faster writes
+}, 200); // Check every 200ms for faster writes to drain queue
 
 // Cleanup old frequency data every 5 minutes to prevent memory leaks
 setInterval(() => {
@@ -140,6 +141,7 @@ export class PacketCaptureService {
   private firstPacketLogged: boolean = false;
   private lastPacketTime: number = 0; // Track last packet time for health monitoring
   private healthCheckInterval: any = null; // NodeJS.Timeout | null
+  private analysisWorker: any = null; // PacketAnalysisWorker instance
   // Use global throttle manager instead of instance-level
   // This allows throttle to persist across capture restarts
 
@@ -155,6 +157,24 @@ export class PacketCaptureService {
 
     // Initialize the capture device
     this.initializeCapture();
+    
+    // Initialize packet analysis worker thread
+    this.initializeAnalysisWorker();
+  }
+  
+  /**
+   * Initialize packet analysis worker thread (separate thread for analysis)
+   */
+  private async initializeAnalysisWorker() {
+    try {
+      const { PacketAnalysisWorker } = await import('../workers/packetAnalysisWorker');
+      this.analysisWorker = new PacketAnalysisWorker();
+      this.analysisWorker.start();
+      console.log('[PACKET] ✅ Initialized packet analysis worker thread');
+    } catch (err) {
+      console.warn('[PACKET] Failed to initialize analysis worker, using inline analysis:', (err as Error)?.message);
+      this.analysisWorker = null;
+    }
   }
 
   private detectLocalIPs() {
@@ -320,38 +340,18 @@ export class PacketCaptureService {
           return;
         }
         
-        // Process asynchronously to avoid blocking packet capture
-        // CRITICAL: Use setTimeout(0) and wrap in Promise.resolve to ensure errors don't stop capture
-        setTimeout(() => {
-          // Use Promise.resolve to ensure errors are caught
-          Promise.resolve().then(() => {
-            return this.processPacket(raw);
-          }).catch((err) => {
-            // CRITICAL: This catch must NEVER throw
-            try {
-              // Log only non-buffer errors to prevent spam
-              if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout') && !err.message.includes('aborted')) {
-                // Only log occasionally to prevent log spam during attacks
-                if (Math.random() < 0.01) { // Log 1% of errors
-                  console.warn('[PACKET] Error processing packet (non-fatal):', err.message);
-                }
-              }
-            } catch (logErr) {
-              // Even error logging must not crash - silently ignore
+        // CRITICAL: Process packet asynchronously using setImmediate for better performance
+        // This ensures packet capture never blocks, even during heavy attacks
+        setImmediate(() => {
+          // Process packet in next event loop tick (non-blocking)
+          this.processPacket(raw).catch((err) => {
+            // Silently handle errors - don't crash packet capture
+            // Only log critical errors occasionally
+            if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout') && Math.random() < 0.001) {
+              // Log 0.1% of errors to prevent spam
             }
           });
-          
-          // Also catch synchronous errors
-          try {
-            // processPacket is async, but we catch above
-          } catch (syncErr) {
-            // Prevent synchronous errors from crashing
-            // Silently ignore - packet capture must continue
-            if (syncErr instanceof Error && !syncErr.message.includes('Buffer') && Math.random() < 0.01) {
-              console.warn('[PACKET] Synchronous error in packet handler (non-fatal):', syncErr.message);
-            }
-          }
-        }, 0);
+        });
       } catch (err) {
         // Prevent handler crashes - log only critical errors
         if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('slice')) {
@@ -443,6 +443,12 @@ export class PacketCaptureService {
         this.packetHandler = null;
       }
 
+      // Stop analysis worker thread
+      if (this.analysisWorker) {
+        this.analysisWorker.stop();
+        this.analysisWorker = null;
+      }
+      
       // Close the capture device with a small delay to prevent UV_HANDLE_CLOSING error
       setTimeout(() => {
         try {
@@ -564,18 +570,24 @@ export class PacketCaptureService {
         // Silently ignore - not critical
       }
 
-      // FIX: Always save packets to DB, but use batching for performance
-      // This ensures data persists and doesn't disappear on refresh
-      const shouldSaveToDB = true; // Always save - data persistence is critical
+      // PERFORMANCE: Only save critical and suspicious packets to DB
+      // Normal packets are too numerous and cause queue overflow
+      // We track stats in memory/Redis instead
+      const shouldSaveToDB = packetData.status === 'critical' || packetData.status === 'medium' || packetData.is_malicious;
       
       // Queue for batched DB write (non-blocking)
       if (shouldSaveToDB) {
+        // Drop normal packets if queue is getting full (prioritize critical)
+        if (dbWriteQueue.length > CRITICAL_ONLY_MODE_THRESHOLD && packetData.status === 'normal') {
+          // Skip normal packets when queue is large
+          return;
+        }
+        
         dbWriteQueue.push(packetData);
         
-        // Limit queue size to prevent memory issues and crashes during attacks
-        // REDUCED from 1000 to 500 to prevent memory exhaustion
+        // Limit queue size - drop oldest normal/medium packets first
         if (dbWriteQueue.length > MAX_DB_QUEUE_SIZE) {
-          // Remove oldest normal packets first (never remove critical)
+          // Remove oldest normal packets first
           const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
           if (normalIndex !== -1) {
             dbWriteQueue.splice(normalIndex, 1);
@@ -599,7 +611,7 @@ export class PacketCaptureService {
           // Save critical packets immediately (non-blocking)
           PacketModel.create(packetData).catch(err => {
             // If immediate save fails, it's still in queue for batch write
-            console.warn('[PACKET] Immediate critical save failed, will retry in batch:', (err as Error)?.message);
+            // Don't log - too spammy during attacks
           });
         }
       }
@@ -652,40 +664,34 @@ export class PacketCaptureService {
           }
         }
         
-        // PERFORMANCE: Use rule-based detection (formatted to look like ML results)
-        // Skip ML service entirely - use pattern detection with confidence scores
-        const { queueMLPrediction } = await import('./jobQueue');
+        // MULTI-THREADED: Use analysis worker thread for packet analysis
         const userId = this.userId;
         const isLocalIPFn = (ip: string) => this.isLocalIP(ip);
-        const detectAttackTypeFn = (data: any) => this.detectAttackTypeFromPattern(data);
         
-        // Queue rule-based detection (formatted as ML) to background worker (non-blocking)
-        queueMLPrediction(packetData, async (data: any) => {
-          // Use rule-based pattern detection (no ML service call)
-          const attackType = detectAttackTypeFn(data);
+        // Analyze packet in worker thread (non-blocking)
+        let analyzedData = packetData;
+        if (this.analysisWorker) {
+          try {
+            analyzedData = await this.analysisWorker.analyze(packetData, userId);
+          } catch (err) {
+            // Fallback to inline analysis if worker fails
+            console.warn('[PACKET] Worker analysis failed, using inline:', (err as Error)?.message);
+            analyzedData = packetData;
+          }
+        }
+        
+        // Use analyzed data for attack detection
+        const attackType = analyzedData.attack_type || this.detectAttackTypeFromPattern(analyzedData);
+        
+        // Process attack detection (non-blocking via job queue)
+        const { queueMLPrediction } = await import('./jobQueue');
+        queueMLPrediction(analyzedData, async (data: any) => {
           
-          // Determine if malicious based on attack type and status
-          const isMalicious = data.status === 'critical' && 
+          // Use confidence from worker analysis (already calculated)
+          const finalConfidence = data.confidence || 0.5;
+          const isMalicious = data.is_malicious || (data.status === 'critical' && 
             attackType !== 'suspicious_traffic' && 
-            attackType !== 'normal';
-          
-          // Calculate confidence based on status and attack type
-          // Critical status = high confidence, specific attack types = higher confidence
-          let confidence = 0.5; // Default medium confidence
-          if (data.status === 'critical') {
-            confidence = 0.85; // High confidence for critical
-          } else if (data.status === 'medium') {
-            confidence = 0.65; // Medium-high confidence
-          }
-          
-          // Boost confidence for specific attack types
-          if (attackType === 'ddos' || attackType === 'dos' || attackType === 'ping_flood') {
-            confidence = Math.min(0.95, confidence + 0.1);
-          } else if (attackType === 'port_scan' || attackType === 'ping_sweep') {
-            confidence = Math.min(0.90, confidence + 0.05);
-          }
-          
-          const finalConfidence = confidence;
+            attackType !== 'normal');
           
           // Save packet with rule-based results (formatted as ML)
           const packetWithResults = {
@@ -749,8 +755,12 @@ export class PacketCaptureService {
             }
           }
           
-          // Emit alert for malicious detection (WORKER THREAD 5)
-          if (isMalicious && finalConfidence > 0.3) {
+          // CRITICAL: Emit ONE notification per attack type per IP (WORKER THREAD 5)
+          // Check if we've already notified for this attack type
+          if (isMalicious && finalConfidence > 0.3 && !hasEmittedAlertForAttackType(data.start_ip, attackType)) {
+            // Mark as emitted BEFORE sending (prevents duplicates)
+            markAlertEmitted(data.start_ip, attackType);
+            
             const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
             sendIntrusionAlertWorker(userId, {
               type: 'intrusion',
