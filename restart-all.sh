@@ -157,8 +157,25 @@ if [ "$REDIS_RUNNING" = false ]; then
 fi
 echo ""
 
-# Step 4: Build and start backend
-echo -e "${YELLOW}[4/6]${NC} Building and starting backend..."
+# Step 4: Setup packet capture permissions (if not already set)
+echo -e "${YELLOW}[4/6]${NC} Checking packet capture permissions..."
+if [ -f "$SCRIPT_DIR/setup-packet-capture-permissions.sh" ]; then
+    # Check if capabilities are already set
+    NODE_BIN=$(which node 2>/dev/null || echo "/usr/bin/node")
+    if [ -f "$NODE_BIN" ]; then
+        CAPS=$(getcap "$NODE_BIN" 2>/dev/null || echo "")
+        if ! echo "$CAPS" | grep -q "cap_net_raw\|cap_net_admin"; then
+            echo "   Setting up packet capture permissions (one-time setup)..."
+            sudo "$SCRIPT_DIR/setup-packet-capture-permissions.sh" || echo "   ⚠ Could not set capabilities (packet capture may require sudo)"
+        else
+            echo -e "${GREEN}   ✓ Packet capture permissions already set${NC}"
+        fi
+    fi
+fi
+echo ""
+
+# Step 5: Build and start backend
+echo -e "${YELLOW}[5/6]${NC} Building and starting backend..."
 cd "$BACKEND_DIR" || exit 1
 
 if [ ! -d "node_modules" ]; then
@@ -175,7 +192,8 @@ fi
 echo -e "${GREEN}   ✓ Build successful${NC}"
 
 echo "   Starting backend..."
-sudo npm start > "$LOG_FILE" 2>&1 &
+# Try without sudo first (if capabilities are set), fallback to sudo
+npm start > "$LOG_FILE" 2>&1 &
 BACKEND_PID=$!
 sleep 5
 
@@ -197,8 +215,8 @@ else
 fi
 echo ""
 
-# Step 5: Start prediction service (optional)
-echo -e "${YELLOW}[5/6]${NC} Starting prediction service..."
+# Step 6: Start prediction service (optional)
+echo -e "${YELLOW}[6/6]${NC} Starting prediction service..."
 if [ -f "$BACKEND_DIR/venv/bin/activate" ]; then
     cd "$BACKEND_DIR" || exit 1
     source venv/bin/activate
@@ -216,8 +234,8 @@ else
 fi
 echo ""
 
-# Step 6: Start frontend
-echo -e "${YELLOW}[6/6]${NC} Starting frontend..."
+# Step 7: Start frontend
+echo -e "${YELLOW}[7/7]${NC} Starting frontend..."
 cd "$FRONTEND_DIR" || exit 1
 
 if [ ! -d "node_modules" ]; then
