@@ -203,7 +203,14 @@ export class PacketCaptureService {
     }
 
     if (!selectedInterface) {
-      throw new Error(`Failed to open any capture device. Last error: ${lastError}`);
+      const errorMsg = lastError ? String(lastError) : 'Unknown error';
+      console.error('❌ Failed to open any capture device. Last error:', errorMsg);
+      throw new Error(`Failed to open any capture device. Last error: ${errorMsg}\n\n` +
+        `Possible causes:\n` +
+        `1. Missing permissions (try running with sudo/root)\n` +
+        `2. No network interfaces available\n` +
+        `3. WinPcap/Npcap not installed (Windows)\n` +
+        `4. libpcap not installed (Linux)`);
     }
   }
 

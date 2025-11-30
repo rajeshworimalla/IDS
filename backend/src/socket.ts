@@ -107,21 +107,58 @@ export function initializeSocket(server: any) {
           // Clean up existing capture if any
           if (userCaptures[userId]) {
             console.log('Stopping existing capture for user:', userId);
-            userCaptures[userId].stopCapture();
+            try {
+              userCaptures[userId].stopCapture();
+            } catch (stopErr) {
+              console.warn('Error stopping existing capture:', stopErr);
+            }
             delete userCaptures[userId];
           }
 
           // Create new capture instance for this user
           console.log('Creating new packet capture service for user:', userId);
-          userCaptures[userId] = new PacketCaptureService(userId);
-          userCaptures[userId].startCapture();
+          try {
+            userCaptures[userId] = new PacketCaptureService(userId);
+            console.log('Packet capture service created, starting capture...');
+            userCaptures[userId].startCapture();
 
-          // Notify client
-          socket.emit('scanning-status', { isScanning: true });
-          console.log('Packet capture started successfully for user:', userId);
-        } catch (error) {
-          console.error('Error starting packet capture:', error);
-          socket.emit('scanning-status', { isScanning: false, error: `Failed to start packet capture: ${error}` });
+            // Notify client
+            socket.emit('scanning-status', { isScanning: true });
+            console.log('✅ Packet capture started successfully for user:', userId);
+          } catch (initError: any) {
+            console.error('❌ Error creating packet capture service:', initError);
+            const errorMessage = initError?.message || String(initError);
+            console.error('Full error details:', {
+              message: errorMessage,
+              stack: initError?.stack,
+              name: initError?.name
+            });
+            
+            // Provide helpful error messages
+            let userFriendlyError = errorMessage;
+            if (errorMessage.includes('No network interfaces')) {
+              userFriendlyError = 'No network interfaces found. Make sure you have network adapters enabled.';
+            } else if (errorMessage.includes('Failed to open')) {
+              userFriendlyError = `Failed to open network interface. This usually requires root/admin privileges. Error: ${errorMessage}`;
+            } else if (errorMessage.includes('permission') || errorMessage.includes('Permission')) {
+              userFriendlyError = 'Permission denied. Packet capture requires root/admin privileges. Try running with sudo.';
+            }
+            
+            socket.emit('scanning-status', { 
+              isScanning: false, 
+              error: userFriendlyError,
+              details: errorMessage
+            });
+            throw initError; // Re-throw to be caught by outer catch
+          }
+        } catch (error: any) {
+          console.error('❌ Error starting packet capture:', error);
+          const errorMessage = error?.message || String(error);
+          socket.emit('scanning-status', { 
+            isScanning: false, 
+            error: `Failed to start packet capture: ${errorMessage}`,
+            details: error?.stack
+          });
         }
       });
 

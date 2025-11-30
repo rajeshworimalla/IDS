@@ -120,8 +120,13 @@ const EventsLog: FC = () => {
       console.log('Scanning status:', status);
       setScanningState(status.isScanning ? 'scanning' : 'idle');
       if (status.error) {
-        console.error('Scanning error:', status.error);
+        console.error('❌ Scanning error:', status.error);
+        if (status.details) {
+          console.error('Error details:', status.details);
+        }
         setScanningState('idle');
+        // Show error to user (you might want to add a toast notification here)
+        alert(`Failed to start packet capture:\n\n${status.error}\n\nCheck backend logs for details.`);
       }
     });
 
