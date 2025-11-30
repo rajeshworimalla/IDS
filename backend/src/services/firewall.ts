@@ -281,6 +281,17 @@ export const firewall = {
           await ipsetAdd(ip, true, opts?.ttlSeconds);
           await flushConntrack(ip, true);
           
+          // CRITICAL: Add direct ip6tables OUTPUT rule as backup
+          if (bins.ip6tables) {
+            try {
+              await tryRun(bins.ip6tables, ['-C', 'OUTPUT', '-d', ip, '-j', 'DROP']);
+              // Rule exists, skip
+            } catch {
+              await run(bins.ip6tables, ['-I', 'OUTPUT', '1', '-d', ip, '-j', 'DROP']);
+              console.log(`[FIREWALL] ✓ Added direct IPv6 OUTPUT rule for ${ip} at position 1`);
+            }
+          }
+          
           // Final verification (non-blocking)
           try {
             const { stdout } = await execAsync(`${bins.ipset} list ids6_blocklist`, { timeout: 2000 });
