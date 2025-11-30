@@ -2,7 +2,7 @@ import { FC, useEffect, useState, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { authService } from '../services/auth';
-import { ipBlockService } from '../services/ipBlockService';
+import { ipBlockService, BlockedIP } from '../services/ipBlockService';
 
 interface IntrusionAlert {
   type: string;
@@ -25,6 +25,8 @@ const NotificationSystem: FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // Track which critical alerts have been shown: IP:attackType (allows different attack types from same IP)
   const criticalAlertsShown = useRef<Set<string>>(new Set());
+  // Track blocked IPs to filter out notifications for already-blocked IPs
+  const blockedIPs = useRef<Set<string>>(new Set());
   
   // Create audio element for sound notifications
   useEffect(() => {
@@ -94,6 +96,16 @@ const NotificationSystem: FC = () => {
         return;
       }
 
+      // Load blocked IPs on mount
+      ipBlockService.getBlockedIPs()
+        .then((blockedList: BlockedIP[]) => {
+          blockedIPs.current = new Set(blockedList.map(b => b.ip));
+          console.log(`[Notifications] Loaded ${blockedList.length} blocked IPs`);
+        })
+        .catch((err: unknown) => {
+          console.warn('[Notifications] Error loading blocked IPs:', err);
+        });
+
       const socketConnection = io('http://localhost:5001', {
         auth: { token },
         withCredentials: true,
@@ -119,23 +131,22 @@ const NotificationSystem: FC = () => {
         // Don't crash, just log
       });
 
+      // Listen for ip-blocked event to track blocked IPs
+      socketConnection.on('ip-blocked', (data: { ip: string; reason?: string; method?: string }) => {
+        try {
+          blockedIPs.current.add(data.ip);
+          console.log(`[Notifications] IP ${data.ip} blocked - added to blocked list`);
+        } catch (err) {
+          console.warn('[Notifications] Error processing ip-blocked:', err);
+        }
+      });
+
       // Listen for blocking-complete event (system ready for next attack)
       socketConnection.on('blocking-complete', (data: { ip: string; message: string }) => {
         try {
           console.log('[Notifications] Blocking complete:', data.message);
-          // Show a success notification
-          const successAlert = {
-            type: 'blocking-complete',
-            severity: 'low' as const,
-            ip: data.ip,
-            attackType: 'Blocked',
-            confidence: 1.0,
-            protocol: '',
-            description: data.message,
-            timestamp: new Date().toISOString(),
-            autoBlocked: false
-          };
-          setAlerts(prev => [successAlert, ...prev.slice(0, 4)]);
+          // Don't show notification for blocking-complete - just track the blocked IP
+          blockedIPs.current.add(data.ip);
         } catch (err) {
           console.warn('[Notifications] Error processing blocking-complete:', err);
         }
@@ -156,6 +167,23 @@ const NotificationSystem: FC = () => {
           const attackType = alert.attackType || 'unknown';
           const inGracePeriod = alert.inGracePeriod || false;
           const requiresUserDecision = alert.requiresUserDecision || false;
+          
+          // CRITICAL: Don't show notifications for already-blocked IPs
+          // UNLESS it's a grace period notification (recently unblocked)
+          const isBlocked = blockedIPs.current.has(alertIP);
+          
+          // If this is a grace period notification, the IP was recently unblocked
+          // Remove it from blocked set so we can show notifications
+          if (inGracePeriod || requiresUserDecision) {
+            blockedIPs.current.delete(alertIP);
+            console.log(`[Notifications] IP ${alertIP} in grace period - removed from blocked list to allow notifications`);
+          }
+          
+          // Skip notifications for blocked IPs (unless grace period)
+          if (isBlocked && !inGracePeriod && !requiresUserDecision) {
+            console.log(`[Notifications] Skipping notification for already-blocked IP: ${alertIP}`);
+            return; // Don't show notification for blocked IPs
+          }
           
           // Create unique key for this alert: IP:attackType
           // This allows different attack types from the same IP to show separate notifications
