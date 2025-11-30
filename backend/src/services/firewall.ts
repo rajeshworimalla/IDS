@@ -238,6 +238,20 @@ export const firewall = {
           await ipsetAdd(ip, false, opts?.ttlSeconds);
           await flushConntrack(ip, false);
           
+          // CRITICAL: Add direct iptables OUTPUT rule as backup (ipset alone may not work)
+          // This ensures the IP is blocked even if ipset rules fail
+          if (bins.iptables) {
+            try {
+              // Add direct OUTPUT rule to block this specific IP
+              await tryRun(bins.iptables, ['-C', 'OUTPUT', '-d', ip, '-j', 'DROP']);
+              // Rule exists, skip
+            } catch {
+              // Rule doesn't exist, add it at position 1
+              await run(bins.iptables, ['-I', 'OUTPUT', '1', '-d', ip, '-j', 'DROP']);
+              console.log(`[FIREWALL] ✓ Added direct OUTPUT rule for ${ip} at position 1`);
+            }
+          }
+          
           // Re-ensure OUTPUT rule is at top after adding IP (critical for domain blocking)
           try {
             if (bins.iptables) {
@@ -308,6 +322,13 @@ export const firewall = {
         await ipsetDel(ip, version === 6);
       } else {
         await iptablesDelete(ip, version === 6);
+      }
+      // Also remove direct iptables OUTPUT rule if it exists
+      if (bins.iptables && version === 4) {
+        await tryRun(bins.iptables, ['-D', 'OUTPUT', '-d', ip, '-j', 'DROP']);
+      }
+      if (bins.ip6tables && version === 6) {
+        await tryRun(bins.ip6tables, ['-D', 'OUTPUT', '-d', ip, '-j', 'DROP']);
       }
       await flushConntrack(ip, version === 6);
       return { removed: true };

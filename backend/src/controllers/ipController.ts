@@ -149,7 +149,24 @@ export const blockIP = async (req: Request, res: Response) => {
     // Ensure base rules are set before blocking (critical for OUTPUT rule)
     try {
       await firewall.ensureBaseRules();
-      console.log(`[BLOCK] Base firewall rules ensured`);
+      console.log(`[BLOCK] ✓ Base firewall rules ensured`);
+      
+      // Verify OUTPUT rule is at position 1 (critical for domain blocking)
+      try {
+        const { execAsync } = await import('../services/firewall');
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execPromise = promisify(exec);
+        const { stdout } = await execPromise('sudo iptables -L OUTPUT -n --line-numbers | head -5');
+        console.log(`[BLOCK] OUTPUT chain rules (first 5):\n${stdout}`);
+        if (stdout.includes('ids_blocklist') && stdout.includes('DROP')) {
+          console.log(`[BLOCK] ✓ OUTPUT rule with ids_blocklist found`);
+        } else {
+          console.warn(`[BLOCK] ⚠ OUTPUT rule with ids_blocklist not found in first 5 rules!`);
+        }
+      } catch (verifyErr) {
+        console.warn(`[BLOCK] Could not verify OUTPUT rules:`, verifyErr);
+      }
     } catch (ruleErr) {
       console.warn(`[BLOCK] Warning: Could not ensure base rules:`, ruleErr);
     }
