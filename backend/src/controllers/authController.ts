@@ -46,6 +46,22 @@ export const register = async (req: Request, res: Response) => {
   try {
     const { email, password, name } = req.body;
 
+    // Validate input
+    if (!email || !password || !name) {
+      return res.status(400).json({ message: 'All fields (name, email, password) are required' });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format' });
+    }
+
+    // Validate password length
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -74,9 +90,25 @@ export const register = async (req: Request, res: Response) => {
         role: user.role,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Registration error:', error);
-    res.status(500).json({ message: 'Server error during registration' });
+    
+    // Provide more specific error messages
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e: any) => e.message).join(', ');
+      return res.status(400).json({ message: `Validation error: ${messages}` });
+    }
+    
+    if (error.code === 11000) {
+      // MongoDB duplicate key error
+      return res.status(400).json({ message: 'Email already registered' });
+    }
+    
+    if (error.message?.includes('MongoServerError') || error.message?.includes('MongoNetworkError')) {
+      return res.status(500).json({ message: 'Database connection error. Please check if MongoDB is running.' });
+    }
+    
+    res.status(500).json({ message: `Server error during registration: ${error.message || 'Unknown error'}` });
   }
 };
 

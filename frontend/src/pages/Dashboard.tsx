@@ -1,5 +1,4 @@
-import { FC, useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { FC, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -41,6 +40,8 @@ const Dashboard: FC = () => {
   const [systemInfo, setSystemInfo] = useState<any>(null);
   const socketRef = useRef<Socket | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isVisibleRef = useRef(true);
+  const packetRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchData = async (skipCharts = false) => {
     try {
@@ -131,6 +132,16 @@ const Dashboard: FC = () => {
   };
 
   useEffect(() => {
+    // Page Visibility API - pause updates when tab is hidden
+    const handleVisibilityChange = () => {
+      isVisibleRef.current = !document.hidden;
+      if (isVisibleRef.current) {
+        // Tab became visible - refresh data
+        fetchData(false).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     // Initial fetch with error handling (fetch charts on initial load)
     fetchData(false).catch(err => {
       console.error('Initial fetch failed:', err);
@@ -165,24 +176,15 @@ const Dashboard: FC = () => {
           // Don't crash, just log
         });
 
-        // Listen for new packets and refresh stats (debounced)
-        let packetRefreshTimeout: NodeJS.Timeout | null = null;
-        socket.on('new-packet', () => {
-          // Debounce: only refresh after 2 seconds of no new packets
-          if (packetRefreshTimeout) {
-            clearTimeout(packetRefreshTimeout);
-          }
-          packetRefreshTimeout = setTimeout(() => {
-            fetchData(true).catch((err: any) => { // Skip charts for faster refresh
-              console.warn('[Dashboard] Error refreshing on new packet:', err);
-            });
-          }, 2000);
-        });
+        // Listen for new packets - DISABLED for performance (only update on intrusions)
+        // socket.on('new-packet', () => {
+        //   // Disabled to reduce lag - stats will update via polling only
+        // });
 
-        // Listen for intrusion alerts - CRITICAL for attack detection
+        // Listen for intrusion alerts - CRITICAL for attack detection (always update)
         socket.on('intrusion-detected', (alert: any) => {
           console.log('[Dashboard] 🚨 INTRUSION DETECTED:', alert);
-          // Immediately refresh stats to show attack (skip charts for speed)
+          // Always refresh for intrusions, even if tab is hidden
           fetchData(true).catch((err: any) => {
             console.warn('[Dashboard] Error refreshing on intrusion:', err);
           });
@@ -195,13 +197,16 @@ const Dashboard: FC = () => {
       // Continue without socket - polling will still work
     }
 
-    // Set up polling interval to refresh stats every 10 seconds (reduced frequency)
+    // Set up polling interval to refresh stats every 120 seconds (minimal updates)
     try {
       refreshIntervalRef.current = setInterval(() => {
-      fetchData(true).catch((err: any) => { // Skip charts on polling for performance
-        console.warn('[Dashboard] Polling refresh error:', err);
-      });
-      }, 10000); // Increased from 5 to 10 seconds
+        // Only poll when tab is visible
+        if (isVisibleRef.current) {
+          fetchData(true).catch((err: any) => { // Skip charts on polling for performance
+            console.warn('[Dashboard] Polling refresh error:', err);
+          });
+        }
+      }, 120000); // Increased to 120 seconds (2 minutes) for minimal background updates
     } catch (err) {
       console.warn('[Dashboard] Error setting up polling:', err);
     }
@@ -209,6 +214,7 @@ const Dashboard: FC = () => {
     // Cleanup
     return () => {
       try {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (socketRef.current) {
           socketRef.current.disconnect();
           socketRef.current = null;
@@ -216,6 +222,10 @@ const Dashboard: FC = () => {
         if (refreshIntervalRef.current) {
           clearInterval(refreshIntervalRef.current);
           refreshIntervalRef.current = null;
+        }
+        if (packetRefreshTimeoutRef.current) {
+          clearTimeout(packetRefreshTimeoutRef.current);
+          packetRefreshTimeoutRef.current = null;
         }
       } catch (err) {
         console.warn('[Dashboard] Cleanup error:', err);
@@ -226,20 +236,11 @@ const Dashboard: FC = () => {
   return (
     <div className="dashboard-page">
       <Navbar />
-      <motion.main
-        className="dashboard-content"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-      >
+      <main className="dashboard-content">
         {error && (
-          <motion.div 
-            className="error-message"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <div className="error-message">
             {error}
-          </motion.div>
+          </div>
         )}
         
         <div className="dashboard-header">
@@ -259,18 +260,8 @@ const Dashboard: FC = () => {
           </div>
         </div>
 
-        <motion.div 
-          className="stats-grid"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <motion.div
-            className="stats-card"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.15 }}
-          >
+        <div className="stats-grid">
+          <div className="stats-card">
             <span className="stats-icon">📊</span>
             <div className="stats-info">
               <span className="stats-value">{stats.totalPackets}</span>
@@ -279,65 +270,39 @@ const Dashboard: FC = () => {
                 (All captured)
               </span>
             </div>
-          </motion.div>
-          <motion.div
-            className="stats-card"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.15 }}
-          >
+          </div>
+          <div className="stats-card">
             <span className="stats-icon">⚠️</span>
             <div className="stats-info">
               <span className="stats-value">{alertStats.critical || stats.criticalCount}</span>
               <span className="stats-title">CRITICAL</span>
             </div>
-          </motion.div>
-          <motion.div
-            className="stats-card"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
+          </div>
+          <div className="stats-card">
             <span className="stats-icon">🔍</span>
             <div className="stats-info">
               <span className="stats-value">{alertStats.total || stats.maliciousCount}</span>
               <span className="stats-title">ATTACKS DETECTED</span>
             </div>
-          </motion.div>
-          {/* <motion.div
-            className="stats-card"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-          >
-            <span className="stats-icon">📦</span>
-            <div className="stats-info">
-              <span className="stats-value">{Math.round(stats.avgBytes)}</span>
-              <span className="stats-title">AVG BYTES</span>
-            </div>
-          </motion.div> */}
-        </motion.div>
+          </div>
+        </div>
 
-        <motion.div 
-          className="charts-grid"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
+        <div className="charts-grid">
           <div className="chart-card">
             <h3>EVENT DISTRIBUTION</h3>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie
-                  data={pieData}
+                  data={memoizedPieData}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
                   outerRadius={80}
                   paddingAngle={5}
                   dataKey="value"
+                  isAnimationActive={false}
                 >
-                  {pieData.map((entry, index) => (
+                  {memoizedPieData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
@@ -349,13 +314,13 @@ const Dashboard: FC = () => {
           <div className="chart-card">
             <h3>NETWORK LOAD</h3>
             <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={lineData}>
+              <LineChart data={memoizedLineData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                 <XAxis dataKey="time" stroke="#8a8d9f" />
                 <YAxis stroke="#8a8d9f" />
                 <Tooltip />
-                <Line type="monotone" dataKey="value1" stroke="#3699ff" strokeWidth={2} dot={false} name="TCP" />
-                <Line type="monotone" dataKey="value2" stroke="#00d0ff" strokeWidth={2} dot={false} name="UDP" />
+                <Line type="monotone" dataKey="value1" stroke="#3699ff" strokeWidth={2} dot={false} isAnimationActive={false} name="TCP" />
+                <Line type="monotone" dataKey="value2" stroke="#00d0ff" strokeWidth={2} dot={false} isAnimationActive={false} name="UDP" />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -363,17 +328,17 @@ const Dashboard: FC = () => {
           <div className="chart-card">
             <h3>TOP HOSTS</h3>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={barData} layout="vertical">
+              <BarChart data={memoizedBarData} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                 <XAxis type="number" stroke="#8a8d9f" />
                 <YAxis dataKey="name" type="category" stroke="#8a8d9f" width={100} />
                 <Tooltip />
-                <Bar dataKey="value" fill="#3699ff" barSize={10} />
+                <Bar dataKey="value" fill="#3699ff" barSize={10} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </motion.div>
-      </motion.main>
+        </div>
+      </main>
     </div>
   );
 };

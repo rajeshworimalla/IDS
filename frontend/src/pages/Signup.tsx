@@ -103,10 +103,9 @@ const Signup: FC = () => {
       
     } catch (err: any) {
       console.error('Registration error:', err);
-      setError(
-        err.response?.data?.message || 
-        'An error occurred during registration. Please try again.'
-      );
+      // Show the actual error message from the service
+      const errorMessage = err.message || err.response?.data?.message || 'An error occurred during registration. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

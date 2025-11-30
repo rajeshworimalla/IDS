@@ -175,23 +175,10 @@ const Monitoring: FC = () => {
         // Don't crash, just log
       });
 
-        // Listen for new packets and intrusion alerts (debounced + only when visible)
-        socket.on('new-packet', () => {
-          // Only update if tab is visible
-          if (!isVisibleRef.current) return;
-          
-          // Increased debounce: only refresh after 5 seconds of no new packets
-          if (packetRefreshTimeoutRef.current) {
-            clearTimeout(packetRefreshTimeoutRef.current);
-          }
-          packetRefreshTimeoutRef.current = setTimeout(() => {
-            if (isVisibleRef.current) {
-              fetchData().catch((err: any) => {
-                console.warn('[Monitoring] Error refreshing on new packet:', err);
-              });
-            }
-          }, 5000); // Increased from 2 to 5 seconds
-        });
+        // Listen for new packets - DISABLED for performance (only update on intrusions)
+        // socket.on('new-packet', () => {
+        //   // Disabled to reduce lag - stats will update via polling only
+        // });
 
         socket.on('intrusion-detected', () => {
           // Always refresh for intrusions, even if tab is hidden
@@ -210,7 +197,7 @@ const Monitoring: FC = () => {
       // Continue without socket - polling will still work
     }
 
-    // Set up polling interval to refresh every 30 seconds (much reduced frequency)
+    // Set up polling interval to refresh every 120 seconds (minimal updates)
     // Sync with Dashboard polling interval for consistency
     try {
       refreshIntervalRef.current = setInterval(() => {
@@ -220,7 +207,7 @@ const Monitoring: FC = () => {
             console.warn('[Monitoring] Polling refresh error:', err);
           });
         }
-      }, 30000); // Increased from 10 to 30 seconds
+      }, 120000); // Increased to 120 seconds (2 minutes) for minimal background updates
     } catch (err) {
       console.warn('[Monitoring] Error setting up polling:', err);
     }
@@ -421,53 +408,31 @@ const Monitoring: FC = () => {
   return (
     <div className="monitoring-page">
       <Navbar />
-      <motion.main
-        className="monitoring-content"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-      >
+      <main className="monitoring-content">
         {error && (
-          <motion.div 
-            className="error-message"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <div className="error-message">
             {error}
-          </motion.div>
+          </div>
         )}
         {blockSuccess && (
-          <motion.div 
-            className="success-message"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
+          <div className="success-message">
             {blockSuccess}
-          </motion.div>
+          </div>
         )}
 
-        <motion.div 
-          className="monitoring-header"
-          initial={{ y: -10 }}
-          animate={{ y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
+        <div className="monitoring-header">
           <div className="header-row">
             <h1>Monitoring</h1>
             <div className="header-actions">
-              <motion.button
+              <button
                 className="view-blocked-button"
                 onClick={handleOpenBlockedIPs}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
               >
                 🚫 View blocked IPs
-              </motion.button>
-              <motion.button
+              </button>
+              <button
                 className="refresh-button"
                 onClick={() => fetchData()}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -479,44 +444,24 @@ const Monitoring: FC = () => {
             </div>
           </div>
           <div className="monitoring-stats">
-            <motion.div 
-              className="stat-card critical"
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.15 }}
-            >
+            <div className="stat-card critical">
               <h3>Critical</h3>
               <span className="stat-value">{alertStats.critical}</span>
-            </motion.div>
-            <motion.div 
-              className="stat-card high"
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.15 }}
-            >
+            </div>
+            <div className="stat-card high">
               <h3>High</h3>
               <span className="stat-value">{alertStats.high}</span>
-            </motion.div>
-            <motion.div 
-              className="stat-card medium"
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.15 }}
-            >
+            </div>
+            <div className="stat-card medium">
               <h3>Medium</h3>
               <span className="stat-value">{alertStats.medium}</span>
-            </motion.div>
-            <motion.div 
-              className="stat-card low"
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ duration: 0.15 }}
-            >
+            </div>
+            <div className="stat-card low">
               <h3>Low</h3>
               <span className="stat-value">{alertStats.low}</span>
-            </motion.div>
+            </div>
           </div>
-        </motion.div>
+        </div>
 
         <div className="controls-container">
           <div className="search-container">
@@ -534,7 +479,7 @@ const Monitoring: FC = () => {
               <h4>Severity</h4>
               <div className="filter-options">
                 {filterOptions.severity.map(option => (
-                  <motion.button
+                  <button
                     key={`severity-${option.value}`}
                     className={`filter-chip ${filters.severity.includes(option.value) ? 'active' : ''}`}
                     style={{ 
@@ -542,12 +487,9 @@ const Monitoring: FC = () => {
                       '--chip-bg': `${option.color}22`
                     } as React.CSSProperties}
                     onClick={() => handleFilterToggle('severity', option.value)}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    transition={{ duration: 0.1 }}
                   >
                     {option.label}
-                  </motion.button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -556,16 +498,13 @@ const Monitoring: FC = () => {
               <h4>Status</h4>
               <div className="filter-options">
                 {filterOptions.status.map(option => (
-                  <motion.button
+                  <button
                     key={`status-${option.value}`}
                     className={`filter-chip ${filters.status.includes(option.value) ? 'active' : ''}`}
                     onClick={() => handleFilterToggle('status', option.value)}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    transition={{ duration: 0.1 }}
                   >
                     {option.label}
-                  </motion.button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -766,7 +705,7 @@ const Monitoring: FC = () => {
             </div>
           </div>
         )}
-      </motion.main>
+      </main>
     </div>
   );
 };

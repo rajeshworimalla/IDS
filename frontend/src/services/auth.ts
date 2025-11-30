@@ -71,6 +71,7 @@ class AuthService {
 
   async register(data: RegisterData): Promise<AuthResponse> {
     try {
+      console.log('Making registration request...');
       const response = await api.post<AuthResponse>(API_ENDPOINTS.AUTH.REGISTER, data);
       
       if (!response.data || !response.data.token || !response.data.user) {
@@ -85,10 +86,20 @@ class AuthService {
       
       return response.data;
     } catch (error: any) {
+      console.error('Registration error details:', error);
+      
+      // Handle different error types with specific messages
       if (error.response?.status === 400) {
-        throw new Error(error.response.data.message || 'Registration failed');
+        throw new Error(error.response.data?.message || 'Email already registered or invalid data');
+      } else if (error.response?.status === 500) {
+        throw new Error(error.response.data?.message || 'Server error. Please check if MongoDB is running.');
+      } else if (!error.response) {
+        // Network error or server not reachable
+        throw new Error('Cannot connect to server. Please check if the backend is running on port 5001.');
+      } else {
+        // Other HTTP errors
+        throw new Error(error.response?.data?.message || `Registration failed: ${error.message || 'Unknown error'}`);
       }
-      throw new Error('An error occurred during registration');
     }
   }
 
