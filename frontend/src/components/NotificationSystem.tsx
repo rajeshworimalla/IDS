@@ -288,7 +288,10 @@ const NotificationSystem: FC = () => {
               zIndex: 99999,
               pointerEvents: 'auto'
             }}
-            onClick={() => removeAlert(alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp))}
+            onClick={(e) => {
+              // Don't close on backdrop click - require explicit acknowledge
+              e.stopPropagation();
+            }}
           >
             <motion.div
               initial={{ y: -50 }}
@@ -308,7 +311,10 @@ const NotificationSystem: FC = () => {
             >
               {/* Close button */}
               <button
-                onClick={() => removeAlert(alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp))}
+                onClick={(e) => {
+              // Don't close on backdrop click - require explicit acknowledge
+              e.stopPropagation();
+            }}
                 style={{
                   position: 'absolute',
                   top: '20px',
@@ -425,9 +431,48 @@ const NotificationSystem: FC = () => {
               )}
 
               {/* Timestamp */}
-              <div style={{ textAlign: 'center', color: '#888', fontSize: '12px' }}>
+              <div style={{ textAlign: 'center', color: '#888', fontSize: '12px', marginBottom: '24px' }}>
                 {new Date(alert.timestamp).toLocaleString()}
               </div>
+
+              {/* Acknowledge Button */}
+              <motion.button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const alertIndex = alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp);
+                  if (alertIndex !== -1) {
+                    removeAlert(alertIndex);
+                  }
+                }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                style={{
+                  width: '100%',
+                  background: 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  padding: '16px 32px',
+                  fontSize: '18px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(82,196,26,0.4)',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(82,196,26,0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(82,196,26,0.4)';
+                }}
+              >
+                <span>✓</span>
+                <span>Acknowledge</span>
+              </motion.button>
             </motion.div>
           </motion.div>
         ))}
