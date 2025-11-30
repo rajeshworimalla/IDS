@@ -503,6 +503,19 @@ export class PacketCaptureService {
       if (Math.random() < 0.001) { // ~0.1% chance = ~once per 1000 packets
         console.log(`[PACKET] ✓ Still capturing packets (last: ${sourceIP} → ${destIP})`);
       }
+      
+      // CRITICAL: Check if this IP is already blocked - log for debugging
+      // This helps identify why second attacks might be slow
+      try {
+        const { redis } = await import('../config/redis');
+        const tempBanKey = `ids:tempban:${sourceIP}`;
+        const blocked = await redis.get(tempBanKey).catch(() => null);
+        if (blocked && Math.random() < 0.1) { // Log 10% of packets from blocked IPs
+          console.log(`[PACKET] 📍 Packet from BLOCKED IP ${sourceIP} - still being captured and analyzed`);
+        }
+      } catch (redisErr) {
+        // Silently ignore - not critical
+      }
 
       const packetData = {
         date: new Date(),
@@ -574,8 +587,23 @@ export class PacketCaptureService {
       const savePromise = Promise.resolve({ _id: `temp_${Date.now()}_${Math.random()}`, ...packetData });
 
       // Enhanced ML prediction with auto-blocking and notifications
+      // CRITICAL: Check if IP is already blocked - if so, prioritize detection (no rate limiting)
+      let isBlockedIP = false;
+      try {
+        const { redis } = await import('../config/redis');
+        const tempBanKey = `ids:tempban:${packetData.start_ip}`;
+        const blocked = await redis.get(tempBanKey).catch(() => null);
+        isBlockedIP = blocked !== null;
+        if (isBlockedIP) {
+          console.log(`[PACKET] ⚠ Packet from BLOCKED IP ${packetData.start_ip} - prioritizing detection`);
+        }
+      } catch (redisErr) {
+        // Silently ignore Redis errors - continue processing
+      }
+      
       // PERFORMANCE: Only analyze suspicious/critical packets during high traffic
       // Rate limit ML predictions (max 5 per second per IP) to prevent overload
+      // BUT: No rate limiting for blocked IPs - they need immediate detection
       if (!this.mlRateLimiter) {
         this.mlRateLimiter = new Map<string, number>();
       }
@@ -583,10 +611,14 @@ export class PacketCaptureService {
       const currentCount = this.mlRateLimiter.get(rateLimitKey) || 0;
       
       // PERFORMANCE: Only run ML on suspicious/critical packets OR if rate limit allows
-      const shouldRunML = packetData.status !== 'normal' || currentCount < 2; // Reduced from 20 to 2
+      // CRITICAL: Always run ML for blocked IPs (no rate limiting)
+      const shouldRunML = isBlockedIP || packetData.status !== 'normal' || currentCount < 2; // Reduced from 20 to 2
       
-      if (shouldRunML && currentCount < 5) { // Reduced from 20 to 5 per second
-        this.mlRateLimiter.set(rateLimitKey, currentCount + 1);
+      // CRITICAL: No rate limit for blocked IPs - they need immediate detection
+      if (shouldRunML && (isBlockedIP || currentCount < 5)) { // Reduced from 20 to 5 per second
+        if (!isBlockedIP) {
+          this.mlRateLimiter.set(rateLimitKey, currentCount + 1);
+        }
         
         // Clean old rate limit entries periodically
         if (this.mlRateLimiter.size > 1000) {
@@ -846,8 +878,9 @@ export class PacketCaptureService {
                     });
                     console.log(`[PACKET] ✓ Emitted ip-blocked event for ${packetData.start_ip}`);
                     
-                    // Emit blocking-complete event after a brief cooldown (1 second)
+                    // Emit blocking-complete event after a brief cooldown (500ms - reduced for faster recovery)
                     // This lets the frontend know when it's safe to continue
+                    // CRITICAL: Reduced cooldown to ensure faster detection of subsequent attacks
                     setTimeout(() => {
                       try {
                         if (io) {
@@ -856,12 +889,12 @@ export class PacketCaptureService {
                             message: `IP ${packetData.start_ip} has been blocked. System ready for next attack.`,
                             timestamp: new Date().toISOString()
                           });
-                          console.log(`[PACKET] ✓ Blocking complete for ${packetData.start_ip} - system ready`);
+                          console.log(`[PACKET] ✓ Blocking complete for ${packetData.start_ip} - system ready (packets from this IP will be prioritized)`);
                         }
                       } catch (cooldownErr) {
                         // Silently ignore cooldown errors
                       }
-                    }, 1000); // 1 second cooldown
+                    }, 500); // Reduced from 1000ms to 500ms for faster recovery
                   }
                 } catch (emitErr) {
                   console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
