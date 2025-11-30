@@ -10,6 +10,7 @@
  * This runs in a separate thread to prevent blocking packet capture.
  */
 
+// @ts-ignore - worker_threads is a Node.js built-in module
 import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 import { Packet as PacketModel } from '../models/Packet';
 
@@ -88,16 +89,19 @@ function detectAttackType(packetData: any): { attackType: string; confidence: nu
   
   // TCP-based attacks
   if (protocol === 'TCP') {
+    const tracker = ipFrequencyTracker.get(packetData.start_ip);
+    const packetCount = tracker?.packets.length || 0;
+    
     // DDoS: Extremely high frequency
     if (frequency >= DETECTION_THRESHOLDS.DDOS_MIN_FREQUENCY && 
-        ipFrequencyTracker.get(packetData.start_ip)?.packets.length >= DETECTION_THRESHOLDS.DDOS_MIN_PACKETS) {
+        packetCount >= DETECTION_THRESHOLDS.DDOS_MIN_PACKETS) {
       return { attackType: 'ddos', confidence: Math.min(0.95, 0.7 + (frequency / 1000) * 0.25) };
     }
     
     // DoS: High frequency but not DDoS level
     if (frequency >= DETECTION_THRESHOLDS.DOS_MIN_FREQUENCY && 
         frequency < DETECTION_THRESHOLDS.DDOS_MIN_FREQUENCY &&
-        ipFrequencyTracker.get(packetData.start_ip)?.packets.length >= DETECTION_THRESHOLDS.DOS_MIN_PACKETS) {
+        packetCount >= DETECTION_THRESHOLDS.DOS_MIN_PACKETS) {
       return { attackType: 'dos', confidence: Math.min(0.90, 0.6 + (frequency / 500) * 0.3) };
     }
     
@@ -105,7 +109,7 @@ function detectAttackType(packetData: any): { attackType: string; confidence: nu
     if (frequency >= DETECTION_THRESHOLDS.PORT_SCAN_MIN_FREQUENCY && 
         frequency <= DETECTION_THRESHOLDS.PORT_SCAN_MAX_FREQUENCY &&
         packetSize < DETECTION_THRESHOLDS.FLOOD_MAX_PACKET_SIZE &&
-        ipFrequencyTracker.get(packetData.start_ip)?.packets.length >= DETECTION_THRESHOLDS.PORT_SCAN_MIN_PACKETS) {
+        packetCount >= DETECTION_THRESHOLDS.PORT_SCAN_MIN_PACKETS) {
       return { attackType: 'port_scan', confidence: Math.min(0.85, 0.5 + (frequency / 100) * 0.35) };
     }
   }
@@ -190,14 +194,18 @@ export class PacketAnalysisWorker {
     if (this.isRunning) return;
     
     this.isRunning = true;
-    this.worker = new Worker(__filename);
+    // @ts-ignore - path and process are Node.js built-ins
+    const path = require('path');
+    // Use process.cwd() for runtime path (works in compiled dist folder)
+    const workerPath = path.join(process.cwd(), 'dist', 'workers', 'packetAnalysisWorker.js');
+    this.worker = new Worker(workerPath);
     
-    this.worker.on('error', (err) => {
+    this.worker.on('error', (err: Error) => {
       console.error('[ANALYSIS-WORKER] Error:', err);
       this.isRunning = false;
     });
     
-    this.worker.on('exit', (code) => {
+    this.worker.on('exit', (code: number) => {
       if (code !== 0) {
         console.warn(`[ANALYSIS-WORKER] Worker stopped with exit code ${code}`);
       }
