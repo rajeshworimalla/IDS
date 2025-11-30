@@ -518,6 +518,12 @@
 .error-text { color: #ff4d4f; }
 
 /* Responsive design */
+@media (max-width: 1400px) {
+  .monitoring-stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
 @media (max-width: 1200px) {
   .monitoring-stats {
     grid-template-columns: repeat(2, 1fr);
