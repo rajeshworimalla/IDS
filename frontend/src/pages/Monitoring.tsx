@@ -44,6 +44,8 @@ const Monitoring: FC = () => {
   const [blockSuccess, setBlockSuccess] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isVisibleRef = useRef(true);
+  const packetRefreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
 
   const filterOptions = {
@@ -119,6 +121,17 @@ const Monitoring: FC = () => {
 
   // Fetch data on component mount
   useEffect(() => {
+    // Page Visibility API - pause updates when tab is hidden
+    const handleVisibilityChange = () => {
+      isVisibleRef.current = !document.hidden;
+      if (isVisibleRef.current) {
+        // Tab became visible - refresh data
+        fetchData().catch(() => {});
+        loadBlockedIPs().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     // Initial fetch with error handling
     fetchData().catch(err => {
       console.error('Initial fetch failed:', err);
@@ -162,28 +175,32 @@ const Monitoring: FC = () => {
         // Don't crash, just log
       });
 
-        // Listen for new packets and intrusion alerts (debounced)
-        let packetRefreshTimeout: NodeJS.Timeout | null = null;
+        // Listen for new packets and intrusion alerts (debounced + only when visible)
         socket.on('new-packet', () => {
-          // Debounce: only refresh after 2 seconds of no new packets
-          if (packetRefreshTimeout) {
-            clearTimeout(packetRefreshTimeout);
+          // Only update if tab is visible
+          if (!isVisibleRef.current) return;
+          
+          // Increased debounce: only refresh after 5 seconds of no new packets
+          if (packetRefreshTimeoutRef.current) {
+            clearTimeout(packetRefreshTimeoutRef.current);
           }
-          packetRefreshTimeout = setTimeout(() => {
-            fetchData().catch((err: any) => {
-              console.warn('[Monitoring] Error refreshing on new packet:', err);
-            });
-          }, 2000);
+          packetRefreshTimeoutRef.current = setTimeout(() => {
+            if (isVisibleRef.current) {
+              fetchData().catch((err: any) => {
+                console.warn('[Monitoring] Error refreshing on new packet:', err);
+              });
+            }
+          }, 5000); // Increased from 2 to 5 seconds
         });
 
         socket.on('intrusion-detected', () => {
-          // Refresh immediately when intrusion detected (non-blocking)
-        fetchData().catch((err: any) => {
-          console.warn('[Monitoring] Error refreshing on intrusion:', err);
-        });
-        loadBlockedIPs().catch((err: any) => {
-          console.warn('[Monitoring] Error loading blocked IPs on intrusion:', err);
-        });
+          // Always refresh for intrusions, even if tab is hidden
+          fetchData().catch((err: any) => {
+            console.warn('[Monitoring] Error refreshing on intrusion:', err);
+          });
+          loadBlockedIPs().catch((err: any) => {
+            console.warn('[Monitoring] Error loading blocked IPs on intrusion:', err);
+          });
         });
 
         socketRef.current = socket;
@@ -193,14 +210,17 @@ const Monitoring: FC = () => {
       // Continue without socket - polling will still work
     }
 
-    // Set up polling interval to refresh every 10 seconds (reduced frequency)
+    // Set up polling interval to refresh every 30 seconds (much reduced frequency)
     // Sync with Dashboard polling interval for consistency
     try {
       refreshIntervalRef.current = setInterval(() => {
-        fetchData().catch((err: any) => {
-          console.warn('[Monitoring] Polling refresh error:', err);
-        });
-      }, 10000); // Same as Dashboard (10 seconds)
+        // Only poll when tab is visible
+        if (isVisibleRef.current) {
+          fetchData().catch((err: any) => {
+            console.warn('[Monitoring] Polling refresh error:', err);
+          });
+        }
+      }, 30000); // Increased from 10 to 30 seconds
     } catch (err) {
       console.warn('[Monitoring] Error setting up polling:', err);
     }
@@ -208,6 +228,7 @@ const Monitoring: FC = () => {
     // Cleanup
     return () => {
       try {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (socketRef.current) {
           socketRef.current.disconnect();
           socketRef.current = null;
@@ -215,6 +236,10 @@ const Monitoring: FC = () => {
         if (refreshIntervalRef.current) {
           clearInterval(refreshIntervalRef.current);
           refreshIntervalRef.current = null;
+        }
+        if (packetRefreshTimeoutRef.current) {
+          clearTimeout(packetRefreshTimeoutRef.current);
+          packetRefreshTimeoutRef.current = null;
         }
       } catch (err) {
         console.warn('[Monitoring] Cleanup error:', err);
