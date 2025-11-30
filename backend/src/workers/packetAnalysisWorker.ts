@@ -196,6 +196,8 @@ export class PacketAnalysisWorker {
     this.isRunning = true;
     // @ts-ignore - path and process are Node.js built-ins
     const path = require('path');
+    // @ts-ignore - process is a Node.js global
+    const process = require('process');
     // Use process.cwd() for runtime path (works in compiled dist folder)
     const workerPath = path.join(process.cwd(), 'dist', 'workers', 'packetAnalysisWorker.js');
     this.worker = new Worker(workerPath);
