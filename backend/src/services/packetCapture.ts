@@ -507,7 +507,7 @@ export class PacketCaptureService {
       // CRITICAL: Check if this IP is already blocked - log for debugging
       // This helps identify why second attacks might be slow
       try {
-        const { redis } = await import('../config/redis');
+        const { redis } = await import('./redis');
         const tempBanKey = `ids:tempban:${sourceIP}`;
         const blocked = await redis.get(tempBanKey).catch(() => null);
         if (blocked && Math.random() < 0.1) { // Log 10% of packets from blocked IPs
@@ -590,7 +590,7 @@ export class PacketCaptureService {
       // CRITICAL: Check if IP is already blocked - if so, prioritize detection (no rate limiting)
       let isBlockedIP = false;
       try {
-        const { redis } = await import('../config/redis');
+        const { redis } = await import('./redis');
         const tempBanKey = `ids:tempban:${packetData.start_ip}`;
         const blocked = await redis.get(tempBanKey).catch(() => null);
         isBlockedIP = blocked !== null;
