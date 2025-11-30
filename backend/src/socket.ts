@@ -202,6 +202,21 @@ export function initializeSocket(server: any) {
   return io;
 }
 
+// Export function to get capture status for a user
+export function getUserCaptureStatus(userId: string): { isCapturing: boolean; lastPacketTime: number | null } | null {
+  const capture = userCaptures[userId];
+  if (!capture) {
+    return null;
+  }
+  
+  // Access private properties via type assertion (hacky but works)
+  const captureAny = capture as any;
+  return {
+    isCapturing: captureAny.isCapturing || false,
+    lastPacketTime: captureAny.lastPacketTime || null
+  };
+}
+
 export function getIO() {
   if (!io) {
     console.error('Socket.IO not initialized');
