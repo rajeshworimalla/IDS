@@ -23,7 +23,7 @@ const packetFrequencies: { [key: string]: { count: number; timestamp: number } }
 const socketEmissionQueue: any[] = [];
 let lastEmissionTime = 0;
 const EMISSION_INTERVAL = 10000; // Emit max once per 10 seconds - DISABLED for performance (only intrusions update)
-const MAX_QUEUE_SIZE = 1; // Keep only most recent packet for UI updates - REDUCED for performance
+const MAX_SOCKET_QUEUE_SIZE = 1; // Keep only most recent packet for UI updates - REDUCED for performance
 const DISABLE_NORMAL_PACKET_EMISSIONS = true; // Disable normal packet emissions to reduce lag
 
 // Batch DB writes to reduce database load during attacks
@@ -31,7 +31,7 @@ const dbWriteQueue: any[] = [];
 let lastDbWriteTime = 0;
 const DB_WRITE_INTERVAL = 500; // Write to DB every 500ms (batched) - INCREASED frequency for better performance
 const MAX_DB_BATCH_SIZE = 100; // Max packets per batch - INCREASED to handle high traffic
-const MAX_QUEUE_SIZE = 1000; // Increased queue size to prevent dropping critical packets
+const MAX_DB_QUEUE_SIZE = 1000; // Increased queue size to prevent dropping critical packets
 
 // Process socket emission queue - optimized for performance (REDUCED frequency)
 setInterval(() => {
@@ -572,7 +572,7 @@ export class PacketCaptureService {
         
         // Limit queue size to prevent memory issues and crashes during attacks
         // REDUCED from 1000 to 500 to prevent memory exhaustion
-        if (dbWriteQueue.length > MAX_QUEUE_SIZE) {
+        if (dbWriteQueue.length > MAX_DB_QUEUE_SIZE) {
           // Remove oldest normal packets first (never remove critical)
           const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
           if (normalIndex !== -1) {
