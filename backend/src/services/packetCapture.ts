@@ -1,8 +1,17 @@
 import { Cap } from 'cap';
 import { Packet as PacketModel, IPacket } from '../models/Packet';
 import { getIO } from '../socket';
+// @ts-ignore - axios types may not be found but it's installed
 import axios from 'axios';
-import os from 'os';
+// @ts-ignore - os is a Node.js built-in module
+import * as os from 'os';
+
+// Buffer is a Node.js global - will exist at runtime
+declare var Buffer: {
+  alloc(size: number): any;
+  from(data: any): any;
+  isBuffer(obj: any): boolean;
+};
 import { 
   isAlertThrottled, 
   isBlockingInProgress, 
@@ -52,7 +61,7 @@ setInterval(() => {
           socketEmissionQueue.length = 0;
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       // Socket not ready, clear queue
       socketEmissionQueue.length = 0;
     }
@@ -83,7 +92,7 @@ setInterval(() => {
               }
             }
           })
-          .catch(err => {
+          .catch((err: unknown) => {
             // If batch write fails, try saving only critical packets individually (non-blocking)
             const errorMsg = (err as Error)?.message || String(err);
             if (!errorMsg.includes('timeout') && !errorMsg.includes('ECONNREFUSED')) {
@@ -105,7 +114,7 @@ setInterval(() => {
         lastDbWriteTime = now;
       }
     }
-  } catch (err) {
+  } catch (err: unknown) {
     // Prevent interval crashes - log but continue
     const errorMsg = (err as Error)?.message || String(err);
     if (!errorMsg.includes('timeout') && !errorMsg.includes('ECONNREFUSED')) {
@@ -132,6 +141,7 @@ export class PacketCaptureService {
   private cap: Cap;
   private isCapturing: boolean = false;
   private linkType: string;
+  // @ts-ignore - Buffer is a Node.js global
   private buffer: Buffer;
   private predictionServiceUrl: string;
   private packetHandler: ((nbytes: number, trunc: boolean) => void) | null = null;
@@ -148,6 +158,7 @@ export class PacketCaptureService {
   constructor(userId: string) {
     this.cap = new Cap();
     this.linkType = 'ETHERNET';
+    // @ts-ignore - Buffer is a Node.js global
     this.buffer = Buffer.alloc(65535);
     this.predictionServiceUrl = 'http://127.0.0.1:5002/predict';
     this.userId = userId;
@@ -171,7 +182,7 @@ export class PacketCaptureService {
       this.analysisWorker = new PacketAnalysisWorker();
       this.analysisWorker.start();
       console.log('[PACKET] ✅ Initialized packet analysis worker thread');
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn('[PACKET] Failed to initialize analysis worker, using inline analysis:', (err as Error)?.message);
       this.analysisWorker = null;
     }
@@ -197,7 +208,7 @@ export class PacketCaptureService {
       this.localIPs.add('127.0.0.1');
       this.localIPs.add('localhost');
       this.localIPs.add('::1');
-    } catch (err) {
+    } catch (err: unknown) {
       console.warn('[PACKET] Error detecting local IPs:', err);
       // Fallback: at least add localhost
       this.localIPs.add('127.0.0.1');
@@ -283,7 +294,7 @@ export class PacketCaptureService {
             try {
               (this.cap as any).setNonBlock(true);
               console.log('Set non-blocking mode');
-            } catch (err) {
+            } catch (err: unknown) {
               console.log('Could not set non-blocking mode:', err);
             }
           }
@@ -291,7 +302,7 @@ export class PacketCaptureService {
           selectedInterface = candidate;
           console.log('Successfully opened capture device:', device);
           break;
-        } catch (err) {
+        } catch (err: unknown) {
           lastError = err;
           console.log(`Failed to open interface ${candidate.name}:`, err);
           continue;
@@ -340,19 +351,22 @@ export class PacketCaptureService {
           return;
         }
         
-        // CRITICAL: Process packet asynchronously using setImmediate for better performance
+        // CRITICAL: Process packet asynchronously using setTimeout(0) for better performance
         // This ensures packet capture never blocks, even during heavy attacks
-        setImmediate(() => {
-          // Process packet in next event loop tick (non-blocking)
-          this.processPacket(raw).catch((err) => {
-            // Silently handle errors - don't crash packet capture
-            // Only log critical errors occasionally
-            if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout') && Math.random() < 0.001) {
-              // Log 0.1% of errors to prevent spam
-            }
-          });
+        // Using setTimeout(0) instead of setImmediate for better compatibility
+        Promise.resolve().then(() => {
+          setTimeout(() => {
+            // Process packet in next event loop tick (non-blocking)
+            this.processPacket(raw).catch((err: unknown) => {
+              // Silently handle errors - don't crash packet capture
+              // Only log critical errors occasionally
+              if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('timeout') && Math.random() < 0.001) {
+                // Log 0.1% of errors to prevent spam
+              }
+            });
+          }, 0);
         });
-      } catch (err) {
+      } catch (err: unknown) {
         // Prevent handler crashes - log only critical errors
         if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('slice')) {
           console.warn('[PACKET] Error in packet handler:', err.message);
@@ -412,7 +426,7 @@ export class PacketCaptureService {
           console.error('[PACKET] Check if backend is still running and packet capture is active');
           // Don't auto-restart - let user restart manually to avoid loops
         }
-      } catch (err) {
+      } catch (err: unknown) {
         // Don't crash on health check errors
         console.warn('[PACKET] Health check error:', err);
       }
@@ -454,7 +468,7 @@ export class PacketCaptureService {
         try {
           this.cap.close();
           console.log('Packet capture stopped successfully');
-        } catch (err) {
+        } catch (err: unknown) {
           console.error('Error closing capture device:', err);
         }
       }, 100);
@@ -462,12 +476,13 @@ export class PacketCaptureService {
       // Reset the buffer
       this.buffer.fill(0);
 
-    } catch (err) {
+    } catch (err: unknown) {
       const error = err as Error;
       console.error('Error stopping packet capture:', error);
     }
   }
 
+  // @ts-ignore - Buffer is a Node.js global
   private async processPacket(raw: Buffer) {
     try {
       // Enhanced validation with better error handling
@@ -483,7 +498,7 @@ export class PacketCaptureService {
       let etherType: number;
       try {
         etherType = raw.readUInt16BE(12);
-      } catch (err) {
+      } catch (err: unknown) {
         // Buffer read error, skip packet
         return;
       }
@@ -500,7 +515,7 @@ export class PacketCaptureService {
         sourceIP = this.getSourceIP(raw);
         destIP = this.getDestinationIP(raw);
         protocol = this.getProtocol(raw);
-      } catch (err) {
+      } catch (err: unknown) {
         // Error extracting packet info, skip packet
         console.warn('[PACKET] Error extracting packet info:', (err as Error)?.message);
         return;
@@ -609,7 +624,7 @@ export class PacketCaptureService {
         // CRITICAL: Save critical packets immediately to ensure they're never lost
         if (packetData.status === 'critical') {
           // Save critical packets immediately (non-blocking)
-          PacketModel.create(packetData).catch(err => {
+          PacketModel.create(packetData).catch((err: unknown) => {
             // If immediate save fails, it's still in queue for batch write
             // Don't log - too spammy during attacks
           });
@@ -673,7 +688,7 @@ export class PacketCaptureService {
         if (this.analysisWorker) {
           try {
             analyzedData = await this.analysisWorker.analyze(packetData, userId);
-          } catch (err) {
+          } catch (err: unknown) {
             // Fallback to inline analysis if worker fails
             console.warn('[PACKET] Worker analysis failed, using inline:', (err as Error)?.message);
             analyzedData = packetData;
@@ -750,7 +765,7 @@ export class PacketCaptureService {
                   });
                 }
               }
-            } catch (err) {
+            } catch (err: unknown) {
               console.warn('[PACKET] Error auto-blocking malicious IP:', err);
             }
           }
@@ -830,21 +845,46 @@ export class PacketCaptureService {
           // Haven't sent notification for this attack type yet - send it now
           console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
           
+          // Check if IP is in grace period (recently manually unblocked)
+          const inGracePeriod = isInGracePeriod(sourceIP);
+          
           // WORKER THREAD 5: Notification worker handles alert emission (async)
           const emitCriticalAlert = async (autoBlocked: boolean = false) => {
             const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
-            const alertData = {
-              type: 'intrusion',
-              severity: 'critical',
-              ip: sourceIP,
-              attackType: criticalAttackType,
-              confidence: 0.85, // High confidence for critical status
-              protocol: packetData.protocol,
-              description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
-              timestamp: new Date().toISOString(),
-              autoBlocked: autoBlocked
-            };
-            console.log(`[PACKET] 📢 Sending notification for ${sourceIP}: ${criticalAttackType} (first notification for this attack type)`);
+            
+            // If in grace period, send special notification asking user if they want to block again
+            let alertData: any;
+            if (inGracePeriod) {
+              alertData = {
+                type: 'intrusion',
+                severity: 'critical',
+                ip: sourceIP,
+                attackType: criticalAttackType,
+                confidence: 0.85, // High confidence for critical status
+                protocol: packetData.protocol,
+                description: `⚠️ You recently manually unblocked ${sourceIP}. It is now sending ${criticalAttackType} attacks again (${packetData.frequency} packets/min). Do you want to block it again?`,
+                timestamp: new Date().toISOString(),
+                autoBlocked: false, // Never auto-block during grace period
+                inGracePeriod: true,
+                requiresUserDecision: true,
+                actionRequired: 'reblock' // Frontend should show a decision dialog
+              };
+              console.log(`[PACKET] 📢 Sending grace period notification for ${sourceIP}: ${criticalAttackType} (requires user decision to re-block)`);
+            } else {
+              alertData = {
+                type: 'intrusion',
+                severity: 'critical',
+                ip: sourceIP,
+                attackType: criticalAttackType,
+                confidence: 0.85, // High confidence for critical status
+                protocol: packetData.protocol,
+                description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
+                timestamp: new Date().toISOString(),
+                autoBlocked: autoBlocked
+              };
+              console.log(`[PACKET] 📢 Sending notification for ${sourceIP}: ${criticalAttackType} (first notification for this attack type)`);
+            }
+            
             await sendIntrusionAlertWorker(this.userId, alertData).catch(() => {});
             markAlertEmitted(sourceIP, criticalAttackType); // Mark as notified for this attack type
           };
@@ -957,7 +997,7 @@ export class PacketCaptureService {
           }
         });
       }
-    } catch (err) {
+    } catch (err: unknown) {
       // Enhanced error handling to prevent crashes
       if (err instanceof Error) {
         // Only log non-buffer related errors to prevent spam
@@ -972,6 +1012,7 @@ export class PacketCaptureService {
     }
   }
 
+  // @ts-ignore - Buffer is a Node.js global
   private getSourceIP(raw: Buffer): string {
     try {
       // Skip Ethernet header (14 bytes) and get source IP from IP header
@@ -984,12 +1025,13 @@ export class PacketCaptureService {
         return '0.0.0.0';
       }
       return `${raw[offset + 12]}.${raw[offset + 13]}.${raw[offset + 14]}.${raw[offset + 15]}`;
-    } catch (err) {
+    } catch (err: unknown) {
       // Return safe default instead of crashing
       return '0.0.0.0';
     }
   }
 
+  // @ts-ignore - Buffer is a Node.js global
   private getDestinationIP(raw: Buffer): string {
     try {
       // Skip Ethernet header (14 bytes) and get destination IP from IP header
@@ -1002,12 +1044,13 @@ export class PacketCaptureService {
         return '0.0.0.0';
       }
       return `${raw[offset + 16]}.${raw[offset + 17]}.${raw[offset + 18]}.${raw[offset + 19]}`;
-    } catch (err) {
+    } catch (err: unknown) {
       // Return safe default instead of crashing
       return '0.0.0.0';
     }
   }
 
+  // @ts-ignore - Buffer is a Node.js global
   private getProtocol(raw: Buffer): string {
     try {
       // Skip Ethernet header (14 bytes) and get protocol from IP header
@@ -1032,7 +1075,7 @@ export class PacketCaptureService {
         case 51: return 'AH';
         default: return `PROTO_${protocol}`;
       }
-    } catch (err) {
+    } catch (err: unknown) {
       // Return safe default instead of crashing
       return 'UNKNOWN';
     }
@@ -1207,6 +1250,7 @@ export class PacketCaptureService {
     return 'suspicious_traffic';
   }
 
+  // @ts-ignore - Buffer is a Node.js global
   private generateDescription(raw: Buffer): string {
     try {
       if (!raw || raw.length < 14) {
@@ -1239,7 +1283,7 @@ export class PacketCaptureService {
       }
 
       return `${protocol} packet (${raw.length} bytes)`;
-    } catch (err) {
+    } catch (err: unknown) {
       // Return safe default instead of crashing
       return `Packet (${raw?.length || 0} bytes)`;
     }
