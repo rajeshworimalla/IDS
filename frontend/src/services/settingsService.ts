@@ -62,6 +62,16 @@ class SettingsService {
       }
     });
   }
+
+  async getSystemInfo(): Promise<any> {
+    try {
+      const response = await api.get(`${API_URL}/system-info`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching system info:', error);
+      throw error;
+    }
+  }
 }
 
 export const settingsService = new SettingsService(); 

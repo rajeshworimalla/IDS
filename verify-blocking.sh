@@ -108,3 +108,4 @@ if [ -n "$RESOLVED_IPV6" ]; then
 fi
 echo ""
 
+

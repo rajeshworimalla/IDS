@@ -1,8 +1,10 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { io, Socket } from 'socket.io-client';
 import Navbar from '../components/Navbar';
 import DataTable from '../components/DataTable';
 import { packetService } from '../services/packetService';
+import { authService } from '../services/auth';
 import '../styles/Activities.css';
 
 interface ActivityStats {
@@ -20,31 +22,74 @@ const Activities: FC = () => {
   const [packets, setPackets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [, setError] = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+
+  const fetchData = async () => {
+    try {
+      setIsLoading(true);
+      const [packetStats, packetData] = await Promise.all([
+        packetService.getPacketStats(),
+        packetService.getPackets()
+      ]);
+
+      setStats({
+        totalEvents: packetStats.totalPackets,
+        activeAlerts: packetStats.criticalCount + packetStats.mediumCount,
+        systemHealth: calculateSystemHealth(packetStats)
+      });
+      setPackets(packetData);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setError('Failed to fetch data. Please try again later.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        const [packetStats, packetData] = await Promise.all([
-          packetService.getPacketStats(),
-          packetService.getPackets()
-        ]);
-
-        setStats({
-          totalEvents: packetStats.totalPackets,
-          activeAlerts: packetStats.criticalCount + packetStats.mediumCount,
-          systemHealth: calculateSystemHealth(packetStats)
-        });
-        setPackets(packetData);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setError('Failed to fetch data. Please try again later.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchData();
+
+    // Set up socket for real-time updates
+    try {
+      const token = authService.getToken();
+      if (token) {
+        const socket = io('http://localhost:5001', {
+          auth: { token },
+          withCredentials: true,
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+        });
+
+        socket.on('connect', () => {
+          console.log('[Activities] Socket connected');
+        });
+
+        socket.on('new-packet', () => {
+          fetchData().catch(() => {});
+        });
+
+        socket.on('intrusion-detected', () => {
+          console.log('[Activities] 🚨 INTRUSION DETECTED');
+          fetchData().catch(() => {});
+        });
+
+        socketRef.current = socket;
+      }
+    } catch (err) {
+      console.warn('[Activities] Socket setup error:', err);
+    }
+
+    // Polling fallback
+    const interval = setInterval(() => {
+      fetchData().catch(() => {});
+    }, 5000);
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+      clearInterval(interval);
+    };
   }, []);
 
   const calculateSystemHealth = (packetStats: any) => {

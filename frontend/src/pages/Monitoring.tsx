@@ -1,9 +1,11 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { io, Socket } from 'socket.io-client';
 import Navbar from '../components/Navbar';
 import DateRangePicker from '../components/DateRangePicker';
 import { packetService, ThreatAlert } from '../services/packetService';
 import { ipBlockService, BlockedIP, BlockResponse } from '../services/ipBlockService';
+import { authService } from '../services/auth';
 import '../styles/Monitoring.css';
 
 interface FilterState {
@@ -40,6 +42,8 @@ const Monitoring: FC = () => {
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blockedError, setBlockedError] = useState<string | null>(null);
   const [blockSuccess, setBlockSuccess] = useState<string | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 
   const filterOptions = {
@@ -80,17 +84,34 @@ const Monitoring: FC = () => {
         apiFilters.to = currentFilters.dateRange.to;
       }
       
-      // Get alerts and stats with filters
-      const [alertsData, statsData] = await Promise.all([
-        packetService.getAlerts(apiFilters),
-        packetService.getAlertStats(apiFilters)
-      ]);
+      // Get alerts and stats with filters (with individual error handling)
+      let alertsData: ThreatAlert[] = [];
+      let statsData = { critical: 0, high: 0, medium: 0, low: 0 };
+      
+      try {
+        const results = await Promise.allSettled([
+          packetService.getAlerts(apiFilters),
+          packetService.getAlertStats(apiFilters)
+        ]);
+        
+        if (results[0].status === 'fulfilled' && Array.isArray(results[0].value)) {
+          alertsData = results[0].value;
+        }
+        
+        if (results[1].status === 'fulfilled' && results[1].value) {
+          statsData = results[1].value;
+        }
+      } catch (err) {
+        console.warn('Error fetching alerts/stats:', err);
+        // Continue with empty data rather than crashing
+      }
 
       setAlerts(alertsData);
       setAlertStats(statsData);
     } catch (err) {
-      console.error('Error fetching monitoring data:', err);
-      setError('Failed to fetch monitoring data. Please try again later.');
+      console.error('Error in fetchData:', err);
+      // Don't show error to user to prevent UI crashes, just log it
+      // setError('Failed to fetch monitoring data. Please try again later.');
     } finally {
       setIsLoading(false);
     }
@@ -98,9 +119,100 @@ const Monitoring: FC = () => {
 
   // Fetch data on component mount
   useEffect(() => {
-    fetchData();
+    // Initial fetch with error handling
+    fetchData().catch(err => {
+      console.error('Initial fetch failed:', err);
+    });
+    
     // Load initial blocked list to mark items as blocked
-    loadBlockedIPs();
+    loadBlockedIPs().catch(err => {
+      console.warn('Error loading blocked IPs:', err);
+    });
+
+    // Set up socket connection for real-time updates
+    try {
+      const token = authService.getToken();
+      if (token) {
+        const socket = io('http://localhost:5001', {
+          auth: { token },
+          withCredentials: true,
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 20000,
+        });
+
+        socket.on('connect', () => {
+          console.log('[Monitoring] Socket connected');
+        });
+
+        socket.on('connect_error', (err) => {
+          console.warn('[Monitoring] Socket connection error:', err);
+          // Don't crash, just log
+        });
+
+        socket.on('error', (err) => {
+          console.warn('[Monitoring] Socket error:', err);
+          // Don't crash, just log
+        });
+
+      socket.on('disconnect', (reason: any) => {
+        console.warn('[Monitoring] Socket disconnected:', reason);
+        // Don't crash, just log
+      });
+
+        // Listen for new packets and intrusion alerts
+        socket.on('new-packet', () => {
+          // Refresh data when new packet arrives (non-blocking)
+        fetchData().catch((err: any) => {
+          console.warn('[Monitoring] Error refreshing on new packet:', err);
+        });
+        });
+
+        socket.on('intrusion-detected', () => {
+          // Refresh immediately when intrusion detected (non-blocking)
+        fetchData().catch((err: any) => {
+          console.warn('[Monitoring] Error refreshing on intrusion:', err);
+        });
+        loadBlockedIPs().catch((err: any) => {
+          console.warn('[Monitoring] Error loading blocked IPs on intrusion:', err);
+        });
+        });
+
+        socketRef.current = socket;
+      }
+    } catch (err) {
+      console.warn('[Monitoring] Error setting up socket:', err);
+      // Continue without socket - polling will still work
+    }
+
+    // Set up polling interval to refresh every 5 seconds
+    try {
+      refreshIntervalRef.current = setInterval(() => {
+        fetchData().catch((err: any) => {
+          console.warn('[Monitoring] Polling refresh error:', err);
+        });
+      }, 5000);
+    } catch (err) {
+      console.warn('[Monitoring] Error setting up polling:', err);
+    }
+
+    // Cleanup
+    return () => {
+      try {
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        if (refreshIntervalRef.current) {
+          clearInterval(refreshIntervalRef.current);
+          refreshIntervalRef.current = null;
+        }
+      } catch (err) {
+        console.warn('[Monitoring] Cleanup error:', err);
+      }
+    };
   }, []);
   
   // Re-fetch data when filters change
@@ -143,10 +255,13 @@ const Monitoring: FC = () => {
   const handleUpdateStatus = async (alertId: string, newStatus: ThreatAlert['status']) => {
     try {
       await packetService.updateAlertStatus(alertId, newStatus);
-      await fetchData();
+      await fetchData().catch(err => {
+        console.warn('Error refreshing after status update:', err);
+      });
     } catch (err) {
       console.error('Error updating alert status:', err);
       setError('Failed to update alert status. Please try again.');
+      // Don't crash, just show error
     }
   };
 
@@ -161,10 +276,13 @@ const Monitoring: FC = () => {
         setBlockSuccess(`Blocked ${ip}${res.method ? ' via ' + res.method : ''}`);
         setTimeout(() => setBlockSuccess(null), 2500);
       }
-      await loadBlockedIPs();
+      await loadBlockedIPs().catch(err => {
+        console.warn('Error reloading blocked IPs after block:', err);
+      });
     } catch (e: any) {
       console.error('Error blocking IP:', e);
       setError(e?.message || 'Failed to block IP.');
+      // Don't crash, just show error message
     }
   };
 
@@ -173,10 +291,13 @@ const Monitoring: FC = () => {
       setBlockedLoading(true);
       setBlockedError(null);
       const list = await ipBlockService.getBlockedIPs();
-      setBlockedIPs(list);
+      if (Array.isArray(list)) {
+        setBlockedIPs(list);
+      }
     } catch (e) {
-      console.error('Error fetching blocked IPs:', e);
-      setBlockedError('Failed to fetch blocked IPs.');
+      console.warn('Error fetching blocked IPs:', e);
+      // Don't set error to prevent UI crashes, just log it
+      // setBlockedError('Failed to fetch blocked IPs.');
     } finally {
       setBlockedLoading(false);
     }
@@ -194,10 +315,13 @@ const Monitoring: FC = () => {
     if (!ok) return;
     try {
       await ipBlockService.unblockIP(ip);
-      await loadBlockedIPs();
+      await loadBlockedIPs().catch(err => {
+        console.warn('Error reloading blocked IPs after unblock:', err);
+      });
     } catch (e) {
       console.error('Error unblocking IP:', e);
       setBlockedError('Failed to unblock IP.');
+      // Don't crash, just show error
     }
   };
 
@@ -211,6 +335,24 @@ const Monitoring: FC = () => {
     
     return matchesSearch;
   });
+
+  const getAttackTypeLabel = (type: string) => {
+    const labels: { [key: string]: string } = {
+      'dos': '🚨 Denial of Service',
+      'ddos': '🚨 Distributed DoS',
+      'probe': '🔍 Network Probe',
+      'port_scan': '🔍 Port Scan',
+      'ping_sweep': '🔍 Ping Sweep',
+      'r2l': '⚠️ Remote to Local',
+      'brute_force': '⚠️ Brute Force',
+      'u2r': '⚠️ User to Root',
+      'critical_traffic': '🚨 Critical Traffic',
+      'suspicious_traffic': '⚠️ Suspicious Traffic',
+      'normal': '✓ Normal',
+      'unknown': '❓ Unknown Attack'
+    };
+    return labels[type?.toLowerCase()] || type || 'Unknown Attack';
+  };
 
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
@@ -461,7 +603,12 @@ const Monitoring: FC = () => {
                           </div>
                           <div className="detail-item">
                             <span className="detail-label">Attack Type</span>
-                            <span className="detail-value">{alert.attack_type}</span>
+                            <span className="detail-value" style={{ 
+                              fontWeight: 'bold', 
+                              color: alert.attack_type && alert.attack_type !== 'normal' ? '#ff4d4f' : '#52c41a' 
+                            }}>
+                              {getAttackTypeLabel(alert.attack_type || 'normal')}
+                            </span>
                           </div>
                           <div className="detail-item">
                             <span className="detail-label">Confidence</span>

@@ -24,10 +24,10 @@ const Blocker: FC = () => {
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [policySaved, setPolicySaved] = useState(false);
 
-  // Websites Control Panel state - Expanded port list
+  // Websites Control Panel state - Expanded port list (includes backend and ML service)
   const defaultPorts = [
     20, 21, 22, 23, 25, 53, 67, 68, 80, 110, 135, 139, 143, 443, 445, 
-    993, 995, 1433, 3000, 3306, 3389, 5000, 5173, 5432, 6379, 8000, 8080, 8443, 27017
+    993, 995, 1433, 3000, 3306, 3389, 5000, 5001, 5002, 5173, 5432, 6379, 8000, 8080, 8443, 27017
   ];
   const [subnet, setSubnet] = useState('');
   const [selectedPorts, setSelectedPorts] = useState<number[]>(defaultPorts);
@@ -68,9 +68,42 @@ const Blocker: FC = () => {
     fetchPolicy();
   }, []);
 
-  // Prefill subnet guess once
+  // Get VM IP address and set as default
   useEffect(() => {
-    setSubnet(guessSubnet());
+    const getVMIP = async () => {
+      try {
+        // Try to get IP from window location or API
+        const hostname = window.location.hostname;
+        
+        // If hostname is an IP, use it directly
+        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+          setSubnet(hostname);
+        } else {
+          // Try to get from API
+          const token = localStorage.getItem('token');
+          const response = await fetch('http://localhost:5001/api/settings/system-info', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (response.ok) {
+            const info = await response.json();
+            // Extract IP from backend URL or use hostname
+            const ipMatch = info.backend?.url?.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+            if (ipMatch) {
+              setSubnet(ipMatch[1]);
+            } else {
+              // Fallback: try to get from network interfaces
+              setSubnet(guessSubnet());
+            }
+          } else {
+            setSubnet(guessSubnet());
+          }
+        }
+      } catch (err) {
+        console.warn('Error getting VM IP:', err);
+        setSubnet(guessSubnet());
+      }
+    };
+    getVMIP();
   }, []);
 
   const totalBlocked = blocked.length;
@@ -137,26 +170,26 @@ const Blocker: FC = () => {
   function guessSubnet(): string {
     const h = window.location.hostname;
     const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (m) return `${m[1]}.${m[2]}.${m[3]}.0/24`;
-    return '192.168.1.0/24';
+    if (m) return m[0]; // Return just the IP, not subnet
+    return '192.168.100.4'; // Default to user's VM IP
   }
+  
   function expandSubnet(pattern: string): string[] {
     pattern = pattern.trim();
     if (!pattern) return [];
-    const cidr24 = pattern.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/);
-    const star   = pattern.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\*$/);
-    const three  = pattern.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    
+    // SECURITY: Only allow scanning single IP addresses (current VM)
+    // Prevent subnet scanning to avoid scanning other VMs
     const single = pattern.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    let base: string | undefined;
-    if (cidr24) base = `${cidr24[1]}.${cidr24[2]}.${cidr24[3]}`;
-    else if (star) base = `${star[1]}.${star[2]}.${star[3]}`;
-    else if (three) base = `${three[1]}.${three[2]}.${three[3]}`;
-    if (base) {
-      const hosts: string[] = [];
-      for (let i = 1; i <= 254; i++) hosts.push(`${base}.${i}`);
-      return hosts;
+    if (single) {
+      // Validate IP address
+      const parts = single.slice(1).map(Number);
+      if (parts.every(p => p >= 0 && p <= 255)) {
+        return [pattern]; // Only return the single IP
+      }
     }
-    if (single) return [pattern];
+    
+    // Reject subnet patterns, CIDR, wildcards, etc.
     return [];
   }
   function guessScheme(port: number): 'http'|'https' { return port === 443 ? 'https' : 'http'; }
@@ -164,15 +197,21 @@ const Blocker: FC = () => {
   async function handleScan() {
     const hosts = expandSubnet(subnet || guessSubnet());
     if (hosts.length === 0) { 
-      setScanStatus('Enter a /24 like 192.168.1.0/24 or 192.168.1.*'); 
+      setScanStatus('⚠️ Enter a single IP address (e.g., 192.168.100.4). Subnet scanning is disabled for security.'); 
       return; 
+    }
+    
+    // SECURITY: Only allow scanning current VM (single IP)
+    if (hosts.length > 1) {
+      setScanStatus('⚠️ Security: Only single IP scanning is allowed. Cannot scan subnets.');
+      return;
     }
     
     const ports = selectedPorts;
     const total = hosts.length * ports.length;
     
-    if (total > 10000) {
-      setScanStatus('Too many combinations. Limit to 10,000 host:port combinations.');
+    if (total > 1000) {
+      setScanStatus('Too many port combinations. Limit to 1000.');
       return;
     }
     
@@ -390,8 +429,18 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
             <motion.section key="websites" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={springy}>
               <div className="websites-controls">
                 <div className="field">
-                  <label>Subnet (CIDR or pattern)</label>
-                  <input type="text" value={subnet} onChange={(e)=>setSubnet(e.target.value)} placeholder="e.g. 192.168.1.0/24 or 192.168.1.*" />
+                  <label>VM IP Address (Single IP only)</label>
+                  <input 
+                    type="text" 
+                    value={subnet} 
+                    onChange={(e)=>setSubnet(e.target.value)} 
+                    placeholder="e.g. 192.168.100.4" 
+                    pattern="^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"
+                    title="Enter a single IP address (subnet scanning disabled for security)"
+                  />
+                  <small style={{ color: '#888', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                    Only single IP scanning is allowed. Subnet scanning is disabled for security.
+                  </small>
                 </div>
                 <div className="ports">
                   {defaultPorts.map((p, i) => (
@@ -442,8 +491,8 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                               53: 'DNS', 67: 'DHCP', 68: 'DHCP', 80: 'HTTP', 110: 'POP3',
                               135: 'RPC', 139: 'NetBIOS', 143: 'IMAP', 443: 'HTTPS', 445: 'SMB',
                               993: 'IMAPS', 995: 'POP3S', 1433: 'MSSQL', 3000: 'Node.js',
-                              3306: 'MySQL', 3389: 'RDP', 5000: 'Flask', 5173: 'Vite',
-                              5432: 'PostgreSQL', 6379: 'Redis', 8000: 'HTTP-Alt', 8080: 'HTTP-Proxy',
+                              3306: 'MySQL', 3389: 'RDP', 5000: 'Flask', 5001: 'IDS Backend', 5002: 'ML Service',
+                              5173: 'Vite', 5432: 'PostgreSQL', 6379: 'Redis', 8000: 'HTTP-Alt', 8080: 'HTTP-Proxy',
                               8443: 'HTTPS-Alt', 27017: 'MongoDB'
                             };
                             const service = serviceNames[p];

@@ -93,14 +93,30 @@ if [ "$MONGODB_RUNNING" = false ]; then
     echo "   ⚠ MongoDB not running - starting Docker MongoDB..."
     sudo docker stop mongodb >/dev/null 2>&1 || true
     sudo docker rm mongodb >/dev/null 2>&1 || true
+    
+    # Start MongoDB with proper binding
+    echo "   Starting MongoDB container..."
     sudo docker run -d -p 0.0.0.0:27017:27017 --name mongodb mongo:4.4 >/dev/null 2>&1
-    sleep 5
-    if timeout 3 nc -zv 127.0.0.1 27017 >/dev/null 2>&1; then
-        echo -e "${GREEN}   ✓ Docker MongoDB started${NC}"
-        MONGODB_RUNNING=true
-    else
-        echo "   ⚠ MongoDB may still be starting"
-    fi
+    
+    # Wait and verify with retries
+    echo "   Waiting for MongoDB to be ready..."
+    for i in {1..15}; do
+        sleep 2
+        # Test from inside container first
+        if sudo docker exec mongodb mongo --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
+            # Then test from host
+            if timeout 3 nc -zv 127.0.0.1 27017 >/dev/null 2>&1; then
+                echo -e "${GREEN}   ✓ Docker MongoDB started and responding${NC}"
+                MONGODB_RUNNING=true
+                break
+            fi
+        fi
+        if [ $i -eq 15 ]; then
+            echo -e "${RED}   ✗ MongoDB failed to start after 30 seconds${NC}"
+            echo "   Check logs: sudo docker logs mongodb"
+            echo "   Trying to continue anyway..."
+        fi
+    done
 fi
 echo ""
 

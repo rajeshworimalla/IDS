@@ -126,16 +126,36 @@ const EventsLog: FC = () => {
     });
 
     socket.on('new-packet', (packet) => {
-      setPackets(prev => {
-        // Check if packet already exists to avoid duplicates
-        const exists = prev.some(p => p._id === packet._id);
-        if (exists) {
-          return prev;
+      try {
+        if (!packet || typeof packet !== 'object') {
+          console.warn('[EventsLog] Invalid packet data:', packet);
+          return;
         }
-        // Limit displayed packets to last 300 for performance (still captures all to DB)
-        const updated = [packet, ...prev];
-        return updated.slice(0, 300);
-      });
+        
+        setPackets(prev => {
+          try {
+            // Check if packet already exists to avoid duplicates
+            const exists = prev.some(p => p && p._id === packet._id);
+            if (exists) {
+              return prev;
+            }
+            // Limit displayed packets to last 300 for performance (still captures all to DB)
+            const updated = [packet, ...prev];
+            return updated.slice(0, 300);
+          } catch (err) {
+            console.warn('[EventsLog] Error updating packets:', err);
+            return prev; // Return previous state on error
+          }
+        });
+      } catch (err) {
+        console.warn('[EventsLog] Error processing new packet:', err);
+        // Don't crash, just log
+      }
+    });
+
+    socket.on('error', (error) => {
+      console.warn('[EventsLog] Socket error:', error);
+      // Don't crash, just log
     });
 
     return () => {
@@ -242,6 +262,24 @@ const EventsLog: FC = () => {
     } else {
       setSelectedRows(packets.map(packet => packet._id));
     }
+  };
+
+  const getAttackTypeLabel = (type: string) => {
+    const labels: { [key: string]: string } = {
+      'dos': '🚨 DoS',
+      'ddos': '🚨 DDoS',
+      'probe': '🔍 Probe',
+      'port_scan': '🔍 Port Scan',
+      'ping_sweep': '🔍 Ping Sweep',
+      'r2l': '⚠️ R2L',
+      'brute_force': '⚠️ Brute Force',
+      'u2r': '⚠️ U2R',
+      'critical_traffic': '🚨 Critical',
+      'suspicious_traffic': '⚠️ Suspicious',
+      'normal': '✓ Normal',
+      'unknown': '❓ Unknown'
+    };
+    return labels[type?.toLowerCase()] || type || 'Unknown';
   };
 
   const getStatusColor = (status: string) => {
@@ -381,10 +419,10 @@ const EventsLog: FC = () => {
                 </th>
                 <th>Packet Traff</th>
                 <th>Date</th>
-                <th>End</th>
                 <th>Start IP</th>
                 <th>End IP</th>
                 <th>Protocol</th>
+                <th>Attack Type</th>
                 <th>Description</th>
                 <th>Frequency</th>
                 <th>Start Bytes</th>
@@ -414,10 +452,27 @@ const EventsLog: FC = () => {
                     </div>
                   </td>
                   <td>{new Date(packet.date).toLocaleDateString()}</td>
-                  <td>{new Date(packet.date).toLocaleDateString()}</td>
                   <td>{packet.start_ip}</td>
                   <td>{packet.end_ip}</td>
                   <td>{packet.protocol}</td>
+                  <td>
+                    {packet.is_malicious && packet.attack_type ? (
+                      <span style={{
+                        color: '#ff4d4f',
+                        fontWeight: 'bold',
+                        fontSize: '12px'
+                      }}>
+                        {getAttackTypeLabel(packet.attack_type)}
+                        {packet.confidence && (
+                          <span style={{ color: '#888', marginLeft: '4px' }}>
+                            ({Math.round(packet.confidence * 100)}%)
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#52c41a' }}>Normal</span>
+                    )}
+                  </td>
                   <td className="description-cell">{packet.description}</td>
                   <td>{packet.frequency}</td>
                   <td>{packet.start_bytes}</td>

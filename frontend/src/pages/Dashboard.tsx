@@ -1,5 +1,6 @@
-import { FC, useState, useEffect } from 'react';
+import { FC, useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { io, Socket } from 'socket.io-client';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -7,6 +8,8 @@ import {
 } from 'recharts';
 import Navbar from '../components/Navbar';
 import { packetService } from '../services/packetService';
+import { authService } from '../services/auth';
+import { settingsService } from '../services/settingsService';
 import '../styles/Dashboard.css';
 
 const Dashboard: FC = () => {
@@ -28,33 +31,147 @@ const Dashboard: FC = () => {
   const [lineData, setLineData] = useState<{ time: string; value1: number; value2: number }[]>([]);
   const [barData, setBarData] = useState<{ name: string; value: number }[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [systemInfo, setSystemInfo] = useState<any>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchData = async () => {
+    try {
+      setError(null);
+      // Fetch packet statistics with error handling
+      try {
+        const packetStats = await packetService.getPacketStats();
+        if (packetStats && typeof packetStats === 'object') {
+          setStats(packetStats);
+        }
+      } catch (err) {
+        console.warn('Error fetching packet stats:', err);
+        // Continue with other data
+      }
+
+      // Fetch status distribution for pie chart
+      try {
+        const statusData = await packetService.getStatusDistribution();
+        if (Array.isArray(statusData)) {
+          setPieData(statusData);
+        }
+      } catch (err) {
+        console.warn('Error fetching status distribution:', err);
+        // Continue with other data
+      }
+
+      // Fetch network load for line chart
+      try {
+        const networkData = await packetService.getNetworkLoad();
+        if (Array.isArray(networkData)) {
+          setLineData(networkData);
+        }
+      } catch (err) {
+        console.warn('Error fetching network load:', err);
+        // Continue with other data
+      }
+
+      // Fetch top hosts for bar chart
+      try {
+        const topHosts = await packetService.getTopHosts();
+        if (Array.isArray(topHosts)) {
+          setBarData(topHosts);
+        }
+      } catch (err) {
+        console.warn('Error fetching top hosts:', err);
+        // Continue - not critical
+      }
+    } catch (error) {
+      console.error('Error in fetchData:', error);
+      // Don't set error state to prevent UI crashes, just log it
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
+    // Initial fetch with error handling
+    fetchData().catch(err => {
+      console.error('Initial fetch failed:', err);
+      // Don't crash, just log
+    });
+
+    // Set up socket connection for real-time updates
+    try {
+      const token = authService.getToken();
+      if (token) {
+        const socket = io('http://localhost:5001', {
+          auth: { token },
+          withCredentials: true,
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 20000,
+        });
+
+        socket.on('connect', () => {
+          console.log('[Dashboard] Socket connected');
+        });
+
+        socket.on('connect_error', (err) => {
+          console.warn('[Dashboard] Socket connection error:', err);
+          // Don't crash, just log
+        });
+
+        socket.on('error', (err) => {
+          console.warn('[Dashboard] Socket error:', err);
+          // Don't crash, just log
+        });
+
+        // Listen for new packets and refresh stats
+        socket.on('new-packet', () => {
+          // Refresh stats when new packet arrives (non-blocking)
+          fetchData().catch((err: any) => {
+            console.warn('[Dashboard] Error refreshing on new packet:', err);
+          });
+        });
+
+        // Listen for intrusion alerts - CRITICAL for attack detection
+        socket.on('intrusion-detected', (alert: any) => {
+          console.log('[Dashboard] 🚨 INTRUSION DETECTED:', alert);
+          // Immediately refresh stats to show attack
+          fetchData().catch((err: any) => {
+            console.warn('[Dashboard] Error refreshing on intrusion:', err);
+          });
+        });
+
+        socketRef.current = socket;
+      }
+    } catch (err) {
+      console.warn('[Dashboard] Error setting up socket:', err);
+      // Continue without socket - polling will still work
+    }
+
+    // Set up polling interval to refresh stats every 5 seconds
+    try {
+      refreshIntervalRef.current = setInterval(() => {
+      fetchData().catch((err: any) => {
+        console.warn('[Dashboard] Polling refresh error:', err);
+      });
+      }, 5000);
+    } catch (err) {
+      console.warn('[Dashboard] Error setting up polling:', err);
+    }
+
+    // Cleanup
+    return () => {
       try {
-        setError(null);
-        // Fetch packet statistics
-        const packetStats = await packetService.getPacketStats();
-        setStats(packetStats);
-
-        // Fetch status distribution for pie chart
-        const statusData = await packetService.getStatusDistribution();
-        setPieData(statusData);
-
-        // Fetch network load for line chart
-        const networkData = await packetService.getNetworkLoad();
-        setLineData(networkData);
-
-        // Fetch top hosts for bar chart
-        const topHosts = await packetService.getTopHosts();
-        setBarData(topHosts);
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-        setError('Failed to fetch dashboard data. Please try again later.');
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        if (refreshIntervalRef.current) {
+          clearInterval(refreshIntervalRef.current);
+          refreshIntervalRef.current = null;
+        }
+      } catch (err) {
+        console.warn('[Dashboard] Cleanup error:', err);
       }
     };
-
-    fetchData();
   }, []);
 
   return (
@@ -132,7 +249,7 @@ const Dashboard: FC = () => {
             <span className="stats-icon">🔍</span>
             <div className="stats-info">
               <span className="stats-value">{stats.maliciousCount}</span>
-              <span className="stats-title">MALICIOUS</span>
+              <span className="stats-title">ATTACKS DETECTED</span>
             </div>
           </motion.div>
           {/* <motion.div

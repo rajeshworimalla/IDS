@@ -172,22 +172,41 @@ export class PacketCaptureService {
     this.isCapturing = true;
     console.log('Starting packet capture...');
 
-    // Create new packet handler (optimized for performance)
+    // Create new packet handler (optimized for performance with crash prevention)
     this.packetHandler = (nbytes: number, trunc: boolean) => {
-      if (nbytes === 0) {
-        return; // Skip silently
-      }
-
       try {
+        if (nbytes === 0 || !this.buffer) {
+          return; // Skip silently
+        }
+
+        // Validate buffer size
+        if (nbytes > this.buffer.length) {
+          console.warn(`[PACKET] Invalid packet size: ${nbytes} > ${this.buffer.length}`);
+          return;
+        }
+
         const raw = this.buffer.slice(0, nbytes);
+        if (!raw || raw.length === 0) {
+          return;
+        }
+        
         // Process asynchronously to avoid blocking packet capture
         Promise.resolve().then(() => {
-          this.processPacket(raw).catch(() => {
-            // Silently handle errors to prevent log spam
+          this.processPacket(raw).catch((err) => {
+            // Log only non-buffer errors to prevent spam
+            if (err instanceof Error && !err.message.includes('Buffer')) {
+              console.warn('[PACKET] Error processing packet:', err.message);
+            }
           });
+        }).catch((err) => {
+          // Prevent promise chain crashes
+          console.warn('[PACKET] Error in promise chain:', err);
         });
       } catch (err) {
-        // Silently handle errors
+        // Prevent handler crashes - log only critical errors
+        if (err instanceof Error && !err.message.includes('Buffer') && !err.message.includes('slice')) {
+          console.warn('[PACKET] Error in packet handler:', err.message);
+        }
       }
     };
 
@@ -302,16 +321,14 @@ export class PacketCaptureService {
       });
 
       // Enhanced ML prediction with auto-blocking and notifications
-      if (packetData.status !== 'normal') {
-        // Rate limit ML predictions (max 10 per second per IP) to prevent overload
-        if (!this.mlRateLimiter) {
-          this.mlRateLimiter = new Map<string, number>();
-        }
-        const rateLimitKey = `${packetData.start_ip}-${Math.floor(Date.now() / 1000)}`;
-        const currentCount = this.mlRateLimiter.get(rateLimitKey) || 0;
-        if (currentCount > 10) {
-          return; // Skip prediction if rate limited
-        }
+      // Analyze ALL packets (not just suspicious ones) for better attack detection
+      // Rate limit ML predictions (max 20 per second per IP) to prevent overload
+      if (!this.mlRateLimiter) {
+        this.mlRateLimiter = new Map<string, number>();
+      }
+      const rateLimitKey = `${packetData.start_ip}-${Math.floor(Date.now() / 1000)}`;
+      const currentCount = this.mlRateLimiter.get(rateLimitKey) || 0;
+      if (currentCount < 20) { // Allow more predictions per second for better detection
         this.mlRateLimiter.set(rateLimitKey, currentCount + 1);
         
         // Clean old rate limit entries periodically
@@ -325,104 +342,149 @@ export class PacketCaptureService {
           }
         }
         
+        // Run ML prediction on ALL packets for better attack detection
         axios.post(this.predictionServiceUrl, {
           packet: packetData
         }, { timeout: 3000 }).then((response: any) => {
-          const predictions = response.data;
-          savePromise.then(async (savedPacket: any) => {
-            if (savedPacket) {
-              const isMalicious = predictions.binary_prediction === 'malicious';
-              const attackType = predictions.attack_type || 'unknown';
-              const confidence = predictions.confidence?.binary || predictions.confidence || 0;
-              
-              savedPacket.is_malicious = isMalicious;
-              savedPacket.attack_type = attackType;
-              savedPacket.confidence = confidence;
-              await savedPacket.save().catch(() => {}); // Non-blocking update
-              
-              // Auto-block malicious IPs with high confidence
-              if (isMalicious && confidence > 0.7) {
-                try {
-                  const { autoBan } = await import('./policy');
-                  await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch(() => {});
-                  
-                  // Emit intrusion alert notification
-                  const io = getIO();
-                  if (io) {
-                    io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                      type: 'intrusion',
-                      severity: 'critical',
-                      ip: packetData.start_ip,
-                      attackType: attackType,
-                      confidence: confidence,
-                      protocol: packetData.protocol,
-                      description: `Intrusion detected: ${attackType} from ${packetData.start_ip}`,
-                      timestamp: new Date().toISOString(),
-                      autoBlocked: true
-                    });
-                  }
-                } catch (err) {
-                  console.error('Error auto-blocking malicious IP:', err);
-                }
-              }
-              
-              // Emit alert for medium-high confidence attacks
-              if (isMalicious && confidence > 0.5) {
-                const io = getIO();
-                if (io) {
-                  io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                    type: 'intrusion',
-                    severity: confidence > 0.8 ? 'critical' : 'high',
-                    ip: packetData.start_ip,
-                    attackType: attackType,
-                    confidence: confidence,
-                    protocol: packetData.protocol,
-                    description: `Suspicious activity detected: ${attackType} from ${packetData.start_ip}`,
-                    timestamp: new Date().toISOString(),
-                    autoBlocked: confidence > 0.7
-                  });
-                }
-              }
+          try {
+            if (!response || !response.data) {
+              console.warn('[PACKET] Invalid ML response');
+              return;
             }
-          });
+            
+            const predictions = response.data;
+            savePromise.then(async (savedPacket: any) => {
+              try {
+                if (!savedPacket) return;
+                
+                const isMalicious = predictions?.binary_prediction === 'malicious';
+                let attackType = predictions?.attack_type || 'unknown';
+                const confidence = predictions?.confidence?.binary || predictions?.confidence || 0;
+                
+                // Enhanced attack type detection based on packet patterns (fallback if ML doesn't classify)
+                if (attackType === 'unknown' || attackType === 'normal') {
+                  attackType = this.detectAttackTypeFromPattern(packetData);
+                }
+                
+                savedPacket.is_malicious = isMalicious;
+                savedPacket.attack_type = attackType;
+                savedPacket.confidence = confidence;
+                await savedPacket.save().catch(() => {}); // Non-blocking update
+                
+                // Auto-block malicious IPs with high confidence (lowered threshold for faster response)
+                if (isMalicious && confidence > 0.6) {
+                  try {
+                    const { autoBan } = await import('./policy');
+                    await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch(() => {});
+                    
+                    // Emit intrusion alert notification
+                    try {
+                      const io = getIO();
+                      if (io) {
+                        io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                          type: 'intrusion',
+                          severity: 'critical',
+                          ip: packetData.start_ip,
+                          attackType: attackType,
+                          confidence: confidence,
+                          protocol: packetData.protocol,
+                          description: `Intrusion detected: ${attackType} from ${packetData.start_ip}`,
+                          timestamp: new Date().toISOString(),
+                          autoBlocked: true
+                        });
+                      }
+                    } catch (emitErr) {
+                      console.warn('[PACKET] Error emitting intrusion alert:', emitErr);
+                    }
+                  } catch (err) {
+                    console.warn('[PACKET] Error auto-blocking malicious IP:', err);
+                  }
+                }
+                
+              // Emit alert for ANY malicious detection (lowered threshold to catch all attacks)
+              if (isMalicious && confidence > 0.3) {
+                  try {
+                    const io = getIO();
+                    if (io) {
+                      io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                        type: 'intrusion',
+                        severity: confidence > 0.8 ? 'critical' : 'high',
+                        ip: packetData.start_ip,
+                        attackType: attackType,
+                        confidence: confidence,
+                        protocol: packetData.protocol,
+                        description: `Suspicious activity detected: ${attackType} from ${packetData.start_ip}`,
+                        timestamp: new Date().toISOString(),
+                        autoBlocked: confidence > 0.7
+                      });
+                    }
+                  } catch (emitErr) {
+                    console.warn('[PACKET] Error emitting alert:', emitErr);
+                  }
+                }
+              } catch (err) {
+                console.warn('[PACKET] Error processing ML prediction result:', err);
+              }
+            }).catch((err) => {
+              console.warn('[PACKET] Error in savePromise:', err);
+            });
+          } catch (err) {
+            console.warn('[PACKET] Error processing ML response:', err);
+          }
         }).catch((err) => {
           // ML service unavailable, continue silently but log
-          if (err.code !== 'ECONNREFUSED') {
-            console.warn('ML prediction error:', err.message);
+          if (err && (err as any).code !== 'ECONNREFUSED') {
+            console.warn('[PACKET] ML prediction error:', (err as any)?.message || err);
           }
         });
       }
 
       // Queue for socket emission (throttled)
       savePromise.then((savedPacket: any) => {
-        if (savedPacket) {
-          const packetObj = savedPacket.toObject();
-          // Add to queue (will be throttled by interval)
-          socketEmissionQueue.push(packetObj);
+        try {
+          if (savedPacket) {
+            const packetObj = savedPacket.toObject();
+            if (packetObj && typeof packetObj === 'object') {
+              // Add to queue (will be throttled by interval)
+              socketEmissionQueue.push(packetObj);
+            }
+          }
+        } catch (err) {
+          console.warn('[PACKET] Error queuing packet for socket:', err);
         }
+      }).catch((err) => {
+        console.warn('[PACKET] Error in savePromise for socket queue:', err);
       });
 
       // Auto-ban on critical events with notification (non-blocking)
       if (packetData.status === 'critical') {
         import('./policy').then(({ autoBan }) => {
           autoBan(packetData.start_ip, 'ids:critical').then(() => {
-            // Emit critical alert notification
-            const io = getIO();
-            if (io) {
-              io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                type: 'intrusion',
-                severity: 'critical',
-                ip: packetData.start_ip,
-                attackType: 'critical_traffic',
-                confidence: 0.9,
-                protocol: packetData.protocol,
-                description: `Critical traffic detected from ${packetData.start_ip}. IP automatically blocked.`,
-                timestamp: new Date().toISOString(),
-                autoBlocked: true
-              });
+            try {
+              // Emit critical alert notification
+              const io = getIO();
+              if (io) {
+                io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                  type: 'intrusion',
+                  severity: 'critical',
+                  ip: packetData.start_ip,
+                  attackType: 'critical_traffic',
+                  confidence: 0.9,
+                  protocol: packetData.protocol,
+                  description: `Critical traffic detected from ${packetData.start_ip}. IP automatically blocked.`,
+                  timestamp: new Date().toISOString(),
+                  autoBlocked: true
+                });
+              }
+            } catch (emitErr) {
+              console.warn('[PACKET] Error emitting critical alert:', emitErr);
             }
-          }).catch(() => {});
-        }).catch(() => {});
+          }).catch((err) => {
+            console.warn('[PACKET] Error auto-banning critical IP:', err);
+          });
+        }).catch((err) => {
+          console.warn('[PACKET] Error importing policy:', err);
+        });
       }
     } catch (err) {
       // Enhanced error handling to prevent crashes
@@ -443,12 +505,16 @@ export class PacketCaptureService {
     try {
       // Skip Ethernet header (14 bytes) and get source IP from IP header
       const offset = 14;
-      if (raw.length < offset + 20) {
-        throw new Error('Buffer too small for IP header');
+      if (!raw || raw.length < offset + 20) {
+        return '0.0.0.0';
+      }
+      // Validate indices are within bounds
+      if (offset + 15 >= raw.length) {
+        return '0.0.0.0';
       }
       return `${raw[offset + 12]}.${raw[offset + 13]}.${raw[offset + 14]}.${raw[offset + 15]}`;
     } catch (err) {
-      console.error('Error extracting source IP:', err);
+      // Return safe default instead of crashing
       return '0.0.0.0';
     }
   }
@@ -457,12 +523,16 @@ export class PacketCaptureService {
     try {
       // Skip Ethernet header (14 bytes) and get destination IP from IP header
       const offset = 14;
-      if (raw.length < offset + 20) {
-        throw new Error('Buffer too small for IP header');
+      if (!raw || raw.length < offset + 20) {
+        return '0.0.0.0';
+      }
+      // Validate indices are within bounds
+      if (offset + 19 >= raw.length) {
+        return '0.0.0.0';
       }
       return `${raw[offset + 16]}.${raw[offset + 17]}.${raw[offset + 18]}.${raw[offset + 19]}`;
     } catch (err) {
-      console.error('Error extracting destination IP:', err);
+      // Return safe default instead of crashing
       return '0.0.0.0';
     }
   }
@@ -471,8 +541,12 @@ export class PacketCaptureService {
     try {
       // Skip Ethernet header (14 bytes) and get protocol from IP header
       const offset = 14;
-      if (raw.length < offset + 10) {
-        throw new Error('Buffer too small for protocol field');
+      if (!raw || raw.length < offset + 10) {
+        return 'UNKNOWN';
+      }
+      // Validate index is within bounds
+      if (offset + 9 >= raw.length) {
+        return 'UNKNOWN';
       }
       const protocol = raw[offset + 9];
       switch (protocol) {
@@ -488,7 +562,7 @@ export class PacketCaptureService {
         default: return `PROTO_${protocol}`;
       }
     } catch (err) {
-      console.error('Error extracting protocol:', err);
+      // Return safe default instead of crashing
       return 'UNKNOWN';
     }
   }
@@ -545,37 +619,37 @@ export class PacketCaptureService {
     const isLargePacket = totalBytes > 1500; // Larger than typical MTU
     const isSmallPacket = totalBytes < 64;   // Smaller than minimum Ethernet frame
 
-    // Internal network traffic - very high thresholds
+    // Internal network traffic - LOWERED thresholds for better attack detection
     if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
-      // Critical: Extremely high frequency that indicates definite attack patterns
-      if (packet.protocol === 'TCP' && packet.frequency > 2000) return 'critical';
-      if (packet.protocol === 'UDP' && packet.frequency > 5000) return 'critical';
-      if (packet.protocol === 'ICMP' && packet.frequency > 1000) return 'critical';
+      // Critical: High frequency that indicates attack patterns (lowered from 2000)
+      if (packet.protocol === 'TCP' && packet.frequency > 50) return 'critical';
+      if (packet.protocol === 'UDP' && packet.frequency > 100) return 'critical';
+      if (packet.protocol === 'ICMP' && packet.frequency > 30) return 'critical';
 
-      // Medium: High frequency with suspicious characteristics
-      if (packet.protocol === 'TCP' && packet.frequency > 500 && (isSmallPacket || isLargePacket)) return 'medium';
-      if (packet.protocol === 'UDP' && packet.frequency > 1000 && (isSmallPacket || isLargePacket)) return 'medium';
-      if (packet.protocol === 'ICMP' && packet.frequency > 200) return 'medium';
+      // Medium: Moderate frequency with suspicious characteristics (lowered from 500)
+      if (packet.protocol === 'TCP' && packet.frequency > 20 && (isSmallPacket || isLargePacket)) return 'medium';
+      if (packet.protocol === 'UDP' && packet.frequency > 40 && (isSmallPacket || isLargePacket)) return 'medium';
+      if (packet.protocol === 'ICMP' && packet.frequency > 10) return 'medium';
 
       return 'normal';
     }
 
-    // External traffic - more sensitive but still realistic
+    // External traffic - MUCH more sensitive for attack detection
     if (isBroadcast(packet.start_ip) || isBroadcast(packet.end_ip)) {
-      // Broadcast traffic - flag high frequency
-      if (packet.frequency > 100) return 'medium';
+      // Broadcast traffic - flag high frequency (lowered from 100)
+      if (packet.frequency > 20) return 'medium';
       return 'normal';
     }
 
-    // Critical: Very high frequency external traffic (likely DDoS or scan)
-    if (packet.protocol === 'TCP' && packet.frequency > 1000) return 'critical';
-    if (packet.protocol === 'UDP' && packet.frequency > 2000) return 'critical';
-    if (packet.protocol === 'ICMP' && packet.frequency > 500) return 'critical';
+    // Critical: High frequency external traffic (likely DDoS or scan) - LOWERED thresholds
+    if (packet.protocol === 'TCP' && packet.frequency > 30) return 'critical';
+    if (packet.protocol === 'UDP' && packet.frequency > 50) return 'critical';
+    if (packet.protocol === 'ICMP' && packet.frequency > 20) return 'critical';
 
-    // Medium: Moderately high frequency with suspicious patterns
-    if (packet.protocol === 'TCP' && packet.frequency > 300 && isSmallPacket) return 'medium';
-    if (packet.protocol === 'UDP' && packet.frequency > 600) return 'medium';
-    if (packet.protocol === 'ICMP' && packet.frequency > 100) return 'medium';
+    // Medium: Moderate frequency with suspicious patterns - LOWERED thresholds
+    if (packet.protocol === 'TCP' && packet.frequency > 10 && isSmallPacket) return 'medium';
+    if (packet.protocol === 'UDP' && packet.frequency > 20) return 'medium';
+    if (packet.protocol === 'ICMP' && packet.frequency > 5) return 'medium';
 
     // Port scan detection - many small TCP packets
     if (packet.protocol === 'TCP' && packet.frequency > 200 && totalBytes < 100) return 'medium';
@@ -583,28 +657,75 @@ export class PacketCaptureService {
     return 'normal';
   }
 
+  private detectAttackTypeFromPattern(packetData: any): string {
+    // Pattern-based attack detection as fallback
+    const protocol = packetData.protocol?.toUpperCase() || '';
+    const frequency = packetData.frequency || 0;
+    const packetSize = packetData.start_bytes || 0;
+    
+    // High frequency TCP = DoS/DDoS
+    if (protocol === 'TCP' && frequency > 50) {
+      return frequency > 200 ? 'ddos' : 'dos';
+    }
+    
+    // High frequency UDP = DoS
+    if (protocol === 'UDP' && frequency > 100) {
+      return 'dos';
+    }
+    
+    // High frequency ICMP = Ping flood/sweep
+    if (protocol === 'ICMP' && frequency > 20) {
+      return 'ping_sweep';
+    }
+    
+    // Many small packets = Port scan
+    if (frequency > 30 && packetSize < 100) {
+      return 'port_scan';
+    }
+    
+    // Many packets to multiple ports = Probe
+    if (frequency > 20 && protocol === 'TCP') {
+      return 'probe';
+    }
+    
+    return 'suspicious_traffic';
+  }
+
   private generateDescription(raw: Buffer): string {
     try {
+      if (!raw || raw.length < 14) {
+        return 'Unknown packet';
+      }
+      
       const protocol = this.getProtocol(raw);
       const offset = 14; // Skip Ethernet header
 
-      // Get IP header length
+      // Get IP header length with bounds checking
+      if (offset >= raw.length) {
+        return `${protocol} packet`;
+      }
+      
       const ipHeaderLength = (raw[offset] & 0x0F) * 4;
 
-      // Get source and destination ports for TCP/UDP
+      // Get source and destination ports for TCP/UDP with bounds checking
       if ((protocol === 'TCP' || protocol === 'UDP') && raw.length >= offset + ipHeaderLength + 4) {
-        const srcPort = raw.readUInt16BE(offset + ipHeaderLength);
-        const dstPort = raw.readUInt16BE(offset + ipHeaderLength + 2);
+        try {
+          const srcPort = raw.readUInt16BE(offset + ipHeaderLength);
+          const dstPort = raw.readUInt16BE(offset + ipHeaderLength + 2);
 
-        // Add common port descriptions
-        const portDesc = this.getPortDescription(dstPort);
-        return `${protocol} ${srcPort} -> ${dstPort}${portDesc ? ` (${portDesc})` : ''}`;
+          // Add common port descriptions
+          const portDesc = this.getPortDescription(dstPort);
+          return `${protocol} ${srcPort} -> ${dstPort}${portDesc ? ` (${portDesc})` : ''}`;
+        } catch (portErr) {
+          // If port reading fails, return basic description
+          return `${protocol} packet (${raw.length} bytes)`;
+        }
       }
 
       return `${protocol} packet (${raw.length} bytes)`;
     } catch (err) {
-      console.error('Error generating description:', err);
-      return `Packet (${raw.length} bytes)`;
+      // Return safe default instead of crashing
+      return `Packet (${raw?.length || 0} bytes)`;
     }
   }
 

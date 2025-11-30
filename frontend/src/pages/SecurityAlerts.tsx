@@ -391,10 +391,36 @@ const SecurityAlerts: FC = () => {
                     <span className="alert-icon">{getSeverityIcon(alert.severity)}</span>
                   </div>
                   <div className="alert-basic-info">
-                    <h3>{alert.type}</h3>
+                    <h3>
+                      {alert.attackType ? (
+                        <span>
+                          {getAttackTypeLabel(alert.attackType)}
+                          {alert.confidence && (
+                            <span style={{ fontSize: '12px', color: '#888', marginLeft: '8px' }}>
+                              ({Math.round(alert.confidence * 100)}% confidence)
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        alert.type
+                      )}
+                    </h3>
                     <div className="alert-meta">
                       <span className="timestamp">{alert.timestamp}</span>
                       {getStatusBadge(alert.status)}
+                      {alert.autoBlocked && (
+                        <span style={{
+                          background: '#ff4d4f',
+                          color: 'white',
+                          fontSize: '10px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          marginLeft: '8px',
+                          fontWeight: 'bold'
+                        }}>
+                          AUTO-BLOCKED
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="alert-actions">

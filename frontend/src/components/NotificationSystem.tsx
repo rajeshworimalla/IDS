@@ -20,48 +20,111 @@ const NotificationSystem: FC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    const token = authService.getToken();
-    if (!token || !authService.isAuthenticated()) {
-      return;
-    }
-
-    const socketConnection = io('http://localhost:5001', {
-      auth: { token },
-      withCredentials: true,
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-    });
-
-    socketConnection.on('connect', () => {
-      console.log('[Notifications] Socket connected');
-      setSocket(socketConnection);
-    });
-
-    socketConnection.on('intrusion-detected', (alert: IntrusionAlert) => {
-      console.log('[Notifications] Intrusion detected:', alert);
-      
-      // Add to alerts list
-      setAlerts(prev => [alert, ...prev.slice(0, 9)]); // Keep last 10 alerts
-      
-      // Show browser notification if permission granted
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('🚨 Intrusion Detected', {
-          body: `${alert.attackType} from ${alert.ip} (${Math.round(alert.confidence * 100)}% confidence)`,
-          icon: '/logo.svg',
-          tag: `intrusion-${alert.ip}-${Date.now()}`,
-          requireInteraction: alert.severity === 'critical',
-        });
+    try {
+      const token = authService.getToken();
+      if (!token || !authService.isAuthenticated()) {
+        return;
       }
-    });
 
-    // Request notification permission on mount
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+      const socketConnection = io('http://localhost:5001', {
+        auth: { token },
+        withCredentials: true,
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+      });
+
+      socketConnection.on('connect', () => {
+        console.log('[Notifications] Socket connected');
+        setSocket(socketConnection);
+      });
+
+      socketConnection.on('connect_error', (err) => {
+        console.warn('[Notifications] Socket connection error:', err);
+        // Don't crash, just log
+      });
+
+      socketConnection.on('error', (err) => {
+        console.warn('[Notifications] Socket error:', err);
+        // Don't crash, just log
+      });
+
+      socketConnection.on('intrusion-detected', (alert: IntrusionAlert) => {
+        try {
+          console.log('[Notifications] Intrusion detected:', alert);
+          
+          // Validate alert data before using
+          if (!alert || typeof alert !== 'object') {
+            console.warn('[Notifications] Invalid alert data:', alert);
+            return;
+          }
+          
+          // Add to alerts list safely
+          setAlerts(prev => {
+            try {
+              const newAlert = {
+                ...alert,
+                ip: alert.ip || 'unknown',
+                attackType: alert.attackType || 'unknown',
+                confidence: typeof alert.confidence === 'number' ? alert.confidence : 0,
+                severity: alert.severity || 'medium',
+              };
+              return [newAlert, ...prev.slice(0, 9)]; // Keep last 10 alerts
+            } catch (err) {
+              console.warn('[Notifications] Error adding alert:', err);
+              return prev; // Return previous state on error
+            }
+          });
+          
+          // Show browser notification if permission granted
+          try {
+            if ('Notification' in window && Notification.permission === 'granted') {
+              const notification = new Notification('🚨 Intrusion Detected', {
+                body: `${alert.attackType || 'Attack'} from ${alert.ip || 'unknown'} (${Math.round((alert.confidence || 0) * 100)}% confidence)`,
+                icon: '/logo.svg',
+                tag: `intrusion-${alert.ip || 'unknown'}-${Date.now()}`,
+                requireInteraction: alert.severity === 'critical',
+              });
+              
+              // Handle notification errors
+              notification.onerror = (err) => {
+                console.warn('[Notifications] Notification error:', err);
+              };
+            }
+          } catch (notifErr) {
+            console.warn('[Notifications] Error showing browser notification:', notifErr);
+            // Don't crash, just log
+          }
+        } catch (err) {
+          console.error('[Notifications] Error processing intrusion alert:', err);
+          // Don't crash, just log
+        }
+      });
+
+      // Request notification permission on mount
+      try {
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().catch(err => {
+            console.warn('[Notifications] Error requesting permission:', err);
+          });
+        }
+      } catch (permErr) {
+        console.warn('[Notifications] Error with notification permission:', permErr);
+      }
+
+      return () => {
+        try {
+          socketConnection.disconnect();
+        } catch (err) {
+          console.warn('[Notifications] Error disconnecting socket:', err);
+        }
+      };
+    } catch (err) {
+      console.error('[Notifications] Error setting up notification system:', err);
+      // Don't crash the app, just log the error
     }
-
-    return () => {
-      socketConnection.disconnect();
-    };
   }, []);
 
   const removeAlert = (index: number) => {

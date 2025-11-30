@@ -219,9 +219,28 @@ export const scanPorts = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'ports array is required' });
     }
     
-    // Limit scan size to prevent abuse
-    if (hosts.length * ports.length > 10000) {
-      return res.status(400).json({ error: 'Scan too large. Maximum 10,000 host:port combinations allowed.' });
+    // SECURITY: Only allow scanning single IP (current VM) - prevent subnet scanning
+    if (hosts.length > 1) {
+      return res.status(403).json({ 
+        error: 'Security restriction: Only single IP scanning is allowed. Cannot scan subnets or multiple hosts.' 
+      });
+    }
+    
+    // Validate IP format
+    const ipPattern = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    for (const host of hosts) {
+      if (!ipPattern.test(host)) {
+        return res.status(400).json({ error: `Invalid IP address format: ${host}` });
+      }
+      const parts = host.split('.').map(Number);
+      if (!parts.every(p => p >= 0 && p <= 255)) {
+        return res.status(400).json({ error: `Invalid IP address: ${host}` });
+      }
+    }
+    
+    // Limit scan size to prevent abuse (reduced since only single IP)
+    if (hosts.length * ports.length > 1000) {
+      return res.status(400).json({ error: 'Scan too large. Maximum 1,000 port combinations allowed per IP.' });
     }
     
     const { scanPorts: scanPortsService } = await import('../services/portScanner');
