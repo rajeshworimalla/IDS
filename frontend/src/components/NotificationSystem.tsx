@@ -265,37 +265,206 @@ const NotificationSystem: FC = () => {
   };
 
   return (
-    <div className="notification-system" style={{
-      position: 'fixed',
-      top: '20px',
-      right: '20px',
-      zIndex: 10000,
-      maxWidth: '380px',
-      pointerEvents: 'none'
-    }}>
-      <AnimatePresence mode="popLayout">
-        {alerts.map((alert, index) => (
+    <>
+      {/* Big Modal Popup for Critical Alerts - Center of Screen */}
+      <AnimatePresence>
+        {alerts.filter(a => a.severity === 'critical').slice(0, 1).map((alert, index) => (
           <motion.div
-            key={`${alert.ip}-${alert.timestamp}-${index}`}
-            initial={{ opacity: 0, x: 400, scale: 0.9, y: -20 }}
-            animate={{ opacity: 1, x: 0, scale: 1, y: 0 }}
-            exit={{ opacity: 0, x: 400, scale: 0.9, transition: { duration: 0.2 } }}
+            key={`modal-${alert.ip}-${alert.timestamp}-${index}`}
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
             transition={{ type: 'spring', damping: 20, stiffness: 300 }}
             style={{
-              pointerEvents: 'auto',
-              marginBottom: '12px',
-              background: 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-              borderRadius: '12px',
-              boxShadow: `0 8px 24px rgba(0,0,0,0.2), 0 0 0 1px ${getSeverityColor(alert.severity)}40`,
-              borderLeft: `5px solid ${getSeverityColor(alert.severity)}`,
-              padding: '18px',
-              cursor: 'pointer',
-              position: 'relative',
-              overflow: 'hidden'
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 99999,
+              pointerEvents: 'auto'
             }}
-            onClick={() => removeAlert(index)}
-            whileHover={{ scale: 1.03, boxShadow: `0 12px 32px rgba(0,0,0,0.25), 0 0 0 1px ${getSeverityColor(alert.severity)}60` }}
+            onClick={() => removeAlert(alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp))}
           >
+            <motion.div
+              initial={{ y: -50 }}
+              animate={{ y: 0 }}
+              style={{
+                background: 'linear-gradient(135deg, #ffffff 0%, #fff5f5 100%)',
+                borderRadius: '20px',
+                boxShadow: `0 20px 60px rgba(255,77,79,0.4), 0 0 0 3px ${getSeverityColor(alert.severity)}`,
+                padding: '40px',
+                maxWidth: '600px',
+                width: '90%',
+                position: 'relative',
+                cursor: 'pointer'
+              }}
+              onClick={(e) => e.stopPropagation()}
+              whileHover={{ scale: 1.02 }}
+            >
+              {/* Close button */}
+              <button
+                onClick={() => removeAlert(alerts.findIndex(a => a.ip === alert.ip && a.timestamp === alert.timestamp))}
+                style={{
+                  position: 'absolute',
+                  top: '20px',
+                  right: '20px',
+                  background: 'rgba(255,77,79,0.1)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '36px',
+                  height: '36px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '20px',
+                  color: '#ff4d4f',
+                  fontWeight: 'bold',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,77,79,0.2)';
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,77,79,0.1)';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                ×
+              </button>
+
+              {/* Alert Icon */}
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                <motion.div
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 1, repeat: Infinity }}
+                  style={{
+                    fontSize: '80px',
+                    marginBottom: '16px'
+                  }}
+                >
+                  🚨
+                </motion.div>
+                <h2 style={{
+                  fontSize: '32px',
+                  fontWeight: 'bold',
+                  color: getSeverityColor(alert.severity),
+                  margin: 0,
+                  marginBottom: '8px'
+                }}>
+                  INTRUSION DETECTED
+                </h2>
+              </div>
+
+              {/* Attack Type */}
+              <div style={{
+                background: 'linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%)',
+                color: 'white',
+                padding: '16px 24px',
+                borderRadius: '12px',
+                marginBottom: '24px',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '8px' }}>ATTACK TYPE</div>
+                <div style={{ fontSize: '28px', fontWeight: 'bold' }}>
+                  {getAttackTypeLabel(alert.attackType)}
+                </div>
+              </div>
+
+              {/* Details */}
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '16px' }}>
+                  <span style={{ color: '#666', fontWeight: '500' }}>Source IP:</span>
+                  <span style={{ fontWeight: 'bold', color: '#ff4d4f' }}>{alert.ip}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '16px' }}>
+                  <span style={{ color: '#666', fontWeight: '500' }}>Protocol:</span>
+                  <span style={{ fontWeight: 'bold' }}>{alert.protocol?.toUpperCase() || 'UNKNOWN'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '16px' }}>
+                  <span style={{ color: '#666', fontWeight: '500' }}>Confidence:</span>
+                  <span style={{ fontWeight: 'bold', color: '#fa8c16' }}>
+                    {Math.round(alert.confidence * 100)}%
+                  </span>
+                </div>
+                {alert.autoBlocked && (
+                  <div style={{
+                    background: 'rgba(255,77,79,0.1)',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    textAlign: 'center',
+                    marginTop: '16px',
+                    border: '2px solid #ff4d4f'
+                  }}>
+                    <span style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '14px' }}>
+                      ⛔ IP AUTOMATICALLY BLOCKED
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Description */}
+              {alert.description && (
+                <div style={{
+                  background: '#f8f9fa',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  marginBottom: '24px',
+                  fontSize: '14px',
+                  color: '#555',
+                  lineHeight: '1.6'
+                }}>
+                  {alert.description}
+                </div>
+              )}
+
+              {/* Timestamp */}
+              <div style={{ textAlign: 'center', color: '#888', fontSize: '12px' }}>
+                {new Date(alert.timestamp).toLocaleString()}
+              </div>
+            </motion.div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+
+      {/* Toast Notifications for Non-Critical Alerts - Top Right */}
+      <div className="notification-system" style={{
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        zIndex: 10000,
+        maxWidth: '380px',
+        pointerEvents: 'none'
+      }}>
+        <AnimatePresence mode="popLayout">
+          {alerts.filter(a => a.severity !== 'critical').map((alert, index) => (
+            <motion.div
+              key={`${alert.ip}-${alert.timestamp}-${index}`}
+              initial={{ opacity: 0, x: 400, scale: 0.9, y: -20 }}
+              animate={{ opacity: 1, x: 0, scale: 1, y: 0 }}
+              exit={{ opacity: 0, x: 400, scale: 0.9, transition: { duration: 0.2 } }}
+              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+              style={{
+                pointerEvents: 'auto',
+                marginBottom: '12px',
+                background: 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
+                borderRadius: '12px',
+                boxShadow: `0 8px 24px rgba(0,0,0,0.2), 0 0 0 1px ${getSeverityColor(alert.severity)}40`,
+                borderLeft: `5px solid ${getSeverityColor(alert.severity)}`,
+                padding: '18px',
+                cursor: 'pointer',
+                position: 'relative',
+                overflow: 'hidden'
+              }}
+              onClick={() => removeAlert(index)}
+              whileHover={{ scale: 1.03, boxShadow: `0 12px 32px rgba(0,0,0,0.25), 0 0 0 1px ${getSeverityColor(alert.severity)}60` }}
+            >
             {/* Pulsing indicator for critical alerts */}
             {alert.severity === 'critical' && (
               <motion.div
@@ -429,6 +598,7 @@ const NotificationSystem: FC = () => {
         ))}
       </AnimatePresence>
     </div>
+    </>
   );
 };
 

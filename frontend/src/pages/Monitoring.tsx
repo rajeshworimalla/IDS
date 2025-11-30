@@ -579,9 +579,15 @@ const Monitoring: FC = () => {
                             <span className="detail-label">Attack Type</span>
                             <span className="detail-value" style={{ 
                               fontWeight: 'bold', 
-                              color: alert.attack_type && alert.attack_type !== 'normal' ? '#ff4d4f' : '#52c41a' 
+                              color: (alert.attack_type && alert.attack_type !== 'normal' && alert.attack_type !== 'unknown') || alert.severity === 'critical' || alert.severity === 'high' ? '#ff4d4f' : '#52c41a' 
                             }}>
-                              {getAttackTypeLabel(alert.attack_type || 'normal')}
+                              {getAttackTypeLabel(
+                                alert.attack_type && alert.attack_type !== 'normal' 
+                                  ? alert.attack_type 
+                                  : (alert.severity === 'critical' || alert.severity === 'high' 
+                                      ? 'critical_traffic' 
+                                      : 'normal')
+                              )}
                             </span>
                           </div>
                           <div className="detail-item">

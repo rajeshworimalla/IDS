@@ -130,6 +130,10 @@ const EventsLog: FC = () => {
       }
     });
 
+    // PERFORMANCE: Throttle packet updates to prevent UI lag during attacks
+    let packetUpdateTimeout: NodeJS.Timeout | null = null;
+    const pendingPackets: any[] = [];
+    
     socket.on('new-packet', (packet) => {
       try {
         if (!packet || typeof packet !== 'object') {
@@ -137,21 +141,34 @@ const EventsLog: FC = () => {
           return;
         }
         
-        setPackets(prev => {
-          try {
-            // Check if packet already exists to avoid duplicates
-            const exists = prev.some(p => p && p._id === packet._id);
-            if (exists) {
-              return prev;
-            }
-            // Limit displayed packets to last 300 for performance (still captures all to DB)
-            const updated = [packet, ...prev];
-            return updated.slice(0, 300);
-          } catch (err) {
-            console.warn('[EventsLog] Error updating packets:', err);
-            return prev; // Return previous state on error
+        // Only queue interesting packets (skip normal during high traffic)
+        if (packet.status !== 'normal' || pendingPackets.length < 10) {
+          pendingPackets.push(packet);
+        }
+        
+        // Debounce updates: only update UI every 2 seconds during high traffic
+        if (packetUpdateTimeout) {
+          clearTimeout(packetUpdateTimeout);
+        }
+        
+        packetUpdateTimeout = setTimeout(() => {
+          if (pendingPackets.length > 0) {
+            setPackets(prev => {
+              try {
+                const updated = [...pendingPackets, ...prev];
+                // Limit displayed packets to last 200 for performance (reduced from 300)
+                const limited = updated.slice(0, 200);
+                // Clear pending packets
+                pendingPackets.length = 0;
+                return limited;
+              } catch (err) {
+                console.warn('[EventsLog] Error updating packets:', err);
+                return prev; // Return previous state on error
+              }
+            });
           }
-        });
+          packetUpdateTimeout = null;
+        }, 2000); // Update every 2 seconds instead of immediately
       } catch (err) {
         console.warn('[EventsLog] Error processing new packet:', err);
         // Don't crash, just log
@@ -461,13 +478,17 @@ const EventsLog: FC = () => {
                   <td>{packet.end_ip}</td>
                   <td>{packet.protocol}</td>
                   <td>
-                    {packet.is_malicious && packet.attack_type ? (
+                    {packet.is_malicious ? (
                       <span style={{
                         color: '#ff4d4f',
                         fontWeight: 'bold',
                         fontSize: '12px'
                       }}>
-                        {getAttackTypeLabel(packet.attack_type)}
+                        {getAttackTypeLabel(
+                          packet.attack_type && packet.attack_type !== 'normal' && packet.attack_type !== 'unknown'
+                            ? packet.attack_type
+                            : (packet.status === 'critical' ? 'critical_traffic' : 'suspicious_traffic')
+                        )}
                         {packet.confidence && (
                           <span style={{ color: '#888', marginLeft: '4px' }}>
                             ({Math.round(packet.confidence * 100)}%)

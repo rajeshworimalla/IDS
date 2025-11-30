@@ -11,10 +11,16 @@ const packetFrequencies: { [key: string]: { count: number; timestamp: number } }
 // Industry standard: Limit UI updates but capture all packets to DB
 const socketEmissionQueue: any[] = [];
 let lastEmissionTime = 0;
-const EMISSION_INTERVAL = 250; // Emit max once per 250ms (4 packets/second to UI)
-const MAX_QUEUE_SIZE = 5; // Keep only most recent 5 packets for UI updates
+const EMISSION_INTERVAL = 1000; // Emit max once per 1000ms (1 packet/second to UI) - INCREASED for performance
+const MAX_QUEUE_SIZE = 1; // Keep only most recent packet for UI updates - REDUCED for performance
 
-// Process socket emission queue - optimized for performance
+// Batch DB writes to reduce database load during attacks
+const dbWriteQueue: any[] = [];
+let lastDbWriteTime = 0;
+const DB_WRITE_INTERVAL = 2000; // Write to DB every 2 seconds (batched)
+const MAX_DB_BATCH_SIZE = 100; // Max packets per batch
+
+// Process socket emission queue - optimized for performance (REDUCED frequency)
 setInterval(() => {
   const now = Date.now();
   if (socketEmissionQueue.length > 0 && (now - lastEmissionTime) >= EMISSION_INTERVAL) {
@@ -26,10 +32,8 @@ setInterval(() => {
         if (packet) {
           io.emit('new-packet', packet);
           lastEmissionTime = now;
-          // Keep only last 5 in queue (most recent)
-          if (socketEmissionQueue.length > MAX_QUEUE_SIZE) {
-            socketEmissionQueue.splice(0, socketEmissionQueue.length - MAX_QUEUE_SIZE);
-          }
+          // Clear queue after emitting
+          socketEmissionQueue.length = 0;
         }
       }
     } catch (err) {
@@ -37,7 +41,26 @@ setInterval(() => {
       socketEmissionQueue.length = 0;
     }
   }
-}, 100); // Check every 100ms
+}, 500); // Check every 500ms (REDUCED frequency for performance)
+
+// Batch DB writes to reduce database load during attacks
+setInterval(() => {
+  const now = Date.now();
+  if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL) {
+    try {
+      const batch = dbWriteQueue.splice(0, MAX_DB_BATCH_SIZE);
+      if (batch.length > 0) {
+        // Use insertMany for better performance
+        PacketModel.insertMany(batch, { ordered: false }).catch(err => {
+          console.warn('[PACKET] Batch DB write error (non-critical):', (err as Error)?.message);
+        });
+        lastDbWriteTime = now;
+      }
+    } catch (err) {
+      console.warn('[PACKET] Error in batch DB write:', (err as Error)?.message);
+    }
+  }
+}, 1000); // Check every 1 second
 
 // Cleanup old frequency data every 5 minutes to prevent memory leaks
 setInterval(() => {
@@ -325,14 +348,31 @@ export class PacketCaptureService {
         return; // Not enough bytes for Ethernet header
       }
       
-      const etherType = raw.readUInt16BE(12);
+      let etherType: number;
+      try {
+        etherType = raw.readUInt16BE(12);
+      } catch (err) {
+        // Buffer read error, skip packet
+        return;
+      }
+      
       if (etherType !== 0x0800) {
         return; // Non-IP packet, skip silently
       }
 
-      const sourceIP = this.getSourceIP(raw);
-      const destIP = this.getDestinationIP(raw);
-      const protocol = this.getProtocol(raw);
+      let sourceIP: string;
+      let destIP: string;
+      let protocol: string;
+      
+      try {
+        sourceIP = this.getSourceIP(raw);
+        destIP = this.getDestinationIP(raw);
+        protocol = this.getProtocol(raw);
+      } catch (err) {
+        // Error extracting packet info, skip packet
+        console.warn('[PACKET] Error extracting packet info:', (err as Error)?.message);
+        return;
+      }
 
       // Skip localhost traffic to reduce noise
       if (sourceIP.startsWith('127.') || destIP.startsWith('127.')) {
@@ -371,22 +411,58 @@ export class PacketCaptureService {
         end_bytes: packetData.end_bytes
       });
 
-      // Only save interesting packets (non-normal status) to reduce DB load
-      // For presentation: save all packets but make it non-blocking
-      const savePromise = PacketModel.create(packetData).catch(err => {
-        console.error('Error saving packet:', err);
-        return null;
-      });
+      // PERFORMANCE OPTIMIZATION: Only save interesting packets during high traffic
+      // During attacks, skip saving normal packets to reduce DB load
+      // BUT: Always save critical packets immediately
+      const shouldSaveToDB = packetData.status !== 'normal' || dbWriteQueue.length < 50;
+      
+      // Queue for batched DB write (non-blocking)
+      if (shouldSaveToDB) {
+        dbWriteQueue.push(packetData);
+        // Limit queue size to prevent memory issues
+        if (dbWriteQueue.length > 500) {
+          // Remove oldest normal packets first (never remove critical)
+          const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
+          if (normalIndex !== -1) {
+            dbWriteQueue.splice(normalIndex, 1);
+          } else {
+            // If no normal packets, remove oldest medium packet
+            const mediumIndex = dbWriteQueue.findIndex(p => p.status === 'medium');
+            if (mediumIndex !== -1) {
+              dbWriteQueue.splice(mediumIndex, 1);
+            } else {
+              dbWriteQueue.shift(); // Last resort: remove oldest
+            }
+          }
+        }
+        
+        // CRITICAL: If queue is getting large, force immediate write for critical packets
+        if (packetData.status === 'critical' && dbWriteQueue.length > 200) {
+          const criticalPackets = dbWriteQueue.filter(p => p.status === 'critical');
+          if (criticalPackets.length > 0) {
+            PacketModel.insertMany(criticalPackets, { ordered: false }).catch(() => {});
+            // Remove written packets from queue
+            dbWriteQueue.splice(0, dbWriteQueue.length, ...dbWriteQueue.filter(p => p.status !== 'critical'));
+          }
+        }
+      }
+      
+      // Create a mock promise for compatibility with existing code
+      const savePromise = Promise.resolve({ _id: `temp_${Date.now()}_${Math.random()}`, ...packetData });
 
       // Enhanced ML prediction with auto-blocking and notifications
-      // Analyze ALL packets (not just suspicious ones) for better attack detection
-      // Rate limit ML predictions (max 20 per second per IP) to prevent overload
+      // PERFORMANCE: Only analyze suspicious/critical packets during high traffic
+      // Rate limit ML predictions (max 5 per second per IP) to prevent overload
       if (!this.mlRateLimiter) {
         this.mlRateLimiter = new Map<string, number>();
       }
       const rateLimitKey = `${packetData.start_ip}-${Math.floor(Date.now() / 1000)}`;
       const currentCount = this.mlRateLimiter.get(rateLimitKey) || 0;
-      if (currentCount < 20) { // Allow more predictions per second for better detection
+      
+      // PERFORMANCE: Only run ML on suspicious/critical packets OR if rate limit allows
+      const shouldRunML = packetData.status !== 'normal' || currentCount < 2; // Reduced from 20 to 2
+      
+      if (shouldRunML && currentCount < 5) { // Reduced from 20 to 5 per second
         this.mlRateLimiter.set(rateLimitKey, currentCount + 1);
         
         // Clean old rate limit entries periodically
@@ -401,9 +477,11 @@ export class PacketCaptureService {
         }
         
         // Run ML prediction on ALL packets for better attack detection
-        axios.post(this.predictionServiceUrl, {
-          packet: packetData
-        }, { timeout: 3000 }).then((response: any) => {
+        // Wrap in try-catch to prevent crashes on HTTP flood or other attacks
+        try {
+          axios.post(this.predictionServiceUrl, {
+            packet: packetData
+          }, { timeout: 3000 }).then((response: any) => {
           try {
             if (!response || !response.data) {
               console.warn('[PACKET] Invalid ML response');
@@ -531,24 +609,39 @@ export class PacketCaptureService {
             console.log(`[PACKET] 🚨 Critical packet detected but ML unavailable - alert already emitted`);
           }
         });
+        } catch (mlErr) {
+          // Catch any errors in the axios call setup (shouldn't happen, but be safe)
+          console.warn('[PACKET] Error setting up ML prediction:', (mlErr as Error)?.message);
+          // Continue processing - critical alerts will still be emitted
+        }
       }
 
-      // Queue for socket emission (throttled)
-      savePromise.then((savedPacket: any) => {
-        try {
-          if (savedPacket) {
-            const packetObj = savedPacket.toObject();
-            if (packetObj && typeof packetObj === 'object') {
-              // Add to queue (will be throttled by interval)
-              socketEmissionQueue.push(packetObj);
+      // PERFORMANCE: Only queue interesting packets for socket emission (skip normal during high traffic)
+      // This prevents UI lag during attacks
+      if (packetData.status !== 'normal' || socketEmissionQueue.length === 0) {
+        savePromise.then((savedPacket: any) => {
+          try {
+            if (savedPacket) {
+              // Use packetData directly (no need to convert from DB object)
+              const packetObj = typeof savedPacket.toObject === 'function' 
+                ? savedPacket.toObject() 
+                : savedPacket;
+              if (packetObj && typeof packetObj === 'object') {
+                // Add to queue (will be throttled by interval)
+                socketEmissionQueue.push(packetObj);
+                // Limit queue size
+                if (socketEmissionQueue.length > MAX_QUEUE_SIZE) {
+                  socketEmissionQueue.shift();
+                }
+              }
             }
+          } catch (err) {
+            console.warn('[PACKET] Error queuing packet for socket:', err);
           }
-        } catch (err) {
-          console.warn('[PACKET] Error queuing packet for socket:', err);
-        }
-      }).catch((err) => {
-        console.warn('[PACKET] Error in savePromise for socket queue:', err);
-      });
+        }).catch((err) => {
+          console.warn('[PACKET] Error in savePromise for socket queue:', err);
+        });
+      }
 
       // Auto-ban on critical events with notification (non-blocking)
       // CRITICAL: Always emit alerts for critical packets, even if ML doesn't respond

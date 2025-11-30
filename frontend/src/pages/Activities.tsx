@@ -64,9 +64,10 @@ const Activities: FC = () => {
           console.log('[Activities] Socket connected');
         });
 
-        socket.on('new-packet', () => {
-          fetchData().catch(() => {});
-        });
+        // DISABLED: Too many updates during attacks cause lag
+        // socket.on('new-packet', () => {
+        //   fetchData().catch(() => {});
+        // });
 
         socket.on('intrusion-detected', () => {
           console.log('[Activities] 🚨 INTRUSION DETECTED');
