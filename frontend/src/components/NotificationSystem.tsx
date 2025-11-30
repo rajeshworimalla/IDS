@@ -13,13 +13,17 @@ interface IntrusionAlert {
   description: string;
   timestamp: string;
   autoBlocked: boolean;
+  inGracePeriod?: boolean;
+  requiresUserDecision?: boolean;
+  actionRequired?: string;
 }
 
 const NotificationSystem: FC = () => {
   const [alerts, setAlerts] = useState<IntrusionAlert[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const criticalIPsShown = useRef<Set<string>>(new Set()); // Track which critical IPs have been shown
+  // Track which critical alerts have been shown: IP:attackType (allows different attack types from same IP)
+  const criticalAlertsShown = useRef<Set<string>>(new Set());
   
   // Create audio element for sound notifications
   useEffect(() => {
@@ -148,19 +152,37 @@ const NotificationSystem: FC = () => {
           
           const severity = alert.severity || 'medium';
           const alertIP = alert.ip || 'unknown';
+          const attackType = alert.attackType || 'unknown';
+          const inGracePeriod = alert.inGracePeriod || false;
+          const requiresUserDecision = alert.requiresUserDecision || false;
           
-          // For critical alerts: only show one popup per IP address
+          // Create unique key for this alert: IP:attackType
+          // This allows different attack types from the same IP to show separate notifications
+          const alertKey = `${alertIP}:${attackType}`;
+          
+          // For critical alerts: only show one popup per IP:attackType combination
+          // BUT: Always allow grace period notifications (requiresUserDecision) to show
           if (severity === 'critical') {
-            if (criticalIPsShown.current.has(alertIP)) {
-              console.log(`[Notifications] Skipping duplicate critical alert for IP: ${alertIP}`);
-              return; // Don't show another popup for this IP
+            // Grace period notifications should always show (user needs to decide)
+            if (!inGracePeriod && !requiresUserDecision && criticalAlertsShown.current.has(alertKey)) {
+              console.log(`[Notifications] Skipping duplicate critical alert for ${alertKey}`);
+              return; // Don't show another popup for this IP:attackType combination
             }
-            // Mark this IP as shown
-            criticalIPsShown.current.add(alertIP);
-            // Remove from set after 5 minutes to allow new alerts if needed
-            setTimeout(() => {
-              criticalIPsShown.current.delete(alertIP);
-            }, 5 * 60 * 1000);
+            
+            // Mark this alert as shown (only if not a grace period notification)
+            // Grace period notifications can show multiple times if user doesn't respond
+            if (!inGracePeriod && !requiresUserDecision) {
+              criticalAlertsShown.current.add(alertKey);
+              // Remove from set after 5 minutes to allow new alerts if needed
+              setTimeout(() => {
+                criticalAlertsShown.current.delete(alertKey);
+              }, 5 * 60 * 1000);
+            }
+            
+            // For grace period notifications, log that we're showing it
+            if (inGracePeriod || requiresUserDecision) {
+              console.log(`[Notifications] Showing grace period notification for ${alertIP}:${attackType} (requires user decision)`);
+            }
           }
           
           // Play sound alert
