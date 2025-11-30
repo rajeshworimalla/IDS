@@ -24,8 +24,11 @@ const Blocker: FC = () => {
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [policySaved, setPolicySaved] = useState(false);
 
-  // Websites Control Panel state
-  const defaultPorts = [80, 443, 8080, 3000, 5173, 8000, 5000];
+  // Websites Control Panel state - Expanded port list
+  const defaultPorts = [
+    20, 21, 22, 23, 25, 53, 67, 68, 80, 110, 135, 139, 143, 443, 445, 
+    993, 995, 1433, 3000, 3306, 3389, 5000, 5173, 5432, 6379, 8000, 8080, 8443, 27017
+  ];
   const [subnet, setSubnet] = useState('');
   const [selectedPorts, setSelectedPorts] = useState<number[]>(defaultPorts);
   const [sites, setSites] = useState<{ host: string; ports: number[] }[]>([]);
@@ -157,61 +160,66 @@ const Blocker: FC = () => {
     return [];
   }
   function guessScheme(port: number): 'http'|'https' { return port === 443 ? 'https' : 'http'; }
-  async function isReachable(url: string, timeoutMs = 1500): Promise<boolean> {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctrl.signal });
-      return true;
-    } catch {
-      return false;
-    } finally { clearTimeout(t); }
-  }
-  function limit(concurrency: number) {
-    const queue: { fn: () => Promise<any>; resolve: (v:any)=>void; reject: (e:any)=>void }[] = [];
-    let active = 0;
-    const next = () => {
-      if (active >= concurrency || queue.length === 0) return;
-      active++;
-      const { fn, resolve, reject } = queue.shift()!;
-      fn().then(resolve, reject).finally(() => { active--; next(); });
-    };
-    return (fn: () => Promise<any>) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
-  }
+  
   async function handleScan() {
     const hosts = expandSubnet(subnet || guessSubnet());
-    if (hosts.length === 0) { setScanStatus('Enter a /24 like 192.168.1.0/24 or 192.168.1.*'); return; }
+    if (hosts.length === 0) { 
+      setScanStatus('Enter a /24 like 192.168.1.0/24 or 192.168.1.*'); 
+      return; 
+    }
+    
     const ports = selectedPorts;
-    const total = Math.min(hosts.length * ports.length, 4000);
-    const limiter = limit(30);
+    const total = hosts.length * ports.length;
+    
+    if (total > 10000) {
+      setScanStatus('Too many combinations. Limit to 10,000 host:port combinations.');
+      return;
+    }
+    
     setSites([]);
     setScanning(true);
-    setScanStatus(`Scanning ${hosts.length} hosts × ${ports.length} ports...`);
+    setScanStatus(`Scanning ${hosts.length} hosts × ${ports.length} ports = ${total} total...`);
     setProgress({ done: 0, total });
 
-    const results = new Map<string, Set<number>>();
-    let done = 0;
-    const tasks: Promise<any>[] = [];
-    for (const host of hosts) {
-      for (const port of ports) {
-        const url = `${guessScheme(port)}://${host}:${port}/`;
-        tasks.push(limiter(async () => {
-          const ok = await isReachable(url, 1500);
-          done++; setProgress({ done, total });
-          if (!ok) return;
-          if (!results.has(host)) results.set(host, new Set());
-          results.get(host)!.add(port);
-        }));
+    try {
+      // Use backend port scanner for accurate results
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5001/api/ips/scan-ports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          hosts,
+          ports,
+          timeout: 2000,
+          concurrency: 50
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        setScanStatus(`Error: ${error.error || 'Scan failed'}`);
+        setScanning(false);
+        return;
       }
+
+      const data = await response.json();
+      setProgress({ done: total, total });
+      
+      if (data.hosts && data.hosts.length > 0) {
+        setSites(data.hosts);
+        setScanStatus(`Found ${data.hosts.length} host(s) with ${data.openPorts} open port(s) in ${data.duration}ms`);
+      } else {
+        setScanStatus(`No open ports found. Scanned ${data.totalScanned} combinations.`);
+      }
+    } catch (error: any) {
+      console.error('Port scan error:', error);
+      setScanStatus(`Error: ${error?.message || 'Network error. Check backend connection.'}`);
+    } finally {
+      setScanning(false);
     }
-
-    await Promise.all(tasks);
-
-    const list = Array.from(results.entries()).map(([host, set]) => ({ host, ports: Array.from(set).sort((a,b)=>a-b) }));
-    if (list.length === 0) setScanStatus('No websites detected. Try adding ports or verifying subnet.');
-    else setScanStatus(`Found ${list.length} host(s).`);
-    setSites(list);
-    setScanning(false);
   }
 
   const springy = { type: 'spring', stiffness: 120, damping: 20, mass: 0.8 } as const;
@@ -427,7 +435,27 @@ placeholder="IP or Domain (e.g., 1.2.3.4 or facebook.com)"
                         transition={{ ...springy, delay: 0.02 * idx }}
                       >
                         <td className="site-host">{site.host}</td>
-                        <td className="site-ports">{site.ports.join(', ')}</td>
+                        <td className="site-ports">
+                          {site.ports.map((p, i) => {
+                            const serviceNames: { [key: number]: string } = {
+                              20: 'FTP Data', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
+                              53: 'DNS', 67: 'DHCP', 68: 'DHCP', 80: 'HTTP', 110: 'POP3',
+                              135: 'RPC', 139: 'NetBIOS', 143: 'IMAP', 443: 'HTTPS', 445: 'SMB',
+                              993: 'IMAPS', 995: 'POP3S', 1433: 'MSSQL', 3000: 'Node.js',
+                              3306: 'MySQL', 3389: 'RDP', 5000: 'Flask', 5173: 'Vite',
+                              5432: 'PostgreSQL', 6379: 'Redis', 8000: 'HTTP-Alt', 8080: 'HTTP-Proxy',
+                              8443: 'HTTPS-Alt', 27017: 'MongoDB'
+                            };
+                            const service = serviceNames[p];
+                            return (
+                              <span key={p} style={{ marginRight: '8px', display: 'inline-block' }}>
+                                <strong>:{p}</strong>
+                                {service && <span style={{ color: '#666', fontSize: '0.9em', marginLeft: '4px' }}>({service})</span>}
+                                {i < site.ports.length - 1 && ', '}
+                              </span>
+                            );
+                          })}
+                        </td>
                         <td>
                           <div className="site-actions">
                             {site.ports.map(p => {

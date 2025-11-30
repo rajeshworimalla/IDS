@@ -80,6 +80,12 @@ export const blockIP = async (req: Request, res: Response) => {
 
     // Otherwise, treat input as a hostname/domain and resolve to IPs
     const raw = String(ip).trim();
+    
+    // Check for common typos (comma instead of period)
+    if (raw.includes(',') && !raw.includes('.')) {
+      return res.status(400).json({ error: `Invalid domain: "${raw}". Did you mean "${raw.replace(/,/g, '.')}"? (Use period, not comma)` });
+    }
+    
     // Strip scheme and path if user pasted a URL
     let host = raw
       .replace(/^https?:\/\//i, '')
@@ -87,9 +93,17 @@ export const blockIP = async (req: Request, res: Response) => {
       .replace(/\/$/, '');
     // Remove common prefixes like www.
     host = host.replace(/^www\./i, '');
+    
+    // Replace commas with periods (common typo)
+    host = host.replace(/,/g, '.');
 
     if (!host || /\s/.test(host) || host.includes('..')) {
-      return res.status(400).json({ error: 'Invalid host' });
+      return res.status(400).json({ error: `Invalid host: "${host}". Please use a valid domain name (e.g., facebook.com)` });
+    }
+    
+    // Validate domain format (must have at least one period for TLD)
+    if (!host.includes('.')) {
+      return res.status(400).json({ error: `Invalid domain: "${host}". Domain must include a top-level domain (e.g., .com, .org)` });
     }
 
     // Resolve both A and AAAA records - get ALL IPs for the domain
@@ -188,6 +202,62 @@ export const blockIP = async (req: Request, res: Response) => {
     const errorMsg = e?.message || String(e) || 'Failed to block IP or domain';
     console.error('blockIP detailed error:', errorMsg);
     return res.status(500).json({ error: errorMsg });
+  }
+};
+
+export const scanPorts = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'User not authenticated' });
+    
+    const { hosts, ports, timeout = 2000, concurrency = 50 } = req.body;
+    
+    if (!hosts || !Array.isArray(hosts) || hosts.length === 0) {
+      return res.status(400).json({ error: 'hosts array is required' });
+    }
+    
+    if (!ports || !Array.isArray(ports) || ports.length === 0) {
+      return res.status(400).json({ error: 'ports array is required' });
+    }
+    
+    // Limit scan size to prevent abuse
+    if (hosts.length * ports.length > 10000) {
+      return res.status(400).json({ error: 'Scan too large. Maximum 10,000 host:port combinations allowed.' });
+    }
+    
+    const { scanPorts: scanPortsService } = await import('../services/portScanner');
+    
+    console.log(`[PORT SCAN] Scanning ${hosts.length} hosts × ${ports.length} ports = ${hosts.length * ports.length} total`);
+    const startTime = Date.now();
+    
+    const results = await scanPortsService(hosts, ports, concurrency, timeout);
+    
+    const duration = Date.now() - startTime;
+    console.log(`[PORT SCAN] Completed in ${duration}ms. Found ${results.length} open ports.`);
+    
+    // Group results by host
+    const grouped: { [host: string]: number[] } = {};
+    for (const result of results) {
+      if (!grouped[result.host]) {
+        grouped[result.host] = [];
+      }
+      grouped[result.host].push(result.port);
+    }
+    
+    // Convert to array format
+    const hostList = Object.entries(grouped).map(([host, ports]) => ({
+      host,
+      ports: ports.sort((a, b) => a - b)
+    }));
+    
+    res.json({
+      hosts: hostList,
+      totalScanned: hosts.length * ports.length,
+      openPorts: results.length,
+      duration
+    });
+  } catch (e: any) {
+    console.error('scanPorts error:', e);
+    res.status(500).json({ error: e?.message || 'Failed to scan ports' });
   }
 };
 
