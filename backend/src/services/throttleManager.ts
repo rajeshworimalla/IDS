@@ -19,11 +19,23 @@ const GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes grace period after manual un
 // Once blocked for an attack type, don't block again for the same attack type
 const blockedAttackTypes: Map<string, Set<string>> = new Map();
 
+// Track which IPs have had alerts emitted for which attack types
+// IP -> Set of attack types that have had alerts emitted
+// This ensures we always emit at least ONE alert per attack type, even if throttled
+const emittedAlerts: Map<string, Set<string>> = new Map();
+
 /**
  * Check if an alert should be throttled for a given IP and attack type
  * @returns true if throttled (should skip), false if allowed
+ * NOTE: Always returns false for the FIRST alert of an attack type (ensures at least one alert is emitted)
  */
 export function isAlertThrottled(ip: string, attackType: string, throttleMs: number = 2000): boolean {
+  // CRITICAL: Always emit the FIRST alert for an attack type, even if throttled
+  // This ensures users always see popup notifications
+  if (!hasEmittedAlertForAttackType(ip, attackType)) {
+    return false; // Not throttled - this is the first alert for this attack type
+  }
+  
   const throttleKey = `${ip}:${attackType}`;
   const lastAlertTime = alertThrottle.get(throttleKey) || 0;
   const timeSinceLastAlert = Date.now() - lastAlertTime;
@@ -49,6 +61,27 @@ export function isAlertThrottled(ip: string, attackType: string, throttleMs: num
 }
 
 /**
+ * Check if we've already emitted an alert for this IP and attack type
+ */
+export function hasEmittedAlertForAttackType(ip: string, attackType: string): boolean {
+  const attackTypes = emittedAlerts.get(ip);
+  if (!attackTypes) {
+    return false; // No alerts emitted yet for this IP
+  }
+  return attackTypes.has(attackType);
+}
+
+/**
+ * Mark that we've emitted an alert for this IP and attack type
+ */
+export function markAlertEmitted(ip: string, attackType: string): void {
+  if (!emittedAlerts.has(ip)) {
+    emittedAlerts.set(ip, new Set());
+  }
+  emittedAlerts.get(ip)!.add(attackType);
+}
+
+/**
  * Clear all throttle entries for a specific IP
  * Called when an IP is manually unblocked
  * Also sets a grace period to prevent immediate re-blocking
@@ -71,6 +104,10 @@ export function clearThrottleForIP(ip: string): void {
   
   // Clear blocked attack types so IP can be blocked again if it attacks with same type
   clearBlockedAttackTypes(ip);
+  
+  // Clear emitted alerts so new alerts can be shown for this IP
+  emittedAlerts.delete(ip);
+  console.log(`[THROTTLE] 🧹 Cleared emitted alerts for ${ip} (new alerts will be shown)`);
   
   // Clean up expired grace periods
   const now = Date.now();

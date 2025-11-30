@@ -11,7 +11,8 @@ import {
   clearThrottleForIP as clearGlobalThrottle,
   isInGracePeriod,
   isAlreadyBlockedForAttackType,
-  markBlockedForAttackType
+  markBlockedForAttackType,
+  markAlertEmitted
 } from './throttleManager';
 
 // Track packet frequencies for status determination with automatic cleanup
@@ -28,8 +29,9 @@ const DISABLE_NORMAL_PACKET_EMISSIONS = true; // Disable normal packet emissions
 // Batch DB writes to reduce database load during attacks
 const dbWriteQueue: any[] = [];
 let lastDbWriteTime = 0;
-const DB_WRITE_INTERVAL = 1000; // Write to DB every 1 second (batched) - REDUCED for better persistence
-const MAX_DB_BATCH_SIZE = 50; // Max packets per batch - REDUCED to prevent DB overload
+const DB_WRITE_INTERVAL = 500; // Write to DB every 500ms (batched) - INCREASED frequency for better performance
+const MAX_DB_BATCH_SIZE = 100; // Max packets per batch - INCREASED to handle high traffic
+const MAX_QUEUE_SIZE = 1000; // Increased queue size to prevent dropping critical packets
 
 // Process socket emission queue - optimized for performance (REDUCED frequency)
 setInterval(() => {
@@ -570,7 +572,7 @@ export class PacketCaptureService {
         
         // Limit queue size to prevent memory issues and crashes during attacks
         // REDUCED from 1000 to 500 to prevent memory exhaustion
-        if (dbWriteQueue.length > 500) {
+        if (dbWriteQueue.length > MAX_QUEUE_SIZE) {
           // Remove oldest normal packets first (never remove critical)
           const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
           if (normalIndex !== -1) {
@@ -869,6 +871,9 @@ export class PacketCaptureService {
               console.log(`[PACKET] 📢 Emitting critical alert for ${sourceIP}:`, criticalAttackType);
               io.to(`user_${this.userId}`).emit('intrusion-detected', alertData);
               console.log(`[PACKET] ✓ Critical alert emitted to user_${this.userId}`);
+              
+              // Mark that we've emitted an alert for this attack type
+              markAlertEmitted(sourceIP, criticalAttackType);
             } else {
               console.warn('[PACKET] ⚠ Socket.IO not available for critical alert');
             }
