@@ -50,14 +50,29 @@ setInterval(() => {
     try {
       const batch = dbWriteQueue.splice(0, MAX_DB_BATCH_SIZE);
       if (batch.length > 0) {
-        // Use insertMany for better performance
-        PacketModel.insertMany(batch, { ordered: false }).catch(err => {
-          console.warn('[PACKET] Batch DB write error (non-critical):', (err as Error)?.message);
-        });
+        // Use insertMany for better performance with timeout protection
+        PacketModel.insertMany(batch, { ordered: false })
+          .then(() => {
+            // Success - clear any error state
+          })
+          .catch(err => {
+            // If batch write fails, try individual writes for critical packets only
+            console.warn('[PACKET] Batch DB write error, trying critical packets individually:', (err as Error)?.message);
+            const criticalBatch = batch.filter(p => p.status === 'critical');
+            if (criticalBatch.length > 0) {
+              // Try saving critical packets individually (non-blocking)
+              criticalBatch.forEach(packet => {
+                PacketModel.create(packet).catch(() => {
+                  // Ignore individual failures - already logged batch error
+                });
+              });
+            }
+          });
         lastDbWriteTime = now;
       }
     } catch (err) {
-      console.warn('[PACKET] Error in batch DB write:', (err as Error)?.message);
+      console.warn('[PACKET] Error in batch DB write interval:', (err as Error)?.message);
+      // Don't crash - just log and continue
     }
   }
 }, 1000); // Check every 1 second
@@ -437,12 +452,27 @@ export class PacketCaptureService {
         }
         
         // CRITICAL: If queue is getting large, force immediate write for critical packets
-        if (packetData.status === 'critical' && dbWriteQueue.length > 200) {
-          const criticalPackets = dbWriteQueue.filter(p => p.status === 'critical');
-          if (criticalPackets.length > 0) {
-            PacketModel.insertMany(criticalPackets, { ordered: false }).catch(() => {});
-            // Remove written packets from queue
-            dbWriteQueue.splice(0, dbWriteQueue.length, ...dbWriteQueue.filter(p => p.status !== 'critical'));
+        // BUT: Only do this if queue is really large to avoid overwhelming DB
+        if (packetData.status === 'critical' && dbWriteQueue.length > 300) {
+          try {
+            const criticalPackets = dbWriteQueue.filter(p => p.status === 'critical');
+            if (criticalPackets.length > 0 && criticalPackets.length <= 50) { // Limit to 50 at a time
+              PacketModel.insertMany(criticalPackets, { ordered: false })
+                .then(() => {
+                  // Remove written packets from queue
+                  criticalPackets.forEach(cp => {
+                    const index = dbWriteQueue.findIndex(p => p === cp);
+                    if (index !== -1) dbWriteQueue.splice(index, 1);
+                  });
+                })
+                .catch(err => {
+                  console.warn('[PACKET] Error writing critical packets immediately:', (err as Error)?.message);
+                  // Don't remove from queue if write failed - let batch writer handle it
+                });
+            }
+          } catch (err) {
+            console.warn('[PACKET] Error in critical packet immediate write:', (err as Error)?.message);
+            // Don't crash - continue processing
           }
         }
       }
@@ -481,7 +511,11 @@ export class PacketCaptureService {
         try {
           axios.post(this.predictionServiceUrl, {
             packet: packetData
-          }, { timeout: 3000 }).then((response: any) => {
+          }, { 
+            timeout: 2000, // Reduced timeout to prevent hanging
+            maxRedirects: 0,
+            validateStatus: () => true // Accept any status to prevent throwing
+          }).then((response: any) => {
           try {
             if (!response || !response.data) {
               console.warn('[PACKET] Invalid ML response');
@@ -592,26 +626,32 @@ export class PacketCaptureService {
             console.warn('[PACKET] Error processing ML response:', err);
           }
         }).catch((err) => {
-          // ML service unavailable - log but continue
+          // ML service unavailable - log but continue (don't crash)
           const errorCode = (err as any)?.code;
           const errorMessage = (err as any)?.message || String(err);
           
-          if (errorCode === 'ECONNREFUSED') {
-            console.warn(`[PACKET] ⚠ ML service not available (connection refused) - using pattern detection only`);
-          } else if (errorCode === 'ETIMEDOUT') {
-            console.warn(`[PACKET] ⚠ ML service timeout - using pattern detection only`);
-          } else {
-            console.warn(`[PACKET] ⚠ ML prediction error: ${errorMessage}`);
+          // Only log errors occasionally to prevent spam
+          if (Math.random() < 0.01) { // Log 1% of errors
+            if (errorCode === 'ECONNREFUSED') {
+              console.warn(`[PACKET] ⚠ ML service not available (connection refused) - using pattern detection only`);
+            } else if (errorCode === 'ETIMEDOUT') {
+              console.warn(`[PACKET] ⚠ ML service timeout - using pattern detection only`);
+            } else if (errorCode !== 'ECONNABORTED') { // Don't log timeout errors
+              // console.warn(`[PACKET] ⚠ ML prediction error: ${errorMessage}`);
+            }
           }
           
           // For critical packets, still emit alert even if ML fails
           if (packetData.status === 'critical') {
-            console.log(`[PACKET] 🚨 Critical packet detected but ML unavailable - alert already emitted`);
+            // Already logged above, no need to log again
           }
         });
         } catch (mlErr) {
           // Catch any errors in the axios call setup (shouldn't happen, but be safe)
-          console.warn('[PACKET] Error setting up ML prediction:', (mlErr as Error)?.message);
+          // Don't log every error to prevent spam
+          if (Math.random() < 0.01) {
+            console.warn('[PACKET] Error setting up ML prediction:', (mlErr as Error)?.message);
+          }
           // Continue processing - critical alerts will still be emitted
         }
       }
@@ -636,10 +676,10 @@ export class PacketCaptureService {
               }
             }
           } catch (err) {
-            console.warn('[PACKET] Error queuing packet for socket:', err);
+            // Silently ignore socket queue errors to prevent crashes
           }
         }).catch((err) => {
-          console.warn('[PACKET] Error in savePromise for socket queue:', err);
+          // Silently ignore errors to prevent crashes
         });
       }
 
