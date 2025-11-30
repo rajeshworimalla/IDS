@@ -505,24 +505,6 @@ export class PacketCaptureService {
       if (Math.random() < 0.002) { // ~0.2% chance = ~once per 500 packets
         console.log(`[PACKET] ✓ Still capturing packets (last: ${sourceIP} → ${destIP}, protocol: ${protocol})`);
       }
-      
-      // Log when frequency is building up (potential attack)
-      if (packetData.frequency > 10 && Math.random() < 0.1) { // Log 10% of high-frequency packets
-        console.log(`[PACKET] 📊 High frequency detected: ${sourceIP} → ${destIP} (${packetData.frequency} packets/min, protocol: ${protocol})`);
-      }
-      
-      // CRITICAL: Check if this IP is already blocked - log for debugging
-      // This helps identify why second attacks might be slow
-      try {
-        const { redis } = await import('./redis');
-        const tempBanKey = `ids:tempban:${sourceIP}`;
-        const blocked = await redis.get(tempBanKey).catch(() => null);
-        if (blocked && Math.random() < 0.1) { // Log 10% of packets from blocked IPs
-          console.log(`[PACKET] 📍 Packet from BLOCKED IP ${sourceIP} - still being captured and analyzed`);
-        }
-      } catch (redisErr) {
-        // Silently ignore - not critical
-      }
 
       const packetData = {
         date: new Date(),
@@ -549,6 +531,24 @@ export class PacketCaptureService {
         start_bytes: packetData.start_bytes,
         end_bytes: packetData.end_bytes
       });
+      
+      // Log when frequency is building up (potential attack) - AFTER packetData is created
+      if (packetData.frequency > 10 && Math.random() < 0.1) { // Log 10% of high-frequency packets
+        console.log(`[PACKET] 📊 High frequency detected: ${sourceIP} → ${destIP} (${packetData.frequency} packets/min, protocol: ${protocol})`);
+      }
+      
+      // CRITICAL: Check if this IP is already blocked - log for debugging
+      // This helps identify why second attacks might be slow
+      try {
+        const { redis } = await import('./redis');
+        const tempBanKey = `ids:tempban:${sourceIP}`;
+        const blocked = await redis.get(tempBanKey).catch(() => null);
+        if (blocked && Math.random() < 0.1) { // Log 10% of packets from blocked IPs
+          console.log(`[PACKET] 📍 Packet from BLOCKED IP ${sourceIP} - still being captured and analyzed`);
+        }
+      } catch (redisErr) {
+        // Silently ignore - not critical
+      }
 
       // FIX: Always save packets to DB, but use batching for performance
       // This ensures data persists and doesn't disappear on refresh
