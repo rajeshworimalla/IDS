@@ -8,7 +8,10 @@ import {
   isBlockingInProgress, 
   setBlockingInProgress, 
   clearBlockingInProgress,
-  clearThrottleForIP as clearGlobalThrottle
+  clearThrottleForIP as clearGlobalThrottle,
+  isInGracePeriod,
+  isAlreadyBlockedForAttackType,
+  markBlockedForAttackType
 } from './throttleManager';
 
 // Track packet frequencies for status determination with automatic cleanup

@@ -9,6 +9,16 @@ const alertThrottle: Map<string, number> = new Map();
 // Global blocking in progress set
 const blockingInProgress: Set<string> = new Set();
 
+// Grace period for manually unblocked IPs (prevent immediate re-blocking)
+// IP -> timestamp when unblocked (grace period expires after 5 minutes)
+const unblockGracePeriod: Map<string, number> = new Map();
+const GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes grace period after manual unblock
+
+// Track which IPs have been blocked for which attack types
+// IP -> Set of attack types that this IP has been blocked for
+// Once blocked for an attack type, don't block again for the same attack type
+const blockedAttackTypes: Map<string, Set<string>> = new Map();
+
 /**
  * Check if an alert should be throttled for a given IP and attack type
  * @returns true if throttled (should skip), false if allowed
@@ -41,6 +51,7 @@ export function isAlertThrottled(ip: string, attackType: string, throttleMs: num
 /**
  * Clear all throttle entries for a specific IP
  * Called when an IP is manually unblocked
+ * Also sets a grace period to prevent immediate re-blocking
  */
 export function clearThrottleForIP(ip: string): void {
   const keysToDelete: string[] = [];
@@ -54,10 +65,81 @@ export function clearThrottleForIP(ip: string): void {
   // Also remove from blocking in progress
   blockingInProgress.delete(ip);
   
+  // Set grace period to prevent immediate re-blocking after manual unblock
+  unblockGracePeriod.set(ip, Date.now());
+  console.log(`[THROTTLE] 🛡️ Grace period set for ${ip} (5 minutes - auto-blocking disabled)`);
+  
+  // Clear blocked attack types so IP can be blocked again if it attacks with same type
+  clearBlockedAttackTypes(ip);
+  
+  // Clean up expired grace periods
+  const now = Date.now();
+  for (const [graceIP, unblockTime] of unblockGracePeriod.entries()) {
+    if (now - unblockTime > GRACE_PERIOD_MS) {
+      unblockGracePeriod.delete(graceIP);
+    }
+  }
+  
   if (keysToDelete.length > 0) {
     console.log(`[THROTTLE] 🧹 Cleared ${keysToDelete.length} throttle entries for ${ip}`);
   } else {
     console.log(`[THROTTLE] ℹ No throttle entries found for ${ip} (may have been cleared already)`);
+  }
+}
+
+/**
+ * Check if an IP is in grace period (recently manually unblocked)
+ * Auto-blocking should be disabled during grace period
+ */
+export function isInGracePeriod(ip: string): boolean {
+  const unblockTime = unblockGracePeriod.get(ip);
+  if (!unblockTime) {
+    return false; // Not in grace period
+  }
+  
+  const timeSinceUnblock = Date.now() - unblockTime;
+  if (timeSinceUnblock > GRACE_PERIOD_MS) {
+    // Grace period expired, remove it
+    unblockGracePeriod.delete(ip);
+    return false;
+  }
+  
+  return true; // Still in grace period
+}
+
+/**
+ * Check if an IP has already been blocked for a specific attack type
+ * Once blocked for an attack type, don't block again for the same attack type
+ */
+export function isAlreadyBlockedForAttackType(ip: string, attackType: string): boolean {
+  const attackTypes = blockedAttackTypes.get(ip);
+  if (!attackTypes) {
+    return false; // Not blocked for any attack type yet
+  }
+  return attackTypes.has(attackType);
+}
+
+/**
+ * Mark an IP as blocked for a specific attack type
+ * This prevents re-blocking for the same attack type
+ */
+export function markBlockedForAttackType(ip: string, attackType: string): void {
+  if (!blockedAttackTypes.has(ip)) {
+    blockedAttackTypes.set(ip, new Set());
+  }
+  blockedAttackTypes.get(ip)!.add(attackType);
+  console.log(`[THROTTLE] ✓ Marked ${ip} as blocked for attack type: ${attackType}`);
+}
+
+/**
+ * Clear blocked attack types for an IP (called when manually unblocked)
+ * This allows the IP to be blocked again if it attacks with the same type
+ */
+export function clearBlockedAttackTypes(ip: string): void {
+  const attackTypes = blockedAttackTypes.get(ip);
+  if (attackTypes && attackTypes.size > 0) {
+    console.log(`[THROTTLE] 🧹 Cleared ${attackTypes.size} blocked attack types for ${ip}: ${Array.from(attackTypes).join(', ')}`);
+    blockedAttackTypes.delete(ip);
   }
 }
 
