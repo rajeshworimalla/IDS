@@ -30,7 +30,7 @@ let processing = false;
 // Throttle durations (ms)
 const THROTTLE_DURATIONS = {
   intrusion: {
-    gracePeriod: 30000, // 30 seconds for grace period
+    gracePeriod: 5 * 60 * 1000, // 5 MINUTES for grace period (only one notification per grace period)
     normal: {
       dos: 10000, // 10 seconds for DoS/DDoS
       other: 2000 // 2 seconds for others
@@ -49,13 +49,16 @@ function shouldThrottle(item: NotificationItem): boolean {
     const attackType = item.data.attackType || 'unknown';
     const inGracePeriod = item.data.inGracePeriod || false;
     
-    const throttleKey = `${ip}:${attackType}`;
+    // For grace period notifications: Use IP-only key to ensure ONLY ONE notification
+    // per IP during entire grace period (5 minutes), regardless of attack type
+    const throttleKey = inGracePeriod ? `grace:${ip}` : `${ip}:${attackType}`;
     const lastSent = notificationThrottle.get(throttleKey) || 0;
     const now = Date.now();
     
     // Determine throttle duration
     let throttleDuration: number;
     if (inGracePeriod) {
+      // Grace period: 5 minutes - only ONE notification per IP during entire grace period
       throttleDuration = THROTTLE_DURATIONS.intrusion.gracePeriod;
     } else {
       const isDoS = attackType === 'dos' || attackType === 'ddos';

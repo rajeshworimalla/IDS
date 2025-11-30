@@ -996,7 +996,9 @@ export class PacketCaptureService {
           return autoBan(sourceIP, `ids:critical:${criticalAttackType}`);
         }).then(async (banResult) => {
           if (!banResult) {
-            return; // Already blocked or local IP
+            // Already blocked, local IP, or duplicate block prevented
+            clearBlockingInProgress(sourceIP);
+            return; // Skip notification and cleanup
           }
           
           try {

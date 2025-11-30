@@ -13,8 +13,25 @@ export type TempBanRecord = {
 /**
  * Queue a blocking operation (non-blocking, returns immediately)
  * MAIN THREAD: Only enqueues job, no heavy work
+ * CRITICAL: Checks if IP is already blocked to prevent duplicates
  */
-export async function enforceTempBan(ip: string, reason: string, opts?: { ttlSeconds?: number }): Promise<TempBanRecord> {
+export async function enforceTempBan(ip: string, reason: string, opts?: { ttlSeconds?: number }): Promise<TempBanRecord | null> {
+  // CRITICAL: Check if already blocked BEFORE queuing (prevents duplicate blocks)
+  try {
+    const { redis } = await import('./redis');
+    const tempBanKey = `ids:tempban:${ip}`;
+    const alreadyBlocked = await redis.get(tempBanKey).catch(() => null);
+    
+    if (alreadyBlocked) {
+      // Already blocked - return null to indicate no action needed
+      console.log(`[BLOCKER] ⚠ IP ${ip} already blocked - skipping duplicate block`);
+      return null;
+    }
+  } catch (err: unknown) {
+    // If Redis check fails, continue (better to try blocking than skip)
+    console.warn(`[BLOCKER] Could not check if IP ${ip} is blocked:`, (err as Error)?.message);
+  }
+  
   // MAIN THREAD: Only enqueue - no blocking operations here
   await queueBlockIP(ip, reason, async (ip: string, reason: string) => {
     // WORKER THREAD 1: Blocking worker handles firewall operations
