@@ -62,6 +62,7 @@ export class PacketCaptureService {
   private userId: string;
   private mlRateLimiter: Map<string, number> | null = null;
   private localIPs: Set<string> = new Set();
+  private firstPacketLogged: boolean = false;
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -261,7 +262,8 @@ export class PacketCaptureService {
     // Add the packet handler
     this.cap.on('packet', this.packetHandler);
 
-    console.log('Packet capture started, waiting for packets...');
+    console.log('✅ Packet capture started, waiting for packets...');
+    console.log('📡 Listening for network traffic. Make sure to start packet capture from Events Log page!');
 
     // Generate some test network traffic to verify capture is working
     this.generateTestTraffic();
