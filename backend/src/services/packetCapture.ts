@@ -361,9 +361,27 @@ export class PacketCaptureService {
         const now = Date.now();
         const timeSinceLastPacket = now - this.lastPacketTime;
         
+        // Log status periodically to help debug
+        if (this.isCapturing) {
+          if (this.lastPacketTime === 0) {
+            console.log('[PACKET] Health: Capture running, waiting for first packet...');
+          } else {
+            const secondsSinceLastPacket = Math.floor(timeSinceLastPacket / 1000);
+            if (secondsSinceLastPacket < 60) {
+              // Log every 5 minutes if receiving packets normally
+              if (Math.random() < 0.01) { // 1% chance = ~once per 5 minutes
+                console.log(`[PACKET] Health: Capture active, last packet ${secondsSinceLastPacket}s ago`);
+              }
+            } else {
+              console.warn(`[PACKET] ⚠ No packets received in ${secondsSinceLastPacket}s - capture may have stopped`);
+            }
+          }
+        }
+        
         // If we haven't received packets in 2 minutes and capture should be running, log warning
         if (this.isCapturing && this.lastPacketTime > 0 && timeSinceLastPacket > 120000) {
-          console.warn('[PACKET] ⚠ No packets received in 2 minutes - capture may have stopped');
+          console.error('[PACKET] ❌ CRITICAL: No packets received in 2 minutes - capture may have stopped!');
+          console.error('[PACKET] Check if backend is still running and packet capture is active');
           // Don't auto-restart - let user restart manually to avoid loops
         }
       } catch (err) {
@@ -465,7 +483,13 @@ export class PacketCaptureService {
       // Log first few packets to verify capture is working (debugging)
       if (!this.firstPacketLogged) {
         console.log(`📦 First packet captured! Source: ${sourceIP} → Dest: ${destIP} Protocol: ${protocol}`);
+        console.log(`[PACKET] ✅ Packet capture is ACTIVE and processing packets`);
         this.firstPacketLogged = true;
+      }
+      
+      // Log periodically to confirm capture is still working (every 1000 packets)
+      if (Math.random() < 0.001) { // ~0.1% chance = ~once per 1000 packets
+        console.log(`[PACKET] ✓ Still capturing packets (last: ${sourceIP} → ${destIP})`);
       }
 
       const packetData = {

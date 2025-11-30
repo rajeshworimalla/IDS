@@ -20,11 +20,13 @@ dotenv.config();
 process.on('uncaughtException', (error: Error) => {
   console.error('❌ UNCAUGHT EXCEPTION - Backend will continue running:', error);
   console.error('Stack:', error.stack);
+  console.error('⚠️  Backend is still running - packet capture may need to be restarted');
   // Don't exit - keep the server running
 });
 
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   console.error('❌ UNHANDLED REJECTION - Backend will continue running:', reason);
+  console.error('⚠️  Backend is still running - packet capture may need to be restarted');
   // Don't exit - keep the server running
 });
 

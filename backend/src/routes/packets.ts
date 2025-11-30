@@ -271,6 +271,36 @@ router.get('/alerts', async (req, res) => {
   }
 });
 
+// Get packet capture status
+router.get('/capture-status', async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    
+    // Import userCaptures from socket.ts
+    const { getUserCaptureStatus } = await import('../socket');
+    const status = getUserCaptureStatus ? getUserCaptureStatus(req.user._id) : null;
+    
+    // Also check recent packet activity
+    const oneMinuteAgo = new Date(Date.now() - 60000);
+    const recentPacketCount = await Packet.countDocuments({
+      user: req.user._id,
+      date: { $gte: oneMinuteAgo }
+    });
+    
+    res.json({
+      isCapturing: status?.isCapturing || false,
+      lastPacketTime: status?.lastPacketTime || null,
+      recentPacketCount,
+      hasRecentActivity: recentPacketCount > 0
+    });
+  } catch (error) {
+    console.error('Error getting capture status:', error);
+    res.status(500).json({ error: 'Error getting capture status' });
+  }
+});
+
 // Get recent alerts
 router.get('/alerts/recent', async (req, res) => {
   try {
