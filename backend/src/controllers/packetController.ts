@@ -55,7 +55,17 @@ export const getPacketStats = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'User not authenticated' });
     }
 
-    console.log('Fetching packet stats for user:', req.user._id);
+    // WORKER THREAD 4: Try to get cached stats first (fast)
+    const { getCachedStats } = await import('../workers/dashboardWorker');
+    const cachedStats = await getCachedStats(req.user._id);
+    
+    if (cachedStats) {
+      console.log('Returning cached stats for user:', req.user._id);
+      return res.json(cachedStats);
+    }
+
+    // Cache miss - fetch from DB (fallback)
+    console.log('Fetching packet stats from DB for user:', req.user._id);
     
     // Convert string ID to ObjectId
     const userId = new mongoose.Types.ObjectId(req.user._id);

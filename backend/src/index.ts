@@ -12,6 +12,7 @@ import { firewall } from './services/firewall';
 import { BlockedIP } from './models/BlockedIP';
 import { config } from './config/env';
 import { initializeSocket } from './socket';
+import { startSchedulers } from './workers/scheduler';
 
 // Load environment variables
 dotenv.config();
@@ -143,6 +144,10 @@ mongoose.connect(config.MONGODB_URI, {
     } catch (e) {
       console.error('Failed to ensure firewall rules or sync blocklist:', e);
     }
+    
+    // Start background worker schedulers
+    startSchedulers();
+    console.log('✅ Worker-based architecture initialized');
     
     // Verify the database exists
     const db = mongoose.connection.db;

@@ -34,8 +34,14 @@ router.get('/all', async (req, res) => {
       return res.status(401).json({ error: 'User not authenticated' });
     }
     
-    console.log('Fetching all packets from MongoDB for user:', req.user._id);
-    const packets = await Packet.find({ user: req.user._id }).sort({ date: -1 });
+    // PERFORMANCE: Limit query to prevent fetching 50k+ documents
+    const limit = parseInt(req.query.limit as string) || 1000; // Default 1000, max 5000
+    const maxLimit = Math.min(limit, 5000);
+    
+    console.log(`Fetching packets from MongoDB for user: ${req.user._id} (limit: ${maxLimit})`);
+    const packets = await Packet.find({ user: req.user._id })
+      .sort({ date: -1 })
+      .limit(maxLimit);
     console.log(`Found ${packets.length} packets for user ${req.user._id}`);
     res.json(packets);
   } catch (error) {
@@ -218,8 +224,14 @@ router.get('/alerts', async (req, res) => {
       };
     }
     
-    console.log('Fetching alerts from MongoDB for user:', req.user._id, 'with filter:', JSON.stringify(filter));
-    const alerts = await Packet.find(filter).sort({ date: -1 });
+    // PERFORMANCE: Limit query to prevent fetching 50k+ documents
+    const limit = parseInt(req.query.limit as string) || 500; // Default 500 alerts
+    const maxLimit = Math.min(limit, 5000); // Max 5000
+    
+    console.log(`Fetching alerts from MongoDB for user: ${req.user._id} (limit: ${maxLimit})`);
+    const alerts = await Packet.find(filter)
+      .sort({ date: -1 })
+      .limit(maxLimit);
     
     // Transform packets into alerts format
     const formattedAlerts = alerts.map(packet => {

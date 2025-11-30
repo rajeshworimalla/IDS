@@ -1,12 +1,6 @@
-import { firewall } from './firewall';
-import { addDeny, removeDeny, reloadNginxIfConfigured } from './nginxDeny';
-import { redis } from './redis';
-import { getPolicy } from './policy';
-import { notifyEvent } from './aggregator';
 import { queueBlockIP } from './jobQueue';
-
-const TEMPBAN_KEY = (ip: string) => `ids:tempban:${ip}`;
-const TEMPBAN_INDEX = 'ids:tempbans';
+import { blockIPWorker } from '../workers/blockingWorker';
+import { logEventWorker } from '../workers/notificationWorker';
 
 export type TempBanRecord = {
   ip: string;
@@ -17,50 +11,23 @@ export type TempBanRecord = {
 };
 
 /**
- * Internal blocking function (called by job queue)
- */
-async function _enforceTempBan(ip: string, reason: string, opts?: { ttlSeconds?: number }): Promise<TempBanRecord> {
-  const policy = await getPolicy();
-  const ttlSeconds = Math.max(1, Math.floor((opts?.ttlSeconds ?? (policy.banMinutes * 60))));
-  const now = Date.now();
-  const expiresAt = now + ttlSeconds * 1000;
-  const methods: string[] = [];
-
-  if (policy.useFirewall) {
-    const res = await firewall.blockIP(ip, { ttlSeconds });
-    if ((res as any).applied) methods.push((res as any).method || 'firewall');
-  }
-
-  if (policy.useNginxDeny) {
-    const ok = await addDeny(ip);
-    if (ok) {
-      methods.push('nginx-deny');
-      // PERFORMANCE: Reload nginx asynchronously (non-blocking)
-      reloadNginxIfConfigured().catch(() => {});
-    }
-  }
-
-  const rec: TempBanRecord = { ip, reason, blockedAt: now, expiresAt, methods };
-  await redis.set(TEMPBAN_KEY(ip), JSON.stringify(rec), 'EX', ttlSeconds);
-  await redis.zadd(TEMPBAN_INDEX, Math.floor(expiresAt / 1000), ip);
-
-  // PERFORMANCE: Notify event asynchronously (non-blocking)
-  notifyEvent('auto_ban', rec).catch(() => {});
-  return rec;
-}
-
-/**
  * Queue a blocking operation (non-blocking, returns immediately)
- * This is the main entry point - it queues the blocking operation
+ * MAIN THREAD: Only enqueues job, no heavy work
  */
 export async function enforceTempBan(ip: string, reason: string, opts?: { ttlSeconds?: number }): Promise<TempBanRecord> {
-  // PERFORMANCE: Queue blocking operation to prevent lag
-  // This returns immediately, actual blocking happens in background
+  // MAIN THREAD: Only enqueue - no blocking operations here
   await queueBlockIP(ip, reason, async (ip: string, reason: string) => {
-    return await _enforceTempBan(ip, reason, opts);
+    // WORKER THREAD 1: Blocking worker handles firewall operations
+    const result = await blockIPWorker(ip, reason, opts);
+    
+    // WORKER THREAD 5: Notification worker handles logging (async, non-blocking)
+    logEventWorker('auto_ban', result).catch(() => {});
+    
+    return result;
   });
   
-  // Return a "pending" record immediately (actual blocking happens in background)
+  // Return immediately (actual blocking happens in worker thread)
+  const { getPolicy } = await import('./policy');
   const policy = await getPolicy();
   const ttlSeconds = Math.max(1, Math.floor((opts?.ttlSeconds ?? (policy.banMinutes * 60))));
   const now = Date.now();
@@ -71,24 +38,28 @@ export async function enforceTempBan(ip: string, reason: string, opts?: { ttlSec
     reason,
     blockedAt: now,
     expiresAt,
-    methods: ['queued'] // Will be updated when actual blocking completes
+    methods: ['queued'] // Will be updated when worker completes
   };
 }
 
 export async function removeTempBan(ip: string): Promise<void> {
-  // PERFORMANCE: Queue unblocking operation (non-blocking)
+  // MAIN THREAD: Only enqueue - no blocking operations here
   const { queueUnblockIP } = await import('./jobQueue');
+  const { unblockIPWorker } = await import('../workers/blockingWorker');
+  const { logEventWorker } = await import('../workers/notificationWorker');
+  
   await queueUnblockIP(ip, async (ip: string) => {
-    try { await firewall.unblockIP(ip); } catch {}
-    try { await removeDeny(ip); await reloadNginxIfConfigured(); } catch {}
-    await redis.del(TEMPBAN_KEY(ip));
-    await redis.zrem(TEMPBAN_INDEX, ip);
-    // PERFORMANCE: Notify event asynchronously (non-blocking)
-    notifyEvent('auto_unban', { ip, ts: Date.now() }).catch(() => {});
+    // WORKER THREAD 1: Blocking worker handles firewall operations
+    await unblockIPWorker(ip);
+    
+    // WORKER THREAD 5: Notification worker handles logging (async, non-blocking)
+    logEventWorker('auto_unban', { ip, ts: Date.now() }).catch(() => {});
   });
 }
 
 export async function isTempBanned(ip: string): Promise<boolean> {
+  const { redis } = await import('./redis');
+  const TEMPBAN_KEY = (ip: string) => `ids:tempban:${ip}`;
   const v = await redis.get(TEMPBAN_KEY(ip));
   return !!v;
 }

@@ -31,12 +31,15 @@ class JobQueue {
   ]);
   
   private processing: Set<string> = new Set();
+  // PERFORMANCE: Track jobs by IP to prevent duplicates
+  private jobsByIP: Map<string, Set<string>> = new Map(); // IP -> Set of job IDs
   private workers: number = 0;
   private maxWorkers: number = 5; // Process up to 5 jobs concurrently
   private stats = {
     processed: 0,
     failed: 0,
-    queued: 0
+    queued: 0,
+    duplicatesRejected: 0
   };
 
   constructor() {
@@ -46,14 +49,41 @@ class JobQueue {
 
   /**
    * Add a job to the queue
+   * @param uniqueKey Optional key for deduplication (e.g., IP address for block-ip jobs)
    */
   async add<T>(
     type: string,
     data: T,
     handler: (data: T) => Promise<any>,
     priority: JobPriority = 'normal',
-    maxRetries: number = 3
+    maxRetries: number = 3,
+    uniqueKey?: string
   ): Promise<string> {
+    // PERFORMANCE: Prevent duplicate jobs for the same IP
+    if (uniqueKey) {
+      const existingJobs = this.jobsByIP.get(uniqueKey) || new Set();
+      
+      // Check if job is already processing
+      for (const jobId of existingJobs) {
+        if (this.processing.has(jobId)) {
+          this.stats.duplicatesRejected++;
+          console.log(`[JOB-QUEUE] ⏭ Rejected duplicate ${type} job for ${uniqueKey} (already processing)`);
+          return jobId; // Return existing job ID
+        }
+      }
+      
+      // Check if job is already queued
+      for (const queue of this.queues.values()) {
+        for (const queuedJob of queue) {
+          if (existingJobs.has(queuedJob.id)) {
+            this.stats.duplicatesRejected++;
+            console.log(`[JOB-QUEUE] ⏭ Rejected duplicate ${type} job for ${uniqueKey} (already queued)`);
+            return queuedJob.id; // Return existing job ID
+          }
+        }
+      }
+    }
+
     const job: Job<T> = {
       id: `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       type,
@@ -64,6 +94,14 @@ class JobQueue {
       maxRetries,
       createdAt: Date.now()
     };
+
+    // Track job by unique key for deduplication
+    if (uniqueKey) {
+      if (!this.jobsByIP.has(uniqueKey)) {
+        this.jobsByIP.set(uniqueKey, new Set());
+      }
+      this.jobsByIP.get(uniqueKey)!.add(job.id);
+    }
 
     const queue = this.queues.get(priority) || this.queues.get('normal')!;
     queue.push(job);
@@ -149,6 +187,14 @@ class JobQueue {
     } finally {
       this.processing.delete(job.id);
       this.workers--;
+      
+      // Clean up job tracking by IP
+      for (const [ip, jobIds] of this.jobsByIP.entries()) {
+        jobIds.delete(job.id);
+        if (jobIds.size === 0) {
+          this.jobsByIP.delete(ip);
+        }
+      }
     }
   }
 
@@ -217,16 +263,18 @@ export const jobQueue = new JobQueue();
 
 /**
  * Queue a firewall blocking operation (critical priority)
+ * Uses IP as unique key to prevent duplicate jobs
  */
 export async function queueBlockIP(ip: string, reason: string, handler: (ip: string, reason: string) => Promise<any>): Promise<string> {
-  return jobQueue.add('block-ip', { ip, reason }, () => handler(ip, reason), 'critical', 2);
+  return jobQueue.add('block-ip', { ip, reason }, () => handler(ip, reason), 'critical', 2, ip);
 }
 
 /**
  * Queue a firewall unblocking operation (critical priority)
+ * Uses IP as unique key to prevent duplicate jobs
  */
 export async function queueUnblockIP(ip: string, handler: (ip: string) => Promise<any>): Promise<string> {
-  return jobQueue.add('unblock-ip', { ip }, () => handler(ip), 'critical', 2);
+  return jobQueue.add('unblock-ip', { ip }, () => handler(ip), 'critical', 2, ip);
 }
 
 /**

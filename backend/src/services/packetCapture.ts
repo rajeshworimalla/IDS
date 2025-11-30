@@ -731,26 +731,20 @@ export class PacketCaptureService {
             }
           }
           
-          // Emit alert for malicious detection
+          // Emit alert for malicious detection (WORKER THREAD 5)
           if (isMalicious && finalConfidence > 0.3) {
-            try {
-              const io = getIO();
-              if (io) {
-                io.to(`user_${userId}`).emit('intrusion-detected', {
-                  type: 'intrusion',
-                  severity: data.status === 'critical' ? 'critical' : (finalConfidence > 0.8 ? 'critical' : 'high'),
-                  ip: data.start_ip,
-                  attackType: attackType,
-                  confidence: finalConfidence,
-                  protocol: data.protocol,
-                  description: `Suspicious activity detected: ${attackType} from ${data.start_ip}`,
-                  timestamp: new Date().toISOString(),
-                  autoBlocked: finalConfidence > 0.7
-                });
-              }
-            } catch (emitErr) {
-              console.warn('[PACKET] Error emitting alert:', emitErr);
-            }
+            const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
+            sendIntrusionAlertWorker(userId, {
+              type: 'intrusion',
+              severity: data.status === 'critical' ? 'critical' : (finalConfidence > 0.8 ? 'critical' : 'high'),
+              ip: data.start_ip,
+              attackType: attackType,
+              confidence: finalConfidence,
+              protocol: data.protocol,
+              description: `Suspicious activity detected: ${attackType} from ${data.start_ip}`,
+              timestamp: new Date().toISOString(),
+              autoBlocked: finalConfidence > 0.7
+            }).catch(() => {});
           }
         }).catch((err) => {
           // Job queue handles retries - just log occasionally
@@ -794,45 +788,27 @@ export class PacketCaptureService {
         // Log critical packet detection with throttle info
         console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType}, throttleKey: ${throttleKey})`);
         
-        // Emit alert IMMEDIATELY (don't wait for auto-ban)
-        // CRITICAL: Only emit once per IP per throttle period
-        const emitCriticalAlert = (autoBlocked: boolean = false) => {
-          try {
-            const io = getIO();
-            if (io) {
-              const alertData = {
-                type: 'intrusion',
-                severity: 'critical',
-                ip: sourceIP,
-                attackType: criticalAttackType,
-                confidence: 0.85, // High confidence for critical status
-                protocol: packetData.protocol,
-                description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
-                timestamp: new Date().toISOString(),
-                autoBlocked: autoBlocked
-              };
-              console.log(`[PACKET] 📢 Emitting critical alert for ${sourceIP}:`, criticalAttackType);
-              io.to(`user_${this.userId}`).emit('intrusion-detected', alertData);
-              console.log(`[PACKET] ✓ Critical alert emitted to user_${this.userId}`);
-              
-              // Mark that we've emitted an alert for this attack type
-              markAlertEmitted(sourceIP, criticalAttackType);
-            } else {
-              console.warn('[PACKET] ⚠ Socket.IO not available for critical alert');
-            }
-          } catch (emitErr) {
-            console.error('[PACKET] ❌ Error emitting critical alert:', emitErr);
-          }
+        // WORKER THREAD 5: Notification worker handles alert emission (async)
+        const emitCriticalAlert = async (autoBlocked: boolean = false) => {
+          const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
+          const alertData = {
+            type: 'intrusion',
+            severity: 'critical',
+            ip: sourceIP,
+            attackType: criticalAttackType,
+            confidence: 0.85, // High confidence for critical status
+            protocol: packetData.protocol,
+            description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
+            timestamp: new Date().toISOString(),
+            autoBlocked: autoBlocked
+          };
+          console.log(`[PACKET] 📢 Queuing critical alert for ${sourceIP}:`, criticalAttackType);
+          await sendIntrusionAlertWorker(this.userId, alertData).catch(() => {});
+          markAlertEmitted(sourceIP, criticalAttackType);
         };
         
-        // Emit alert immediately (before auto-ban)
-        // CRITICAL: Wrap in try-catch to prevent crashes
-        try {
-          emitCriticalAlert(false);
-        } catch (alertErr) {
-          console.warn('[PACKET] Error emitting critical alert:', alertErr);
-          // Continue - don't let alert errors stop processing
-        }
+        // Emit alert immediately (before auto-ban) - async, non-blocking
+        emitCriticalAlert(false).catch(() => {});
         
         // Then try to auto-ban (non-blocking)
         // CRITICAL: Check if already blocked or blocking in progress to prevent duplicate operations
@@ -874,7 +850,7 @@ export class PacketCaptureService {
             
             return autoBan(sourceIP, `ids:critical:${criticalAttackType}`);
           });
-        }).then((banResult) => {
+        }).then(async (banResult) => {
           if (!banResult) {
             return; // Already blocked or local IP
           }
@@ -888,39 +864,20 @@ export class PacketCaptureService {
             // Emit another alert with autoBlocked=true (only once)
             emitCriticalAlert(true);
             
-            // Also emit explicit ip-blocked event for Blocker page (only once)
-            try {
-              const io = getIO();
-              if (io) {
-                io.to(`user_${this.userId}`).emit('ip-blocked', {
-                  ip: sourceIP,
-                  reason: `ids:critical:${criticalAttackType}`,
-                  method: banResult.methods?.join(', ') || 'firewall',
-                  timestamp: new Date().toISOString()
-                });
-                console.log(`[PACKET] ✓ Emitted ip-blocked event for ${sourceIP}`);
-                
-                // Emit blocking-complete event after a brief cooldown (500ms)
-                setTimeout(() => {
-                  try {
-                    if (io) {
-                      io.to(`user_${this.userId}`).emit('blocking-complete', {
-                        ip: sourceIP,
-                        message: `IP ${sourceIP} has been blocked. System ready for next attack.`,
-                        timestamp: new Date().toISOString()
-                      });
-                      console.log(`[PACKET] ✓ Blocking complete for ${sourceIP} - system ready`);
-                    }
-                  } catch (cooldownErr) {
-                    // Silently ignore cooldown errors
-                  }
-                  // Remove from blocking in progress after cooldown (use global throttle manager)
-                  clearBlockingInProgress(sourceIP);
-                }, 500);
-              }
-            } catch (emitErr) {
-              console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
-            }
+            // WORKER THREAD 5: Notification worker handles websocket emissions (async)
+            const { sendIPBlockedNotificationWorker, sendBlockingCompleteNotificationWorker } = await import('../workers/notificationWorker');
+            sendIPBlockedNotificationWorker(
+              this.userId,
+              sourceIP,
+              `ids:critical:${criticalAttackType}`,
+              banResult.methods?.join(', ') || 'firewall'
+            ).catch(() => {});
+            
+            // Emit blocking-complete after cooldown (async)
+            setTimeout(() => {
+              sendBlockingCompleteNotificationWorker(this.userId, sourceIP).catch(() => {});
+              clearBlockingInProgress(sourceIP);
+            }, 500);
           } catch (logErr) {
             // Even logging errors must not crash
           }

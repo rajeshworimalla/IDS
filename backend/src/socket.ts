@@ -95,6 +95,10 @@ export function initializeSocket(server: any) {
 
       // Join user to their own room for targeted broadcasts
       socket.join(`user_${userId}`);
+      
+      // Register user as active for dashboard updates
+      const { registerActiveUser } = await import('./workers/scheduler');
+      registerActiveUser(userId);
 
       socket.on('start-scanning', (data) => {
         console.log('Starting packet capture for user:', userId);
@@ -192,6 +196,10 @@ export function initializeSocket(server: any) {
         } catch (error) {
           console.error('Error stopping packet capture on disconnect:', error);
         }
+        
+        // Unregister user from dashboard updates
+        const { unregisterActiveUser } = await import('./workers/scheduler');
+        unregisterActiveUser(userId);
       });
 
       socket.on('error', (error) => {
