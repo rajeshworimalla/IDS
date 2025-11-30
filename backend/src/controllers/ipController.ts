@@ -146,6 +146,14 @@ export const blockIP = async (req: Request, res: Response) => {
     let successCount = 0;
     let failCount = 0;
     
+    // Ensure base rules are set before blocking (critical for OUTPUT rule)
+    try {
+      await firewall.ensureBaseRules();
+      console.log(`[BLOCK] Base firewall rules ensured`);
+    } catch (ruleErr) {
+      console.warn(`[BLOCK] Warning: Could not ensure base rules:`, ruleErr);
+    }
+    
     // Block ALL IPs for the domain (both IPv4 and IPv6)
     for (const addr of uniq) {
       try {
@@ -171,6 +179,15 @@ export const blockIP = async (req: Request, res: Response) => {
           successCount++;
           console.log(`[BLOCK] ✓ Successfully blocked ${addr} via ${(applied as any).method}`);
           results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: (applied as any).method });
+          
+          // Flush DNS cache to ensure browser gets fresh DNS (non-blocking)
+          try {
+            const { exec } = require('child_process');
+            exec('sudo systemd-resolve --flush-caches 2>/dev/null || sudo resolvectl flush-caches 2>/dev/null || true', () => {});
+            console.log(`[BLOCK] DNS cache flush attempted for ${addr}`);
+          } catch (dnsErr) {
+            // Ignore DNS flush errors
+          }
         } else {
           failCount++;
           console.error(`[BLOCK] ✗ Failed to block ${addr}: ${(applied as any).error}`);

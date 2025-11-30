@@ -104,17 +104,12 @@ async function ensureIptablesSetRules(v6 = false) {
   }
   
   // OUTPUT dst in set (blocks outgoing to blocked IPs) - THIS IS KEY FOR DOMAIN BLOCKING
-  // Insert at position 1 to ensure it takes precedence over other rules
-  if (!(await tryRun(bin, ['-C', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']))) {
-    // First, try to remove any existing rule at wrong position
-    await tryRun(bin, ['-D', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
-    // Insert at position 1 (top of chain) to ensure it's checked first
-    await run(bin, ['-I', 'OUTPUT', '1', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
-    console.log(`[FIREWALL] Added OUTPUT rule for ${setName} at position 1 (this blocks outgoing connections)`);
-  } else {
-    // Rule exists, but verify it's at the top
-    console.log(`[FIREWALL] OUTPUT rule for ${setName} already exists`);
-  }
+  // Always ensure it's at position 1 (top of chain) to take precedence
+  // Remove any existing rule first (in case it's at wrong position)
+  await tryRun(bin, ['-D', 'OUTPUT', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
+  // Insert at position 1 (top of chain) to ensure it's checked first
+  await run(bin, ['-I', 'OUTPUT', '1', '-m', 'set', '--match-set', setName, 'dst', '-j', 'DROP']);
+  console.log(`[FIREWALL] ✓ OUTPUT rule for ${setName} inserted at position 1 (blocks outgoing connections to blocked IPs)`);
   
   // FORWARD src in set
   if (!(await tryRun(bin, ['-C', 'FORWARD', '-m', 'set', '--match-set', setName, 'src', '-j', 'DROP']))) {
@@ -238,10 +233,20 @@ export const firewall = {
     try {
       console.log(`[FIREWALL] Blocking IP: ${ip} (IPv${version})`);
       if (bins.ipset) {
-        await this.ensureBaseRules();
+        await this.ensureBaseRules(); // Ensure OUTPUT rule is at position 1
         if (version === 4) {
           await ipsetAdd(ip, false, opts?.ttlSeconds);
           await flushConntrack(ip, false);
+          
+          // Re-ensure OUTPUT rule is at top after adding IP (critical for domain blocking)
+          try {
+            // Remove and re-insert OUTPUT rule at position 1 to ensure it's checked first
+            await tryRun(bins.iptables, ['-D', 'OUTPUT', '-m', 'set', '--match-set', 'ids_blocklist', 'dst', '-j', 'DROP']);
+            await run(bins.iptables, ['-I', 'OUTPUT', '1', '-m', 'set', '--match-set', 'ids_blocklist', 'dst', '-j', 'DROP']);
+            console.log(`[FIREWALL] ✓ Re-ensured OUTPUT rule at position 1 for domain blocking`);
+          } catch (ruleErr) {
+            console.warn(`[FIREWALL] Could not re-ensure OUTPUT rule:`, ruleErr);
+          }
           
           // Final verification - check if IP is actually in blocklist (non-blocking)
           try {
