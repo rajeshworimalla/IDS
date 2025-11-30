@@ -608,8 +608,7 @@ export class PacketCaptureService {
           }, { 
             timeout: 1500, // Further reduced timeout to prevent hanging
             maxRedirects: 0,
-            validateStatus: () => true, // Accept any status to prevent throwing
-            signal: AbortSignal.timeout(1500) // Abort after 1.5s
+            validateStatus: () => true // Accept any status to prevent throwing
           } as any).then((response: any) => {
           try {
             if (!response || !response.data) {
