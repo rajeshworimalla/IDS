@@ -13,7 +13,8 @@ import {
   isAlreadyBlockedForAttackType,
   markBlockedForAttackType,
   markAlertEmitted,
-  hasEmittedAlertForAttackType
+  hasEmittedAlertForAttackType,
+  isInDetectionCooldown
 } from './throttleManager';
 
 // Track packet frequencies for status determination with automatic cleanup
@@ -699,8 +700,24 @@ export class PacketCaptureService {
           });
           
           // Auto-block malicious IPs (queued, non-blocking)
+          // CRITICAL: Check if already blocked BEFORE trying to queue
           if (isMalicious && finalConfidence > 0.6 && !isLocalIPFn(data.start_ip)) {
+            // CRITICAL: Fast cooldown check - prevents duplicate processing
+            if (isInDetectionCooldown(data.start_ip)) {
+              return; // Skip - IP was processed recently (within 2 seconds)
+            }
+            
             try {
+              // Check if already blocked before queuing
+              const { redis } = await import('./redis');
+              const tempBanKey = `ids:tempban:${data.start_ip}`;
+              const alreadyBlocked = await redis.get(tempBanKey).catch(() => null);
+              
+              if (alreadyBlocked) {
+                // Already blocked - skip queuing (job queue will reject anyway)
+                return; // Don't try to queue, don't log
+              }
+              
               const { autoBan } = await import('./policy');
               const banResult = await autoBan(data.start_ip, `IDS:${attackType} (${Math.round(finalConfidence * 100)}%)`).catch(() => null);
               
@@ -768,7 +785,12 @@ export class PacketCaptureService {
       // PERFORMANCE: Throttle alerts and blocking to prevent spam during attacks
       if (packetData.status === 'critical') {
         const sourceIP = packetData.start_ip;
-        const now = Date.now();
+        
+        // CRITICAL: Fast cooldown check FIRST - prevents detection spam
+        // This stops the detection loop from processing the same IP multiple times per second
+        if (isInDetectionCooldown(sourceIP)) {
+          return; // Skip - IP was processed recently (within 2 seconds)
+        }
         
         // Detect attack type FIRST to allow different attack types to be detected
         const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
@@ -777,52 +799,25 @@ export class PacketCaptureService {
         // ONE notification per attack type per IP (even if IP was blocked previously)
         const alreadyNotifiedForThisAttackType = hasEmittedAlertForAttackType(sourceIP, criticalAttackType);
         
-        // CRITICAL: For DoS/DDoS attacks, check if already blocked FIRST before processing
+        // CRITICAL: Check if already blocked BEFORE processing
         // This prevents blocking on every packet during a flood attack
         const isDoSOrDDoS = criticalAttackType === 'dos' || criticalAttackType === 'ddos';
         
-        // For DoS/DDoS: Check if already blocked BEFORE processing (prevents blocking every packet)
-        // BUT: Still send notification if we haven't notified for this attack type yet
+        // Check if already blocked (for all attack types, not just DoS/DDoS)
         let alreadyBlocked = false;
-        if (isDoSOrDDoS) {
-          try {
-            const { redis } = await import('./redis');
-            const tempBanKey = `ids:tempban:${sourceIP}`;
-            const blocked = await redis.get(tempBanKey).catch(() => null);
-            alreadyBlocked = blocked !== null;
-            
-            // If already blocked AND already notified for this attack type, skip everything
-            if (alreadyBlocked && alreadyNotifiedForThisAttackType) {
-              return; // Skip all processing - already blocked and notified
-            }
-            
-            // Also check if already blocked for this attack type
-            if (isAlreadyBlockedForAttackType(sourceIP, criticalAttackType) && alreadyNotifiedForThisAttackType) {
-              return; // Already blocked and notified for this attack type - skip
-            }
-          } catch (redisErr) {
-            // Continue if Redis check fails
-          }
+        try {
+          const { redis } = await import('./redis');
+          const tempBanKey = `ids:tempban:${sourceIP}`;
+          const blocked = await redis.get(tempBanKey).catch(() => null);
+          alreadyBlocked = blocked !== null;
+        } catch (redisErr) {
+          // Continue if Redis check fails
         }
         
-        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
-        // BUT: Allow different attack types to be detected (track by IP+attackType)
-        // For DoS/DDoS: Use longer throttle window (10 seconds) to prevent spam
-        const throttleKey = `${sourceIP}:${criticalAttackType}`;
-        const ALERT_THROTTLE_MS = isDoSOrDDoS ? 10000 : 2000; // 10 seconds for DoS/DDoS, 2 seconds for others
-        
-        // CRITICAL: Check if we've already sent notification for this attack type
-        // If yes, skip notification but still allow blocking if needed
-        if (alreadyNotifiedForThisAttackType) {
-          // Already sent notification for this attack type - skip notification
-          // But for DoS/DDoS, also skip all processing if already blocked
-          if (isDoSOrDDoS && alreadyBlocked) {
-            return; // Skip everything - already blocked and notified
-          }
-          // For other attacks or if not blocked yet, continue to blocking logic
-        } else {
+        // CRITICAL: Send notification FIRST if we haven't notified for this attack type yet
+        // This ensures notifications are sent even if IP is already blocked
+        if (!alreadyNotifiedForThisAttackType) {
           // Haven't sent notification for this attack type yet - send it now
-          // Log critical packet detection with throttle info
           console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
           
           // WORKER THREAD 5: Notification worker handles alert emission (async)
@@ -849,46 +844,66 @@ export class PacketCaptureService {
           await emitCriticalAlert(false).catch(() => {});
         }
         
+        // For DoS/DDoS: If already blocked AND already notified, skip all processing
+        if (isDoSOrDDoS && alreadyBlocked && alreadyNotifiedForThisAttackType) {
+          return; // Skip all processing - already blocked and notified
+        }
+        
+        // Also check if already blocked for this attack type
+        if (isAlreadyBlockedForAttackType(sourceIP, criticalAttackType) && alreadyNotifiedForThisAttackType) {
+          return; // Already blocked and notified for this attack type - skip
+        }
+        
+        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
+        // BUT: Allow different attack types to be detected (track by IP+attackType)
+        // For DoS/DDoS: Use longer throttle window (10 seconds) to prevent spam
+        const throttleKey = `${sourceIP}:${criticalAttackType}`;
+        const ALERT_THROTTLE_MS = isDoSOrDDoS ? 10000 : 2000; // 10 seconds for DoS/DDoS, 2 seconds for others
+        
+        // Use global throttle manager (persists across capture restarts)
+        if (isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS)) {
+          // Skip - already alerted recently for this IP+attackType combination
+          // But allow different attack types from same IP
+          if (!isDoSOrDDoS) { // Only log for non-DoS attacks to reduce spam
+            console.log(`[PACKET] ⏭ Skipping throttled alert for ${throttleKey}`);
+          }
+          // For DoS/DDoS, if already blocked and notified, skip everything
+          if (isDoSOrDDoS && alreadyBlocked) {
+            return; // Skip all processing
+          }
+          // For other attacks, continue to blocking logic (might need to block)
+        }
+        
         // Then try to auto-ban (non-blocking)
-        // CRITICAL: Check if already blocked or blocking in progress to prevent duplicate operations
-        Promise.resolve().then(() => {
-          return import('./redis');
-        }).then(({ redis }) => {
-          const tempBanKey = `ids:tempban:${sourceIP}`;
-          return redis.get(tempBanKey).catch(() => null);
-        }).then((alreadyBlocked) => {
-          // CRITICAL: Check if already blocked for THIS SPECIFIC attack type
-          // Once blocked for an attack type, don't block again for the same attack type
-          if (isAlreadyBlockedForAttackType(sourceIP, criticalAttackType)) {
-            console.log(`[PACKET] ⏭ IP ${sourceIP} already blocked for attack type '${criticalAttackType}' - skipping duplicate block`);
-            return null; // Skip blocking - already blocked for this attack type
+        // CRITICAL: Check if already blocked BEFORE trying to queue
+        // Skip blocking if already blocked (prevents duplicate queue attempts)
+        if (alreadyBlocked || isAlreadyBlockedForAttackType(sourceIP, criticalAttackType)) {
+          // Already blocked - skip blocking attempt
+          return; // Don't try to queue, don't log
+        }
+        
+        // Skip if blocking in progress or in grace period
+        if (isBlockingInProgress(sourceIP) || isInGracePeriod(sourceIP)) {
+          if (isInGracePeriod(sourceIP)) {
+            console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - skipping auto-block`);
+          } else {
+            console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
+          }
+          return; // Skip blocking
+        }
+        
+        // Mark as blocking in progress (use global throttle manager)
+        setBlockingInProgress(sourceIP);
+        
+        // Import policy and block
+        import('./policy').then(({ autoBan }) => {
+          // Never auto-ban local IP addresses
+          if (this.isLocalIP(sourceIP)) {
+            clearBlockingInProgress(sourceIP);
+            return null;
           }
           
-          // Skip if already blocked in Redis, blocking in progress, or in grace period
-          if (alreadyBlocked || isBlockingInProgress(sourceIP) || isInGracePeriod(sourceIP)) {
-            if (alreadyBlocked) {
-              console.log(`[PACKET] ⚠ IP ${sourceIP} already blocked in Redis - skipping duplicate block`);
-            } else if (isInGracePeriod(sourceIP)) {
-              console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - skipping auto-block`);
-            } else {
-              console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
-            }
-            return null; // Skip blocking
-          }
-          
-          // Mark as blocking in progress (use global throttle manager)
-          setBlockingInProgress(sourceIP);
-          
-          // Import policy and block
-          return import('./policy').then(({ autoBan }) => {
-            // Never auto-ban local IP addresses
-            if (this.isLocalIP(sourceIP)) {
-              clearBlockingInProgress(sourceIP);
-              return null;
-            }
-            
-            return autoBan(sourceIP, `ids:critical:${criticalAttackType}`);
-          });
+          return autoBan(sourceIP, `ids:critical:${criticalAttackType}`);
         }).then(async (banResult) => {
           if (!banResult) {
             return; // Already blocked or local IP

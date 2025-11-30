@@ -14,7 +14,7 @@ import { Packet } from '../models/Packet';
 
 const CACHE_KEY_STATS = (userId: string) => `ids:dashboard:stats:${userId}`;
 const CACHE_KEY_ALERTS = (userId: string) => `ids:dashboard:alerts:${userId}`;
-const CACHE_TTL = 30; // 30 seconds cache
+const CACHE_TTL = 5; // 5 seconds cache (updated every 2 seconds, so 5s TTL is safe)
 
 /**
  * Update dashboard stats cache (called periodically)

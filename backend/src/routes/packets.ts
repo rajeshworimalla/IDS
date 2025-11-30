@@ -228,6 +228,26 @@ router.get('/alerts', async (req, res) => {
     const limit = parseInt(req.query.limit as string) || 500; // Default 500 alerts
     const maxLimit = Math.min(limit, 5000); // Max 5000
     
+    // WORKER THREAD 4: Try to get cached alerts first (fast)
+    // Only use cache if no filters are applied (cache contains recent alerts only)
+    const hasFilters = severity || status || from || to || timeRange || sourceIP || destinationIP;
+    if (!hasFilters) {
+      const { getCachedAlerts } = await import('../workers/dashboardWorker');
+      const cachedAlerts = await getCachedAlerts(req.user._id);
+      if (cachedAlerts) {
+        console.log(`Returning cached alerts for user: ${req.user._id}`);
+        // Return cached alert stats (not full alerts, but summary)
+        return res.json({
+          critical: cachedAlerts.critical || 0,
+          high: cachedAlerts.high || 0,
+          medium: cachedAlerts.medium || 0,
+          low: cachedAlerts.low || 0,
+          total: cachedAlerts.total || 0,
+          cached: true
+        });
+      }
+    }
+    
     console.log(`Fetching alerts from MongoDB for user: ${req.user._id} (limit: ${maxLimit})`);
     const alerts = await Packet.find(filter)
       .sort({ date: -1 })

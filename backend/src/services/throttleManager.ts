@@ -24,6 +24,41 @@ const blockedAttackTypes: Map<string, Set<string>> = new Map();
 // This ensures we always emit at least ONE alert per attack type, even if throttled
 const emittedAlerts: Map<string, Set<string>> = new Map();
 
+// CRITICAL: Fast in-memory cooldown per IP to prevent detection spam
+// IP -> timestamp of last detection attempt
+// This prevents the detection loop from processing the same IP multiple times per second
+const detectionCooldown: Map<string, number> = new Map();
+const DETECTION_COOLDOWN_MS = 2000; // 2 seconds cooldown per IP
+
+/**
+ * CRITICAL: Fast cooldown check to prevent detection spam
+ * Returns true if IP was processed recently (within cooldown period)
+ * This prevents the detection loop from processing the same IP multiple times per second
+ */
+export function isInDetectionCooldown(ip: string): boolean {
+  const lastDetection = detectionCooldown.get(ip) || 0;
+  const timeSinceLastDetection = Date.now() - lastDetection;
+  
+  if (timeSinceLastDetection < DETECTION_COOLDOWN_MS) {
+    return true; // Still in cooldown
+  }
+  
+  // Update cooldown timestamp
+  detectionCooldown.set(ip, Date.now());
+  
+  // Clean old entries periodically (older than 1 minute)
+  if (detectionCooldown.size > 1000) {
+    const now = Date.now();
+    for (const [key, timestamp] of detectionCooldown.entries()) {
+      if (now - timestamp > 60000) {
+        detectionCooldown.delete(key);
+      }
+    }
+  }
+  
+  return false; // Not in cooldown
+}
+
 /**
  * Check if an alert should be throttled for a given IP and attack type
  * @returns true if throttled (should skip), false if allowed
@@ -108,6 +143,9 @@ export function clearThrottleForIP(ip: string): void {
   // Clear emitted alerts so new alerts can be shown for this IP
   emittedAlerts.delete(ip);
   console.log(`[THROTTLE] 🧹 Cleared emitted alerts for ${ip} (new alerts will be shown)`);
+  
+  // Clear detection cooldown so IP can be detected again immediately
+  detectionCooldown.delete(ip);
   
   // Clean up expired grace periods
   const now = Date.now();
