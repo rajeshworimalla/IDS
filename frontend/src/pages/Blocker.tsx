@@ -106,18 +106,23 @@ const Blocker: FC = () => {
         // Listen for explicit ip-blocked event (if backend emits it)
         socket.on('ip-blocked', (data: { ip: string; reason: string }) => {
           console.log('[Blocker] IP blocked event received:', data.ip);
-          fetchBlocked().catch(err => {
-            console.warn('[Blocker] Error refreshing after block event:', err);
-          });
+          // Add small delay to ensure backend has saved to DB
+          setTimeout(() => {
+            fetchBlocked().catch(err => {
+              console.warn('[Blocker] Error refreshing after block event:', err);
+            });
+          }, 200); // 200ms delay to ensure DB write completes
         });
 
         // Listen for blocking-complete event (system ready for next attack)
         socket.on('blocking-complete', (data: { ip: string; message: string }) => {
           console.log('[Blocker] Blocking complete:', data.message);
-          // Refresh blocked list to show the newly blocked IP
-          fetchBlocked().catch(err => {
-            console.warn('[Blocker] Error refreshing after blocking complete:', err);
-          });
+          // Refresh blocked list to show the newly blocked IP (with delay to ensure DB is updated)
+          setTimeout(() => {
+            fetchBlocked().catch(err => {
+              console.warn('[Blocker] Error refreshing after blocking complete:', err);
+            });
+          }, 300); // 300ms delay to ensure DB write completes
           // Show a brief status message (you can add a toast notification here if needed)
           setScanStatus(`✓ IP ${data.ip} blocked. System ready for next attack.`);
           // Clear status after 3 seconds

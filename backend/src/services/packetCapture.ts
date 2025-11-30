@@ -126,6 +126,8 @@ export class PacketCaptureService {
   private firstPacketLogged: boolean = false;
   private lastPacketTime: number = 0; // Track last packet time for health monitoring
   private healthCheckInterval: any = null; // NodeJS.Timeout | null
+  private alertThrottle: Map<string, number> = new Map(); // Track last alert time per IP (prevent spam)
+  private blockingInProgress: Set<string> = new Set(); // Track IPs currently being blocked (prevent duplicate blocks)
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -808,13 +810,41 @@ export class PacketCaptureService {
 
       // Auto-ban on critical events with notification (non-blocking)
       // CRITICAL: Always emit alerts for critical packets, even if ML doesn't respond
+      // PERFORMANCE: Throttle alerts and blocking to prevent spam during attacks
       if (packetData.status === 'critical') {
-        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${packetData.start_ip} (freq: ${packetData.frequency})`);
+        const sourceIP = packetData.start_ip;
+        const now = Date.now();
+        
+        // THROTTLE: Only process critical alerts once per IP per 5 seconds
+        const lastAlertTime = this.alertThrottle.get(sourceIP) || 0;
+        const timeSinceLastAlert = now - lastAlertTime;
+        const ALERT_THROTTLE_MS = 5000; // 5 seconds between alerts for same IP
+        
+        if (timeSinceLastAlert < ALERT_THROTTLE_MS) {
+          // Skip - already alerted recently for this IP
+          return; // Don't process this critical packet (already handled)
+        }
+        
+        // Update throttle
+        this.alertThrottle.set(sourceIP, now);
+        
+        // Clean old throttle entries (older than 1 minute)
+        if (this.alertThrottle.size > 100) {
+          for (const [ip, alertTime] of this.alertThrottle.entries()) {
+            if (now - alertTime > 60000) {
+              this.alertThrottle.delete(ip);
+            }
+          }
+        }
+        
+        // Log only first critical packet per IP
+        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency})`);
         
         // Detect attack type from pattern for critical packets
         const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
         
         // Emit alert IMMEDIATELY (don't wait for auto-ban)
+        // CRITICAL: Only emit once per IP per throttle period
         const emitCriticalAlert = (autoBlocked: boolean = false) => {
           try {
             const io = getIO();
@@ -822,15 +852,15 @@ export class PacketCaptureService {
               const alertData = {
                 type: 'intrusion',
                 severity: 'critical',
-                ip: packetData.start_ip,
+                ip: sourceIP,
                 attackType: criticalAttackType,
                 confidence: 0.85, // High confidence for critical status
                 protocol: packetData.protocol,
-                description: `Critical traffic detected: ${criticalAttackType} from ${packetData.start_ip} (${packetData.frequency} packets/min)`,
+                description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
                 timestamp: new Date().toISOString(),
                 autoBlocked: autoBlocked
               };
-              console.log(`[PACKET] 📢 Emitting critical alert:`, alertData);
+              console.log(`[PACKET] 📢 Emitting critical alert for ${sourceIP}:`, criticalAttackType);
               io.to(`user_${this.userId}`).emit('intrusion-detected', alertData);
               console.log(`[PACKET] ✓ Critical alert emitted to user_${this.userId}`);
             } else {
@@ -851,80 +881,89 @@ export class PacketCaptureService {
         }
         
         // Then try to auto-ban (non-blocking)
-        // CRITICAL: Use Promise.resolve to ensure errors don't propagate
+        // CRITICAL: Check if already blocked or blocking in progress to prevent duplicate operations
         Promise.resolve().then(() => {
-          return import('./policy');
-        }).then(({ autoBan }) => {
-          // Never auto-ban local IP addresses
-          if (!this.isLocalIP(packetData.start_ip)) {
-            // CRITICAL: Wrap auto-ban in try-catch and use Promise.resolve
-            Promise.resolve().then(() => {
-              return autoBan(packetData.start_ip, `ids:critical:${criticalAttackType}`);
-            }).then((banResult) => {
-              try {
-                console.log(`[PACKET] ✓ Auto-banned critical IP: ${packetData.start_ip}`);
-                // Emit another alert with autoBlocked=true
-                emitCriticalAlert(true);
-                
-                // Also emit explicit ip-blocked event for Blocker page
-                try {
-                  const io = getIO();
-                  if (io && banResult) {
-                    io.to(`user_${this.userId}`).emit('ip-blocked', {
-                      ip: packetData.start_ip,
-                      reason: `ids:critical:${criticalAttackType}`,
-                      method: banResult.methods?.join(', ') || 'firewall',
-                      timestamp: new Date().toISOString()
-                    });
-                    console.log(`[PACKET] ✓ Emitted ip-blocked event for ${packetData.start_ip}`);
-                    
-                    // Emit blocking-complete event after a brief cooldown (500ms - reduced for faster recovery)
-                    // This lets the frontend know when it's safe to continue
-                    // CRITICAL: Reduced cooldown to ensure faster detection of subsequent attacks
-                    setTimeout(() => {
-                      try {
-                        if (io) {
-                          io.to(`user_${this.userId}`).emit('blocking-complete', {
-                            ip: packetData.start_ip,
-                            message: `IP ${packetData.start_ip} has been blocked. System ready for next attack.`,
-                            timestamp: new Date().toISOString()
-                          });
-                          console.log(`[PACKET] ✓ Blocking complete for ${packetData.start_ip} - system ready (packets from this IP will be prioritized)`);
-                        }
-                      } catch (cooldownErr) {
-                        // Silently ignore cooldown errors
-                      }
-                    }, 500); // Reduced from 1000ms to 500ms for faster recovery
-                  }
-                } catch (emitErr) {
-                  console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
-                  // Continue - don't let emit errors stop processing
-                }
-              } catch (logErr) {
-                // Even logging errors must not crash
-                // Silently continue
-              }
-            }).catch((err) => {
-              // CRITICAL: Auto-ban errors must not stop packet processing
-              // Silently ignore - alert already emitted
-              if (Math.random() < 0.1) { // Log 10% of auto-ban errors
-                console.warn('[PACKET] Error auto-banning critical IP (non-fatal):', (err as Error)?.message);
-              }
-            });
-          } else {
-            console.log(`[PACKET] ⚠ Skipping auto-ban for local IP: ${packetData.start_ip}`);
-            // Still emit alert for local IPs (for visibility, but don't block)
-            try {
-              emitCriticalAlert(false);
-            } catch (alertErr) {
-              // Silently ignore alert errors
+          return import('./redis');
+        }).then(({ redis }) => {
+          const tempBanKey = `ids:tempban:${sourceIP}`;
+          return redis.get(tempBanKey).catch(() => null);
+        }).then((alreadyBlocked) => {
+          // Skip if already blocked or blocking in progress
+          if (alreadyBlocked || this.blockingInProgress.has(sourceIP)) {
+            if (alreadyBlocked) {
+              console.log(`[PACKET] ⚠ IP ${sourceIP} already blocked - skipping duplicate block`);
             }
+            return null; // Skip blocking
+          }
+          
+          // Mark as blocking in progress
+          this.blockingInProgress.add(sourceIP);
+          
+          // Remove from set after 10 seconds (blocking should complete by then)
+          setTimeout(() => {
+            this.blockingInProgress.delete(sourceIP);
+          }, 10000);
+          
+          // Import policy and block
+          return import('./policy').then(({ autoBan }) => {
+            // Never auto-ban local IP addresses
+            if (this.isLocalIP(sourceIP)) {
+              this.blockingInProgress.delete(sourceIP);
+              return null;
+            }
+            
+            return autoBan(sourceIP, `ids:critical:${criticalAttackType}`);
+          });
+        }).then((banResult) => {
+          if (!banResult) {
+            return; // Already blocked or local IP
+          }
+          
+          try {
+            console.log(`[PACKET] ✓ Auto-banned critical IP: ${sourceIP}`);
+            // Emit another alert with autoBlocked=true (only once)
+            emitCriticalAlert(true);
+            
+            // Also emit explicit ip-blocked event for Blocker page (only once)
+            try {
+              const io = getIO();
+              if (io) {
+                io.to(`user_${this.userId}`).emit('ip-blocked', {
+                  ip: sourceIP,
+                  reason: `ids:critical:${criticalAttackType}`,
+                  method: banResult.methods?.join(', ') || 'firewall',
+                  timestamp: new Date().toISOString()
+                });
+                console.log(`[PACKET] ✓ Emitted ip-blocked event for ${sourceIP}`);
+                
+                // Emit blocking-complete event after a brief cooldown (500ms)
+                setTimeout(() => {
+                  try {
+                    if (io) {
+                      io.to(`user_${this.userId}`).emit('blocking-complete', {
+                        ip: sourceIP,
+                        message: `IP ${sourceIP} has been blocked. System ready for next attack.`,
+                        timestamp: new Date().toISOString()
+                      });
+                      console.log(`[PACKET] ✓ Blocking complete for ${sourceIP} - system ready`);
+                    }
+                  } catch (cooldownErr) {
+                    // Silently ignore cooldown errors
+                  }
+                }, 500);
+              }
+            } catch (emitErr) {
+              console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
+            }
+          } catch (logErr) {
+            // Even logging errors must not crash
           }
         }).catch((err) => {
-          // CRITICAL: Policy import errors must not stop packet processing
-          // Silently ignore - alert already emitted
-          if (Math.random() < 0.1) { // Log 10% of import errors
-            console.warn('[PACKET] Error importing policy module (non-fatal):', (err as Error)?.message);
+          // CRITICAL: Errors must not stop packet processing
+          // Remove from blocking in progress on error
+          this.blockingInProgress.delete(sourceIP);
+          if (Math.random() < 0.1) { // Log 10% of errors
+            console.warn('[PACKET] Error in blocking process (non-fatal):', (err as Error)?.message);
           }
         });
       }
