@@ -892,17 +892,17 @@ export class PacketCaptureService {
           return; // Don't try to queue, don't log
         }
         
-        // Skip if blocking in progress or in grace period (but still allow detection/notifications)
-        // CRITICAL: Grace period only prevents blocking, NOT detection/notifications
+        // Skip if blocking in progress
         if (isBlockingInProgress(sourceIP)) {
           console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
           return; // Skip blocking
         }
         
-        // Grace period: Skip blocking but allow detection/notifications
+        // CRITICAL: Grace period only prevents blocking, NOT detection/notifications
+        // Detection and notifications were already sent above, so we can skip blocking here
         if (isInGracePeriod(sourceIP)) {
-          console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - skipping auto-block but allowing detection`);
-          // Don't return - continue to allow notifications, just skip blocking below
+          console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - detection logged, skipping auto-block`);
+          return; // Skip blocking but notification was already sent above
         }
         
         // Mark as blocking in progress (use global throttle manager)
