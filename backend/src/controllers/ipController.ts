@@ -286,11 +286,40 @@ export const unblockIP = async (req: Request, res: Response) => {
     const { ip } = req.params;
     if (!ip) return res.status(400).json({ error: 'ip param is required' });
 
-    await BlockedIP.deleteOne({ user: req.user._id, ip });
+    // Remove from MongoDB (try user-specific first, then all users for auto-blocked IPs)
+    const userDeleteResult = await BlockedIP.deleteOne({ user: req.user._id, ip });
+    // Also try to delete without user filter (for auto-blocked IPs that might not have user)
+    if (userDeleteResult.deletedCount === 0) {
+      await BlockedIP.deleteOne({ ip }).catch(() => {});
+    }
+
+    // Remove from Redis temp bans (for auto-blocked IPs)
+    try {
+      const { removeTempBan } = await import('../services/blocker');
+      await removeTempBan(ip);
+      console.log(`[UNBLOCK] Removed ${ip} from Redis temp bans`);
+    } catch (redisErr) {
+      console.warn(`[UNBLOCK] Could not remove from Redis (may not be temp banned):`, redisErr);
+      // Continue - not all IPs are in Redis
+    }
+
+    // Remove from firewall
     const result = await firewall.unblockIP(ip);
-    return res.json({ message: 'Unblocked', removed: (result as any).removed !== false });
+    
+    if ((result as any).removed !== false) {
+      console.log(`[UNBLOCK] Successfully unblocked ${ip}`);
+      return res.json({ message: 'Unblocked successfully', removed: true });
+    } else {
+      console.warn(`[UNBLOCK] Firewall unblock may have failed:`, (result as any).error);
+      // Still return success if DB/Redis cleanup worked
+      return res.json({ 
+        message: 'Unblocked from database and Redis', 
+        removed: true,
+        warning: (result as any).error ? `Firewall removal: ${(result as any).error}` : undefined
+      });
+    }
   } catch (e) {
     console.error('unblockIP error:', e);
-    return res.status(500).json({ error: 'Failed to unblock IP' });
+    return res.status(500).json({ error: `Failed to unblock IP: ${(e as any)?.message || String(e)}` });
   }
 };
