@@ -559,26 +559,44 @@ export class PacketCaptureService {
                 if (isMalicious && confidence > 0.6 && !this.isLocalIP(packetData.start_ip)) {
                   try {
                     const { autoBan } = await import('./policy');
-                    await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch(() => {});
+                    const banResult = await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch((err) => {
+                      console.warn('[PACKET] Auto-ban failed:', err);
+                      return null;
+                    });
                     
-                    // Emit intrusion alert notification
-                    try {
-                      const io = getIO();
-                      if (io) {
-                        io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                          type: 'intrusion',
-                          severity: 'critical',
-                          ip: packetData.start_ip,
-                          attackType: attackType,
-                          confidence: confidence,
-                          protocol: packetData.protocol,
-                          description: `Intrusion detected: ${attackType} from ${packetData.start_ip}`,
-                          timestamp: new Date().toISOString(),
-                          autoBlocked: true
-                        });
+                    // Only emit if blocking actually succeeded
+                    if (banResult) {
+                      console.log(`[PACKET] ✓ Successfully auto-blocked IP: ${packetData.start_ip}`);
+                      
+                      // Emit intrusion alert notification with autoBlocked flag
+                      try {
+                        const io = getIO();
+                        if (io) {
+                          io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                            type: 'intrusion',
+                            severity: 'critical',
+                            ip: packetData.start_ip,
+                            attackType: attackType,
+                            confidence: confidence,
+                            protocol: packetData.protocol,
+                            description: `Intrusion detected: ${attackType} from ${packetData.start_ip}`,
+                            timestamp: new Date().toISOString(),
+                            autoBlocked: true
+                          });
+                          
+                          // Also emit explicit ip-blocked event for Blocker page
+                          io.to(`user_${this.userId}`).emit('ip-blocked', {
+                            ip: packetData.start_ip,
+                            reason: `ML:${attackType} (${Math.round(confidence * 100)}%)`,
+                            method: banResult.methods?.join(', ') || 'firewall',
+                            timestamp: new Date().toISOString()
+                          });
+                        }
+                      } catch (emitErr) {
+                        console.warn('[PACKET] Error emitting intrusion alert:', emitErr);
                       }
-                    } catch (emitErr) {
-                      console.warn('[PACKET] Error emitting intrusion alert:', emitErr);
+                    } else {
+                      console.warn(`[PACKET] ⚠ Auto-block failed for IP: ${packetData.start_ip}`);
                     }
                   } catch (err) {
                     console.warn('[PACKET] Error auto-blocking malicious IP:', err);
@@ -696,10 +714,26 @@ export class PacketCaptureService {
         import('./policy').then(({ autoBan }) => {
           // Never auto-ban local IP addresses
           if (!this.isLocalIP(packetData.start_ip)) {
-            autoBan(packetData.start_ip, `ids:critical:${criticalAttackType}`).then(() => {
+            autoBan(packetData.start_ip, `ids:critical:${criticalAttackType}`).then((banResult) => {
               console.log(`[PACKET] ✓ Auto-banned critical IP: ${packetData.start_ip}`);
               // Emit another alert with autoBlocked=true
               emitCriticalAlert(true);
+              
+              // Also emit explicit ip-blocked event for Blocker page
+              try {
+                const io = getIO();
+                if (io && banResult) {
+                  io.to(`user_${this.userId}`).emit('ip-blocked', {
+                    ip: packetData.start_ip,
+                    reason: `ids:critical:${criticalAttackType}`,
+                    method: banResult.methods?.join(', ') || 'firewall',
+                    timestamp: new Date().toISOString()
+                  });
+                  console.log(`[PACKET] ✓ Emitted ip-blocked event for ${packetData.start_ip}`);
+                }
+              } catch (emitErr) {
+                console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
+              }
             }).catch((err) => {
               console.warn('[PACKET] Error auto-banning critical IP:', err);
               // Alert already emitted, so we're good

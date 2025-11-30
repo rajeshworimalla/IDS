@@ -1,7 +1,9 @@
-import { FC, useEffect, useMemo, useState } from 'react';
+import { FC, useEffect, useMemo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { io, Socket } from 'socket.io-client';
 import Navbar from '../components/Navbar';
 import { ipBlockService, BlockedIP, BlockPolicy } from '../services/ipBlockService';
+import { authService } from '../services/auth';
 import '../styles/Blocker.css';
 
 const Blocker: FC = () => {
@@ -35,6 +37,7 @@ const Blocker: FC = () => {
   const [scanning, setScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState('');
   const [progress, setProgress] = useState<{done:number; total:number}>({ done: 0, total: 0 });
+  const socketRef = useRef<Socket | null>(null);
 
   const fetchBlocked = async () => {
     try {
@@ -66,6 +69,61 @@ const Blocker: FC = () => {
   useEffect(() => {
     fetchBlocked();
     fetchPolicy();
+    
+    // Set up socket connection for real-time updates when IPs are auto-blocked
+    try {
+      const token = authService.getToken();
+      if (token) {
+        const socket = io('http://localhost:5001', {
+          auth: { token },
+          withCredentials: true,
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          timeout: 20000,
+        });
+
+        socket.on('connect', () => {
+          console.log('[Blocker] Socket connected');
+        });
+
+        socket.on('connect_error', (err) => {
+          console.warn('[Blocker] Socket connection error:', err);
+        });
+
+        // Listen for intrusion-detected events with autoBlocked flag
+        socket.on('intrusion-detected', (data: any) => {
+          if (data.autoBlocked === true) {
+            console.log('[Blocker] IP auto-blocked:', data.ip);
+            // Refresh blocked list immediately when an IP is auto-blocked
+            fetchBlocked().catch(err => {
+              console.warn('[Blocker] Error refreshing after auto-block:', err);
+            });
+          }
+        });
+
+        // Listen for explicit ip-blocked event (if backend emits it)
+        socket.on('ip-blocked', (data: { ip: string; reason: string }) => {
+          console.log('[Blocker] IP blocked event received:', data.ip);
+          fetchBlocked().catch(err => {
+            console.warn('[Blocker] Error refreshing after block event:', err);
+          });
+        });
+
+        socketRef.current = socket;
+      }
+    } catch (err) {
+      console.warn('[Blocker] Error setting up socket:', err);
+    }
+
+    // Cleanup
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+    };
   }, []);
 
   // Get VM IP address and set as default
