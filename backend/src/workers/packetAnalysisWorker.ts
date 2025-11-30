@@ -24,10 +24,11 @@ const DETECTION_THRESHOLDS = {
   DDOS_MIN_FREQUENCY: 500,
   DDOS_MIN_PACKETS: 100,
   
-  // Port Scan: Moderate frequency (10-100 packets/min) with small packets
-  PORT_SCAN_MIN_FREQUENCY: 10,
+  // Port Scan: Moderate frequency (5-100 packets/min) with small packets
+  // LOWERED to catch nmap scans faster
+  PORT_SCAN_MIN_FREQUENCY: 5,
   PORT_SCAN_MAX_FREQUENCY: 100,
-  PORT_SCAN_MIN_PACKETS: 5, // Need at least 5 packets to detect scan
+  PORT_SCAN_MIN_PACKETS: 3, // Need at least 3 packets to detect scan (lowered for faster detection)
   
   // ICMP Flood: High ICMP frequency
   ICMP_FLOOD_MIN_FREQUENCY: 30,

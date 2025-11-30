@@ -892,14 +892,17 @@ export class PacketCaptureService {
           return; // Don't try to queue, don't log
         }
         
-        // Skip if blocking in progress or in grace period
-        if (isBlockingInProgress(sourceIP) || isInGracePeriod(sourceIP)) {
-          if (isInGracePeriod(sourceIP)) {
-            console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - skipping auto-block`);
-          } else {
-            console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
-          }
+        // Skip if blocking in progress or in grace period (but still allow detection/notifications)
+        // CRITICAL: Grace period only prevents blocking, NOT detection/notifications
+        if (isBlockingInProgress(sourceIP)) {
+          console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
           return; // Skip blocking
+        }
+        
+        // Grace period: Skip blocking but allow detection/notifications
+        if (isInGracePeriod(sourceIP)) {
+          console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - skipping auto-block but allowing detection`);
+          // Don't return - continue to allow notifications, just skip blocking below
         }
         
         // Mark as blocking in progress (use global throttle manager)
@@ -1111,12 +1114,14 @@ export class PacketCaptureService {
     }
 
     // Critical: High frequency external traffic (likely DDoS or scan) - LOWERED thresholds
-    if (packet.protocol === 'TCP' && packet.frequency > 20) return 'critical'; // Lowered from 30 for SYN flood
+    // Lower threshold to catch port scans faster (10+ packets = critical)
+    if (packet.protocol === 'TCP' && packet.frequency >= 10) return 'critical'; // Lowered from 20 to catch scans faster
     if (packet.protocol === 'UDP' && packet.frequency > 50) return 'critical';
     if (packet.protocol === 'ICMP' && packet.frequency > 15) return 'critical'; // Lowered from 20
 
-    // Medium: Moderate frequency with suspicious patterns - LOWERED thresholds
-    if (packet.protocol === 'TCP' && packet.frequency > 10 && isSmallPacket) return 'medium';
+    // Medium: Moderate frequency with suspicious patterns - LOWERED thresholds for port scan detection
+    // Lower threshold to catch nmap scans (5+ packets in short time = scan)
+    if (packet.protocol === 'TCP' && packet.frequency >= 5 && isSmallPacket) return 'medium';
     if (packet.protocol === 'UDP' && packet.frequency > 20) return 'medium';
     if (packet.protocol === 'ICMP' && packet.frequency > 5) return 'medium';
 
@@ -1145,8 +1150,9 @@ export class PacketCaptureService {
       }
       
       // Port scan: Moderate frequency + small packets (scanning behavior)
-      // Lower threshold to catch stealth scans
-      if (frequency >= 10 && frequency <= 100 && packetSize < 150) {
+      // LOWERED threshold to catch nmap scans (even slow ones)
+      // Nmap scans typically send 5-20 packets quickly, so lower threshold
+      if (frequency >= 5 && frequency <= 100 && packetSize < 150) {
         return 'port_scan';
       }
       
