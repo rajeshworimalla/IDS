@@ -501,9 +501,14 @@ export class PacketCaptureService {
         this.firstPacketLogged = true;
       }
       
-      // Log periodically to confirm capture is still working (every 1000 packets)
-      if (Math.random() < 0.001) { // ~0.1% chance = ~once per 1000 packets
-        console.log(`[PACKET] ✓ Still capturing packets (last: ${sourceIP} → ${destIP})`);
+      // Log periodically to confirm capture is still working (every 500 packets - more frequent)
+      if (Math.random() < 0.002) { // ~0.2% chance = ~once per 500 packets
+        console.log(`[PACKET] ✓ Still capturing packets (last: ${sourceIP} → ${destIP}, protocol: ${protocol})`);
+      }
+      
+      // Log when frequency is building up (potential attack)
+      if (packetData.frequency > 10 && Math.random() < 0.1) { // Log 10% of high-frequency packets
+        console.log(`[PACKET] 📊 High frequency detected: ${sourceIP} → ${destIP} (${packetData.frequency} packets/min, protocol: ${protocol})`);
       }
       
       // CRITICAL: Check if this IP is already blocked - log for debugging
@@ -815,18 +820,24 @@ export class PacketCaptureService {
         const sourceIP = packetData.start_ip;
         const now = Date.now();
         
-        // THROTTLE: Only process critical alerts once per IP per 5 seconds
-        const lastAlertTime = this.alertThrottle.get(sourceIP) || 0;
+        // Detect attack type FIRST to allow different attack types to be detected
+        const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
+        
+        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
+        // BUT: Allow different attack types to be detected (track by IP+attackType)
+        const throttleKey = `${sourceIP}:${criticalAttackType}`;
+        const lastAlertTime = this.alertThrottle.get(throttleKey) || 0;
         const timeSinceLastAlert = now - lastAlertTime;
-        const ALERT_THROTTLE_MS = 5000; // 5 seconds between alerts for same IP
+        const ALERT_THROTTLE_MS = 2000; // 2 seconds between alerts for same IP+attackType
         
         if (timeSinceLastAlert < ALERT_THROTTLE_MS) {
-          // Skip - already alerted recently for this IP
+          // Skip - already alerted recently for this IP+attackType combination
+          // But allow different attack types from same IP
           return; // Don't process this critical packet (already handled)
         }
         
-        // Update throttle
-        this.alertThrottle.set(sourceIP, now);
+        // Update throttle with attack type
+        this.alertThrottle.set(throttleKey, now);
         
         // Clean old throttle entries (older than 1 minute)
         if (this.alertThrottle.size > 100) {
@@ -837,11 +848,8 @@ export class PacketCaptureService {
           }
         }
         
-        // Log only first critical packet per IP
-        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency})`);
-        
-        // Detect attack type from pattern for critical packets
-        const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
+        // Log critical packet detection
+        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
         
         // Emit alert IMMEDIATELY (don't wait for auto-ban)
         // CRITICAL: Only emit once per IP per throttle period
@@ -1102,13 +1110,14 @@ export class PacketCaptureService {
 
     // Internal network traffic - LOWERED thresholds for better attack detection
     if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
-      // Critical: High frequency that indicates attack patterns (lowered from 2000)
-      if (packet.protocol === 'TCP' && packet.frequency > 50) return 'critical';
+      // Critical: High frequency that indicates attack patterns
+      // SYN flood detection: Lower threshold for TCP (many connections = attack)
+      if (packet.protocol === 'TCP' && packet.frequency > 30) return 'critical'; // Lowered from 50 for SYN flood
       if (packet.protocol === 'UDP' && packet.frequency > 100) return 'critical';
-      if (packet.protocol === 'ICMP' && packet.frequency > 30) return 'critical';
+      if (packet.protocol === 'ICMP' && packet.frequency > 20) return 'critical'; // Lowered from 30
 
-      // Medium: Moderate frequency with suspicious characteristics (lowered from 500)
-      if (packet.protocol === 'TCP' && packet.frequency > 20 && (isSmallPacket || isLargePacket)) return 'medium';
+      // Medium: Moderate frequency with suspicious characteristics
+      if (packet.protocol === 'TCP' && packet.frequency > 15 && (isSmallPacket || isLargePacket)) return 'medium'; // Lowered from 20
       if (packet.protocol === 'UDP' && packet.frequency > 40 && (isSmallPacket || isLargePacket)) return 'medium';
       if (packet.protocol === 'ICMP' && packet.frequency > 10) return 'medium';
 
@@ -1123,9 +1132,9 @@ export class PacketCaptureService {
     }
 
     // Critical: High frequency external traffic (likely DDoS or scan) - LOWERED thresholds
-    if (packet.protocol === 'TCP' && packet.frequency > 30) return 'critical';
+    if (packet.protocol === 'TCP' && packet.frequency > 20) return 'critical'; // Lowered from 30 for SYN flood
     if (packet.protocol === 'UDP' && packet.frequency > 50) return 'critical';
-    if (packet.protocol === 'ICMP' && packet.frequency > 20) return 'critical';
+    if (packet.protocol === 'ICMP' && packet.frequency > 15) return 'critical'; // Lowered from 20
 
     // Medium: Moderate frequency with suspicious patterns - LOWERED thresholds
     if (packet.protocol === 'TCP' && packet.frequency > 10 && isSmallPacket) return 'medium';
