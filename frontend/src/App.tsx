@@ -10,6 +10,7 @@ import Support from './pages/Support'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Blocker from './pages/Blocker'
+import NotificationSystem from './components/NotificationSystem'
 import './App.css'
 
 const App: FC = () => {
@@ -71,6 +72,7 @@ const App: FC = () => {
 
   return (
     <Router>
+      {isAuthenticated && <NotificationSystem />}
       <Routes>
         {/* Auth routes - redirect to dashboard if already logged in */}
         <Route 

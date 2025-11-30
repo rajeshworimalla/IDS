@@ -1,11 +1,13 @@
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { io, Socket } from 'socket.io-client';
 import Navbar from '../components/Navbar';
 import { ipBlockService } from '../services/ipBlockService';
+import { authService } from '../services/auth';
 import '../styles/SecurityAlerts.css';
 
 interface ThreatAlert {
-  id: number;
+  id: string;
   severity: 'critical' | 'high' | 'medium' | 'low';
   type: string;
   source: string;
@@ -13,6 +15,9 @@ interface ThreatAlert {
   timestamp: string;
   description: string;
   status: 'active' | 'investigating' | 'mitigated' | 'resolved';
+  attackType?: string;
+  confidence?: number;
+  autoBlocked?: boolean;
 }
 
 interface FilterState {
@@ -31,9 +36,53 @@ const SecurityAlerts: FC = () => {
   });
   const [blockMsg, setBlockMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [threatAlerts, setThreatAlerts] = useState<ThreatAlert[]>([]);
+  const [socket, setSocket] = useState<Socket | null>(null);
 
-  // Mock threat data
-  const threatAlerts: ThreatAlert[] = [
+  // Listen for real-time intrusion alerts
+  useEffect(() => {
+    const token = authService.getToken();
+    if (!token) return;
+
+    const socketConnection = io('http://localhost:5001', {
+      auth: { token },
+      withCredentials: true,
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    });
+
+    socketConnection.on('connect', () => {
+      console.log('[SecurityAlerts] Socket connected');
+      setSocket(socketConnection);
+    });
+
+    socketConnection.on('intrusion-detected', (alert: any) => {
+      const newAlert: ThreatAlert = {
+        id: `${alert.ip}-${alert.timestamp}`,
+        severity: alert.severity || 'high',
+        type: alert.attackType || 'Unknown Attack',
+        source: alert.ip,
+        destination: 'Network',
+        timestamp: new Date(alert.timestamp).toLocaleString(),
+        description: alert.description || `Attack detected: ${alert.attackType}`,
+        status: alert.autoBlocked ? 'mitigated' : 'active',
+        attackType: alert.attackType,
+        confidence: alert.confidence,
+        autoBlocked: alert.autoBlocked,
+      };
+      
+      setThreatAlerts(prev => [newAlert, ...prev.slice(0, 99)]); // Keep last 100
+    });
+
+    return () => {
+      socketConnection.disconnect();
+    };
+  }, []);
+
+  // Initial mock data for demo (will be replaced by real alerts)
+  useEffect(() => {
+    if (threatAlerts.length === 0) {
+      const mockAlerts: ThreatAlert[] = [
     {
       id: 1,
       severity: 'critical',
@@ -84,7 +133,10 @@ const SecurityAlerts: FC = () => {
       description: 'Unusual traffic pattern detected. Non-business hours communication with flagged IP address.',
       status: 'resolved'
     }
-  ];
+      ];
+      setThreatAlerts(mockAlerts);
+    }
+  }, []);
 
   const timeRangeOptions = [
     { value: '1h', label: 'Last Hour' },
@@ -374,6 +426,17 @@ const SecurityAlerts: FC = () => {
                     </div>
                     <div className="detail-description">
                       <p>{alert.description}</p>
+                      {alert.attackType && (
+                        <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                          <strong>Attack Type:</strong> {alert.attackType}
+                          {alert.confidence && (
+                            <span> • <strong>Confidence:</strong> {Math.round(alert.confidence * 100)}%</span>
+                          )}
+                          {alert.autoBlocked && (
+                            <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}> • AUTO-BLOCKED</span>
+                          )}
+                        </p>
+                      )}
                     </div>
                     <div className="detail-actions">
                       <motion.button 

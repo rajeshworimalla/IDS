@@ -59,6 +59,7 @@ export class PacketCaptureService {
   private predictionServiceUrl: string;
   private packetHandler: ((nbytes: number, trunc: boolean) => void) | null = null;
   private userId: string;
+  private mlRateLimiter: Map<string, number> | null = null;
 
   constructor(userId: string) {
     this.cap = new Cap();
@@ -243,12 +244,16 @@ export class PacketCaptureService {
 
   private async processPacket(raw: Buffer) {
     try {
-      // Fast validation - skip early to avoid processing overhead
-      if (raw.length < 34) {
+      // Enhanced validation with better error handling
+      if (!raw || raw.length < 34) {
         return; // Too small, skip silently
       }
 
-      // Check if it's an IP packet (EtherType 0x0800)
+      // Check if it's an IP packet (EtherType 0x0800) with bounds checking
+      if (raw.length < 14) {
+        return; // Not enough bytes for Ethernet header
+      }
+      
       const etherType = raw.readUInt16BE(12);
       if (etherType !== 0x0800) {
         return; // Non-IP packet, skip silently
@@ -296,22 +301,95 @@ export class PacketCaptureService {
         return null;
       });
 
-      // ML prediction - truly non-blocking (fire and forget)
+      // Enhanced ML prediction with auto-blocking and notifications
       if (packetData.status !== 'normal') {
+        // Rate limit ML predictions (max 10 per second per IP) to prevent overload
+        if (!this.mlRateLimiter) {
+          this.mlRateLimiter = new Map<string, number>();
+        }
+        const rateLimitKey = `${packetData.start_ip}-${Math.floor(Date.now() / 1000)}`;
+        const currentCount = this.mlRateLimiter.get(rateLimitKey) || 0;
+        if (currentCount > 10) {
+          return; // Skip prediction if rate limited
+        }
+        this.mlRateLimiter.set(rateLimitKey, currentCount + 1);
+        
+        // Clean old rate limit entries periodically
+        if (this.mlRateLimiter.size > 1000) {
+          const now = Math.floor(Date.now() / 1000);
+          for (const [key] of this.mlRateLimiter) {
+            const keyTime = parseInt(key.split('-').pop() || '0');
+            if (now - keyTime > 60) {
+              this.mlRateLimiter.delete(key);
+            }
+          }
+        }
+        
         axios.post(this.predictionServiceUrl, {
           packet: packetData
-        }, { timeout: 2000 }).then((response: any) => {
+        }, { timeout: 3000 }).then((response: any) => {
           const predictions = response.data;
-          savePromise.then((savedPacket: any) => {
+          savePromise.then(async (savedPacket: any) => {
             if (savedPacket) {
-              savedPacket.is_malicious = predictions.binary_prediction === 'malicious';
-              savedPacket.attack_type = predictions.attack_type;
-              savedPacket.confidence = predictions.confidence.binary;
-              savedPacket.save().catch(() => {}); // Non-blocking update
+              const isMalicious = predictions.binary_prediction === 'malicious';
+              const attackType = predictions.attack_type || 'unknown';
+              const confidence = predictions.confidence?.binary || predictions.confidence || 0;
+              
+              savedPacket.is_malicious = isMalicious;
+              savedPacket.attack_type = attackType;
+              savedPacket.confidence = confidence;
+              await savedPacket.save().catch(() => {}); // Non-blocking update
+              
+              // Auto-block malicious IPs with high confidence
+              if (isMalicious && confidence > 0.7) {
+                try {
+                  const { autoBan } = await import('./policy');
+                  await autoBan(packetData.start_ip, `ML:${attackType} (${Math.round(confidence * 100)}%)`).catch(() => {});
+                  
+                  // Emit intrusion alert notification
+                  const io = getIO();
+                  if (io) {
+                    io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                      type: 'intrusion',
+                      severity: 'critical',
+                      ip: packetData.start_ip,
+                      attackType: attackType,
+                      confidence: confidence,
+                      protocol: packetData.protocol,
+                      description: `Intrusion detected: ${attackType} from ${packetData.start_ip}`,
+                      timestamp: new Date().toISOString(),
+                      autoBlocked: true
+                    });
+                  }
+                } catch (err) {
+                  console.error('Error auto-blocking malicious IP:', err);
+                }
+              }
+              
+              // Emit alert for medium-high confidence attacks
+              if (isMalicious && confidence > 0.5) {
+                const io = getIO();
+                if (io) {
+                  io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                    type: 'intrusion',
+                    severity: confidence > 0.8 ? 'critical' : 'high',
+                    ip: packetData.start_ip,
+                    attackType: attackType,
+                    confidence: confidence,
+                    protocol: packetData.protocol,
+                    description: `Suspicious activity detected: ${attackType} from ${packetData.start_ip}`,
+                    timestamp: new Date().toISOString(),
+                    autoBlocked: confidence > 0.7
+                  });
+                }
+              }
             }
           });
-        }).catch(() => {
-          // ML service unavailable, continue silently
+        }).catch((err) => {
+          // ML service unavailable, continue silently but log
+          if (err.code !== 'ECONNREFUSED') {
+            console.warn('ML prediction error:', err.message);
+          }
         });
       }
 
@@ -324,18 +402,40 @@ export class PacketCaptureService {
         }
       });
 
-      // Auto-ban on critical events (non-blocking)
+      // Auto-ban on critical events with notification (non-blocking)
       if (packetData.status === 'critical') {
         import('./policy').then(({ autoBan }) => {
-          autoBan(packetData.start_ip, 'ids:critical').catch(() => {});
+          autoBan(packetData.start_ip, 'ids:critical').then(() => {
+            // Emit critical alert notification
+            const io = getIO();
+            if (io) {
+              io.to(`user_${this.userId}`).emit('intrusion-detected', {
+                type: 'intrusion',
+                severity: 'critical',
+                ip: packetData.start_ip,
+                attackType: 'critical_traffic',
+                confidence: 0.9,
+                protocol: packetData.protocol,
+                description: `Critical traffic detected from ${packetData.start_ip}. IP automatically blocked.`,
+                timestamp: new Date().toISOString(),
+                autoBlocked: true
+              });
+            }
+          }).catch(() => {});
         }).catch(() => {});
       }
     } catch (err) {
-      // Silently handle errors to prevent log spam
-      // Only log critical errors
-      if (err instanceof Error && !err.message.includes('Buffer')) {
-        console.error('Error processing packet:', err.message);
+      // Enhanced error handling to prevent crashes
+      if (err instanceof Error) {
+        // Only log non-buffer related errors to prevent spam
+        const errorMsg = err.message.toLowerCase();
+        if (!errorMsg.includes('buffer') && 
+            !errorMsg.includes('out of range') && 
+            !errorMsg.includes('index')) {
+          console.error('[PACKET] Error processing packet:', err.message);
+        }
       }
+      // Silently continue - never crash on packet processing errors
     }
   }
 

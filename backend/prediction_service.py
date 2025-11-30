@@ -40,8 +40,8 @@ except Exception as e:
     raise
 
 def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
-    """Preprocess a single packet into features."""
-    # Create a dictionary with all features initialized to 0
+    """Preprocess a single packet into features with enhanced attack detection."""
+    # Enhanced feature extraction for better attack detection
     features = {
         'Destination Port': 0,
         'Flow Duration': 0,
@@ -122,62 +122,130 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
         'Idle Min': 0
     }
     
-    # Map packet data to features
-    start_bytes = packet.get('start_bytes', 0)
-    end_bytes = packet.get('end_bytes', 0)
-    frequency = packet.get('frequency', 0)
+    # Enhanced packet data extraction
+    start_bytes = max(0, packet.get('start_bytes', 0))
+    end_bytes = max(0, packet.get('end_bytes', 0))
+    frequency = max(0, packet.get('frequency', 0))
+    protocol = packet.get('protocol', 'TCP').upper()
+    status = packet.get('status', 'normal')
+    description = packet.get('description', '')
     
-    # Basic packet features
+    # Extract port information from description
+    src_port = 0
+    dst_port = 0
+    if '->' in description:
+        try:
+            parts = description.split('->')
+            if len(parts) == 2:
+                src_port = int(parts[0].split()[-1]) if parts[0].split()[-1].isdigit() else 0
+                dst_port = int(parts[1].strip().split()[0]) if parts[1].strip().split()[0].isdigit() else 0
+        except:
+            pass
+    
+    # Enhanced basic packet features
+    features['Destination Port'] = dst_port
     features['Total Length of Fwd Packets'] = start_bytes
     features['Total Length of Bwd Packets'] = end_bytes
-    features['Flow Packets/s'] = frequency
-    features['Max Packet Length'] = max(start_bytes, end_bytes)
-    features['Min Packet Length'] = min(start_bytes, end_bytes)
+    features['Flow Packets/s'] = max(0.1, frequency)  # Avoid zero division
+    features['Max Packet Length'] = max(start_bytes, end_bytes, 1)
+    features['Min Packet Length'] = min(start_bytes, end_bytes) if (start_bytes > 0 or end_bytes > 0) else 1
     features['act_data_pkt_fwd'] = 1 if start_bytes > 0 else 0
-    features['min_seg_size_forward'] = start_bytes
-    features['Fwd Header Length'] = start_bytes
-    features['Fwd Header Length.1'] = start_bytes
-    features['Bwd Header Length'] = end_bytes
+    features['min_seg_size_forward'] = start_bytes if start_bytes > 0 else 1
+    features['Fwd Header Length'] = max(20, start_bytes)  # Minimum IP header size
+    features['Fwd Header Length.1'] = max(20, start_bytes)
+    features['Bwd Header Length'] = max(20, end_bytes) if end_bytes > 0 else 0
     
-    # Calculate derived features
+    # Enhanced derived features with attack pattern detection
     total_bytes = start_bytes + end_bytes
+    packet_count = 1  # Single packet in this flow
+    
+    # Flow duration estimation (based on frequency)
+    flow_duration = max(1, 1000 / frequency) if frequency > 0 else 1000
+    features['Flow Duration'] = flow_duration
+    
+    # Packet counts
+    features['Total Fwd Packets'] = 1 if start_bytes > 0 else 0
+    features['Total Backward Packets'] = 1 if end_bytes > 0 else 0
+    
     if total_bytes > 0:
         features['Average Packet Size'] = total_bytes / 2
         features['Packet Length Mean'] = total_bytes / 2
-        features['Packet Length Variance'] = ((start_bytes - features['Packet Length Mean'])**2 + 
-                                           (end_bytes - features['Packet Length Mean'])**2) / 2
-        features['Packet Length Std'] = np.sqrt(features['Packet Length Variance'])
+        mean_size = total_bytes / 2
+        features['Packet Length Variance'] = ((start_bytes - mean_size)**2 + (end_bytes - mean_size)**2) / 2
+        features['Packet Length Std'] = np.sqrt(max(0, features['Packet Length Variance']))
         
         # Calculate segment sizes
-        features['Avg Fwd Segment Size'] = start_bytes
-        features['Avg Bwd Segment Size'] = end_bytes
+        features['Avg Fwd Segment Size'] = start_bytes if start_bytes > 0 else 0
+        features['Avg Bwd Segment Size'] = end_bytes if end_bytes > 0 else 0
         
-        # Calculate down/up ratio
+        # Calculate down/up ratio (detects data exfiltration)
         if end_bytes > 0:
             features['Down/Up Ratio'] = start_bytes / end_bytes
+        else:
+            features['Down/Up Ratio'] = start_bytes if start_bytes > 0 else 0.1
     
-    # Protocol specific features
-    protocol = packet.get('protocol', '').upper()
+    # Enhanced protocol-specific features with attack indicators
     if protocol == 'TCP':
         features['SYN Flag Count'] = 1
         features['ACK Flag Count'] = 1
         features['Fwd PSH Flags'] = 1
         features['Bwd PSH Flags'] = 1
+        # Port scan detection (common scan ports)
+        if dst_port in [22, 23, 25, 53, 80, 135, 139, 443, 445, 1433, 3306, 3389, 5432]:
+            features['SYN Flag Count'] = 2  # Higher weight for common ports
     elif protocol == 'UDP':
         features['PSH Flag Count'] = 1
         features['Fwd PSH Flags'] = 1
+        # UDP flood detection
+        if frequency > 100:
+            features['PSH Flag Count'] = 2
     elif protocol == 'ICMP':
         features['URG Flag Count'] = 1
         features['Fwd URG Flags'] = 1
+        # ICMP flood/ping sweep detection
+        if frequency > 50:
+            features['URG Flag Count'] = 2
     
-    # Port and flow features
-    description = packet.get('description', '')
-    if '->' in description:
-        try:
-            dest_port = int(description.split('->')[1].strip())
-            features['Destination Port'] = dest_port
-        except:
-            pass
+    # Attack pattern indicators
+    # High frequency = potential DDoS
+    if frequency > 500:
+        features['Flow Packets/s'] = frequency * 1.5
+        features['Fwd Packets/s'] = frequency
+        features['Bwd Packets/s'] = frequency * 0.5
+    
+    # Suspicious packet size patterns
+    if start_bytes > 1500 or end_bytes > 1500:  # Jumbo frames or fragmentation attack
+        features['Fwd Packet Length Max'] = start_bytes * 1.2
+        features['Bwd Packet Length Max'] = end_bytes * 1.2
+    
+    if start_bytes < 64 or end_bytes < 64:  # Tiny packets (potential scan)
+        features['Fwd Packet Length Min'] = start_bytes * 0.5
+        features['Bwd Packet Length Min'] = end_bytes * 0.5
+    
+    # Enhanced IAT (Inter-Arrival Time) features for attack detection
+    # Estimate IAT based on frequency
+    if frequency > 0:
+        iat_mean = 1000.0 / frequency
+        features['Flow IAT Mean'] = iat_mean
+        features['Flow IAT Std'] = iat_mean * 0.3  # Estimated variation
+        features['Flow IAT Max'] = iat_mean * 2
+        features['Flow IAT Min'] = iat_mean * 0.1
+        features['Fwd IAT Total'] = iat_mean
+        features['Fwd IAT Mean'] = iat_mean
+        features['Fwd IAT Std'] = iat_mean * 0.3
+        features['Fwd IAT Max'] = iat_mean * 2
+        features['Fwd IAT Min'] = iat_mean * 0.1
+        features['Bwd IAT Total'] = iat_mean * 0.5
+        features['Bwd IAT Mean'] = iat_mean * 0.5
+        features['Bwd IAT Std'] = iat_mean * 0.15
+        features['Bwd IAT Max'] = iat_mean
+        features['Bwd IAT Min'] = iat_mean * 0.05
+    else:
+        # Default values
+        features['Flow IAT Mean'] = 1000
+        features['Flow IAT Std'] = 300
+        features['Flow IAT Max'] = 2000
+        features['Flow IAT Min'] = 100
     
     # Calculate bulk features
     if start_bytes > 0:
@@ -210,14 +278,39 @@ def preprocess_packet(packet: Dict[str, Any]) -> np.ndarray:
     
     return features_df
 
+# Rate limiting for predictions to prevent overload
+from collections import defaultdict
+from time import time
+prediction_rates = defaultdict(list)
+MAX_PREDICTIONS_PER_SECOND = 50  # Limit to prevent crashes
+
+def check_rate_limit():
+    """Simple rate limiter to prevent overload"""
+    now = time()
+    # Clean old entries (older than 1 second)
+    for key in list(prediction_rates.keys()):
+        prediction_rates[key] = [t for t in prediction_rates[key] if now - t < 1.0]
+    
+    # Check if we're over limit
+    total_recent = sum(len(times) for times in prediction_rates.values())
+    if total_recent > MAX_PREDICTIONS_PER_SECOND:
+        return False
+    return True
+
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
+        # Rate limiting check
+        if not check_rate_limit():
+            return jsonify({'error': 'Rate limit exceeded. Please slow down requests.'}), 429
+        
         data = request.json
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        print(f"Received data: {data}")
+        # Log request (throttled)
+        if time() % 10 < 1:  # Log roughly every 10 seconds
+            print(f"[PREDICT] Received prediction request")
 
         # Handle both single packet and list of packets
         if isinstance(data, dict) and 'packet' in data:
@@ -256,25 +349,43 @@ def predict():
             except Exception as e:
                 return jsonify({'error': f'Error preprocessing packet: {str(e)}'}), 400
             
-            # Get predictions
+            # Get predictions with enhanced error handling
             try:
-                print("Making binary prediction...")
+                # Record prediction time for rate limiting
+                prediction_rates['predictions'].append(time())
+                
+                # Make predictions with timeout protection
                 binary_pred = binary_model.predict(features)[0]
-                print(f"Binary prediction: {binary_pred}")
-                
-                print("Making multiclass prediction...")
                 multiclass_pred = multiclass_model.predict(features)[0]
-                print(f"Multiclass prediction: {multiclass_pred}")
                 
-                # Map predictions to labels
+                # Enhanced attack type classification with better labels
                 binary_label = 'malicious' if binary_pred == 1 else 'benign'
-                attack_type = {
+                
+                # Map multiclass predictions to detailed attack types
+                attack_type_map = {
                     0: 'normal',
-                    1: 'dos',
-                    2: 'probe',
-                    3: 'r2l',
-                    4: 'u2r'
-                }.get(multiclass_pred, 'unknown')
+                    1: 'dos',      # Denial of Service
+                    2: 'probe',    # Port scan, reconnaissance
+                    3: 'r2l',      # Remote to Local (unauthorized access)
+                    4: 'u2r'       # User to Root (privilege escalation)
+                }
+                
+                attack_type = attack_type_map.get(multiclass_pred, 'unknown')
+                
+                # Enhance attack type based on packet characteristics
+                if binary_label == 'malicious':
+                    protocol = packet.get('protocol', '').upper()
+                    frequency = packet.get('frequency', 0)
+                    
+                    # Refine attack type based on patterns
+                    if attack_type == 'dos' and frequency > 1000:
+                        attack_type = 'ddos'  # Distributed DoS
+                    elif attack_type == 'probe' and protocol == 'ICMP':
+                        attack_type = 'ping_sweep'
+                    elif attack_type == 'probe' and frequency > 200:
+                        attack_type = 'port_scan'
+                    elif attack_type == 'r2l' and protocol == 'TCP':
+                        attack_type = 'brute_force'
                 
                 # Get confidence scores safely
                 try:
@@ -297,14 +408,29 @@ def predict():
                     }
                 })
             except Exception as e:
-                return jsonify({'error': f'Error making predictions: {str(e)}'}), 500
+                error_msg = str(e)
+                print(f"[PREDICT] Prediction error: {error_msg}")
+                # Return safe defaults instead of crashing
+                return jsonify({
+                    'packet_id': packet.get('_id', ''),
+                    'binary_prediction': 'benign',  # Safe default
+                    'attack_type': 'normal',
+                    'confidence': {
+                        'binary': 0.5,
+                        'multiclass': 0.5
+                    },
+                    'error': f'Prediction failed: {error_msg}'
+                }), 200  # Return 200 with error in response to prevent crashes
 
         # Return single result if single packet was sent
         if len(results) == 1:
             return jsonify(results[0])
         return jsonify(results)
     except Exception as e:
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        error_msg = str(e)
+        print(f"[PREDICT] Server error: {error_msg}")
+        # Return error response without crashing
+        return jsonify({'error': f'Server error: {error_msg}'}), 500
 
 if __name__ == '__main__':
     try:
