@@ -162,12 +162,18 @@ const Monitoring: FC = () => {
         // Don't crash, just log
       });
 
-        // Listen for new packets and intrusion alerts
+        // Listen for new packets and intrusion alerts (debounced)
+        let packetRefreshTimeout: NodeJS.Timeout | null = null;
         socket.on('new-packet', () => {
-          // Refresh data when new packet arrives (non-blocking)
-        fetchData().catch((err: any) => {
-          console.warn('[Monitoring] Error refreshing on new packet:', err);
-        });
+          // Debounce: only refresh after 2 seconds of no new packets
+          if (packetRefreshTimeout) {
+            clearTimeout(packetRefreshTimeout);
+          }
+          packetRefreshTimeout = setTimeout(() => {
+            fetchData().catch((err: any) => {
+              console.warn('[Monitoring] Error refreshing on new packet:', err);
+            });
+          }, 2000);
         });
 
         socket.on('intrusion-detected', () => {
@@ -187,13 +193,14 @@ const Monitoring: FC = () => {
       // Continue without socket - polling will still work
     }
 
-    // Set up polling interval to refresh every 5 seconds
+    // Set up polling interval to refresh every 10 seconds (reduced frequency)
+    // Sync with Dashboard polling interval for consistency
     try {
       refreshIntervalRef.current = setInterval(() => {
         fetchData().catch((err: any) => {
           console.warn('[Monitoring] Polling refresh error:', err);
         });
-      }, 5000);
+      }, 10000); // Same as Dashboard (10 seconds)
     } catch (err) {
       console.warn('[Monitoring] Error setting up polling:', err);
     }
@@ -393,7 +400,7 @@ const Monitoring: FC = () => {
         className="monitoring-content"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.2 }}
       >
         {error && (
           <motion.div 
@@ -416,8 +423,9 @@ const Monitoring: FC = () => {
 
         <motion.div 
           className="monitoring-header"
-          initial={{ y: -20 }}
+          initial={{ y: -10 }}
           animate={{ y: 0 }}
+          transition={{ duration: 0.2 }}
         >
           <div className="header-row">
             <h1>Monitoring</h1>
@@ -448,36 +456,36 @@ const Monitoring: FC = () => {
           <div className="monitoring-stats">
             <motion.div 
               className="stat-card critical"
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1 }}
+              transition={{ duration: 0.15 }}
             >
               <h3>Critical</h3>
               <span className="stat-value">{alertStats.critical}</span>
             </motion.div>
             <motion.div 
               className="stat-card high"
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.2 }}
+              transition={{ duration: 0.15 }}
             >
               <h3>High</h3>
               <span className="stat-value">{alertStats.high}</span>
             </motion.div>
             <motion.div 
               className="stat-card medium"
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.3 }}
+              transition={{ duration: 0.15 }}
             >
               <h3>Medium</h3>
               <span className="stat-value">{alertStats.medium}</span>
             </motion.div>
             <motion.div 
               className="stat-card low"
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.4 }}
+              transition={{ duration: 0.15 }}
             >
               <h3>Low</h3>
               <span className="stat-value">{alertStats.low}</span>
@@ -509,8 +517,9 @@ const Monitoring: FC = () => {
                       '--chip-bg': `${option.color}22`
                     } as React.CSSProperties}
                     onClick={() => handleFilterToggle('severity', option.value)}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    transition={{ duration: 0.1 }}
                   >
                     {option.label}
                   </motion.button>
@@ -526,8 +535,9 @@ const Monitoring: FC = () => {
                     key={`status-${option.value}`}
                     className={`filter-chip ${filters.status.includes(option.value) ? 'active' : ''}`}
                     onClick={() => handleFilterToggle('status', option.value)}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    transition={{ duration: 0.1 }}
                   >
                     {option.label}
                   </motion.button>
@@ -590,7 +600,7 @@ const Monitoring: FC = () => {
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.3 }}
+                        transition={{ duration: 0.15 }}
                       >
                         <div className="detail-group">
                           <div className="detail-item">

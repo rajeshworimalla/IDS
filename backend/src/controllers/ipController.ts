@@ -233,7 +233,7 @@ export const scanPorts = async (req: Request, res: Response) => {
         return res.status(400).json({ error: `Invalid IP address format: ${host}` });
       }
       const parts = host.split('.').map(Number);
-      if (!parts.every(p => p >= 0 && p <= 255)) {
+      if (!parts.every((p: number) => p >= 0 && p <= 255)) {
         return res.status(400).json({ error: `Invalid IP address: ${host}` });
       }
     }

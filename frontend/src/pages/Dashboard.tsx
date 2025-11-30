@@ -27,6 +27,13 @@ const Dashboard: FC = () => {
     normalPercentage: 0,
     maliciousPercentage: 0
   });
+  const [alertStats, setAlertStats] = useState({
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    total: 0
+  });
   const [pieData, setPieData] = useState<{ name: string; value: number; color: string }[]>([]);
   const [lineData, setLineData] = useState<{ time: string; value1: number; value2: number }[]>([]);
   const [barData, setBarData] = useState<{ name: string; value: number }[]>([]);
@@ -35,51 +42,87 @@ const Dashboard: FC = () => {
   const socketRef = useRef<Socket | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = async (skipCharts = false) => {
     try {
       setError(null);
-      // Fetch packet statistics with error handling
+      // Fetch packet statistics with error handling (always fetch stats)
+      // This gets ALL packets stats - same source as Monitoring uses for alerts
       try {
         const packetStats = await packetService.getPacketStats();
         if (packetStats && typeof packetStats === 'object') {
-          setStats(packetStats);
+          // Ensure we're using the same data source
+          setStats({
+            ...packetStats,
+            // Make sure maliciousCount matches what Monitoring shows
+            maliciousCount: packetStats.maliciousCount || 0,
+            criticalCount: packetStats.criticalCount || 0,
+            mediumCount: packetStats.mediumCount || 0,
+            normalCount: packetStats.normalCount || 0,
+            totalPackets: packetStats.totalPackets || 0
+          });
         }
       } catch (err) {
         console.warn('Error fetching packet stats:', err);
         // Continue with other data
       }
-
-      // Fetch status distribution for pie chart
+      
+      // Fetch alert stats to ensure consistency with Monitoring page (SAME DATA SOURCE)
       try {
-        const statusData = await packetService.getStatusDistribution();
-        if (Array.isArray(statusData)) {
-          setPieData(statusData);
+        const alertStatsData = await packetService.getAlertStats({
+          severity: ['critical', 'high', 'medium', 'low'],
+          status: []
+        });
+        if (alertStatsData && typeof alertStatsData === 'object') {
+          setAlertStats(alertStatsData);
+          // Sync Dashboard stats with Monitoring alert stats for consistency
+          setStats(prev => ({
+            ...prev,
+            // Use alert stats as primary source to match Monitoring page
+            maliciousCount: alertStatsData.total || prev.maliciousCount,
+            criticalCount: alertStatsData.critical || prev.criticalCount,
+            // Keep packet stats for total packets count
+            totalPackets: prev.totalPackets
+          }));
         }
       } catch (err) {
-        console.warn('Error fetching status distribution:', err);
-        // Continue with other data
-      }
-
-      // Fetch network load for line chart
-      try {
-        const networkData = await packetService.getNetworkLoad();
-        if (Array.isArray(networkData)) {
-          setLineData(networkData);
-        }
-      } catch (err) {
-        console.warn('Error fetching network load:', err);
-        // Continue with other data
-      }
-
-      // Fetch top hosts for bar chart
-      try {
-        const topHosts = await packetService.getTopHosts();
-        if (Array.isArray(topHosts)) {
-          setBarData(topHosts);
-        }
-      } catch (err) {
-        console.warn('Error fetching top hosts:', err);
+        console.warn('Error fetching alert stats for consistency:', err);
         // Continue - not critical
+      }
+
+      // Only fetch chart data if not skipping (for performance)
+      if (!skipCharts) {
+        // Fetch status distribution for pie chart
+        try {
+          const statusData = await packetService.getStatusDistribution();
+          if (Array.isArray(statusData)) {
+            setPieData(statusData);
+          }
+        } catch (err) {
+          console.warn('Error fetching status distribution:', err);
+          // Continue with other data
+        }
+
+        // Fetch network load for line chart
+        try {
+          const networkData = await packetService.getNetworkLoad();
+          if (Array.isArray(networkData)) {
+            setLineData(networkData);
+          }
+        } catch (err) {
+          console.warn('Error fetching network load:', err);
+          // Continue with other data
+        }
+
+        // Fetch top hosts for bar chart
+        try {
+          const topHosts = await packetService.getTopHosts();
+          if (Array.isArray(topHosts)) {
+            setBarData(topHosts);
+          }
+        } catch (err) {
+          console.warn('Error fetching top hosts:', err);
+          // Continue - not critical
+        }
       }
     } catch (error) {
       console.error('Error in fetchData:', error);
@@ -88,8 +131,8 @@ const Dashboard: FC = () => {
   };
 
   useEffect(() => {
-    // Initial fetch with error handling
-    fetchData().catch(err => {
+    // Initial fetch with error handling (fetch charts on initial load)
+    fetchData(false).catch(err => {
       console.error('Initial fetch failed:', err);
       // Don't crash, just log
     });
@@ -122,19 +165,25 @@ const Dashboard: FC = () => {
           // Don't crash, just log
         });
 
-        // Listen for new packets and refresh stats
+        // Listen for new packets and refresh stats (debounced)
+        let packetRefreshTimeout: NodeJS.Timeout | null = null;
         socket.on('new-packet', () => {
-          // Refresh stats when new packet arrives (non-blocking)
-          fetchData().catch((err: any) => {
-            console.warn('[Dashboard] Error refreshing on new packet:', err);
-          });
+          // Debounce: only refresh after 2 seconds of no new packets
+          if (packetRefreshTimeout) {
+            clearTimeout(packetRefreshTimeout);
+          }
+          packetRefreshTimeout = setTimeout(() => {
+            fetchData(true).catch((err: any) => { // Skip charts for faster refresh
+              console.warn('[Dashboard] Error refreshing on new packet:', err);
+            });
+          }, 2000);
         });
 
         // Listen for intrusion alerts - CRITICAL for attack detection
         socket.on('intrusion-detected', (alert: any) => {
           console.log('[Dashboard] 🚨 INTRUSION DETECTED:', alert);
-          // Immediately refresh stats to show attack
-          fetchData().catch((err: any) => {
+          // Immediately refresh stats to show attack (skip charts for speed)
+          fetchData(true).catch((err: any) => {
             console.warn('[Dashboard] Error refreshing on intrusion:', err);
           });
         });
@@ -146,13 +195,13 @@ const Dashboard: FC = () => {
       // Continue without socket - polling will still work
     }
 
-    // Set up polling interval to refresh stats every 5 seconds
+    // Set up polling interval to refresh stats every 10 seconds (reduced frequency)
     try {
       refreshIntervalRef.current = setInterval(() => {
-      fetchData().catch((err: any) => {
+      fetchData(true).catch((err: any) => { // Skip charts on polling for performance
         console.warn('[Dashboard] Polling refresh error:', err);
       });
-      }, 5000);
+      }, 10000); // Increased from 5 to 10 seconds
     } catch (err) {
       console.warn('[Dashboard] Error setting up polling:', err);
     }
@@ -181,7 +230,7 @@ const Dashboard: FC = () => {
         className="dashboard-content"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.2 }}
       >
         {error && (
           <motion.div 
@@ -212,31 +261,34 @@ const Dashboard: FC = () => {
 
         <motion.div 
           className="stats-grid"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
+          transition={{ duration: 0.2 }}
         >
           <motion.div
             className="stats-card"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
+            transition={{ duration: 0.15 }}
           >
             <span className="stats-icon">📊</span>
             <div className="stats-info">
               <span className="stats-value">{stats.totalPackets}</span>
               <span className="stats-title">TOTAL PACKETS</span>
+              <span style={{ fontSize: '9px', color: '#666', display: 'block', marginTop: '2px' }}>
+                (All captured)
+              </span>
             </div>
           </motion.div>
           <motion.div
             className="stats-card"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ duration: 0.15 }}
           >
             <span className="stats-icon">⚠️</span>
             <div className="stats-info">
-              <span className="stats-value">{stats.criticalCount}</span>
+              <span className="stats-value">{alertStats.critical || stats.criticalCount}</span>
               <span className="stats-title">CRITICAL</span>
             </div>
           </motion.div>
@@ -248,7 +300,7 @@ const Dashboard: FC = () => {
           >
             <span className="stats-icon">🔍</span>
             <div className="stats-info">
-              <span className="stats-value">{stats.maliciousCount}</span>
+              <span className="stats-value">{alertStats.total || stats.maliciousCount}</span>
               <span className="stats-title">ATTACKS DETECTED</span>
             </div>
           </motion.div>
@@ -268,9 +320,9 @@ const Dashboard: FC = () => {
 
         <motion.div 
           className="charts-grid"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
+          transition={{ duration: 0.2 }}
         >
           <div className="chart-card">
             <h3>EVENT DISTRIBUTION</h3>
