@@ -306,6 +306,11 @@ export const firewall = {
           // Return success even if verification fails (add command succeeded)
           return { applied: true, method: 'ipset-v6' };
         }
+      } else {
+        // Fallback to direct iptables if ipset not available
+        await iptablesCheckOrAdd(ip, version === 6);
+        await flushConntrack(ip, version === 6);
+        return { applied: true, method: version === 6 ? 'iptables-v6' : 'iptables-v4' };
       }
       // Fallback to raw iptables rules (no per-element TTL available)
       if (!bins.iptables && !bins.ip6tables) {

@@ -185,8 +185,11 @@ export const blockIP = async (req: Request, res: Response) => {
           $setOnInsert: { blockedAt: new Date() },
           $set: { reason: reasonText }
         };
-        if ((applied as any).applied !== false && (applied as any).method) {
-          updateData.$set.method = (applied as any).method;
+        
+        // Always set method if available, otherwise use default
+        const method = (applied as any).method || (ipVersion === 6 ? 'ipset-v6' : 'ipset-v4');
+        if ((applied as any).applied !== false) {
+          updateData.$set.method = method;
         }
         
         const doc = await BlockedIP.findOneAndUpdate(
@@ -197,8 +200,13 @@ export const blockIP = async (req: Request, res: Response) => {
         
         if ((applied as any).applied !== false) {
           successCount++;
-          console.log(`[BLOCK] ✓ Successfully blocked ${addr} via ${(applied as any).method}`);
-          results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: (applied as any).method });
+          console.log(`[BLOCK] ✓ Successfully blocked ${addr} via ${method}`);
+          // Update doc with method if it wasn't set
+          if (!doc.method && method) {
+            doc.method = method;
+            await doc.save().catch(() => {});
+          }
+          results.push({ ip: doc.ip, reason: doc.reason, blockedAt: doc.blockedAt, applied: true, method: doc.method || method });
           
           // Flush DNS cache to ensure browser gets fresh DNS (non-blocking)
           try {
