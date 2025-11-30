@@ -28,8 +28,21 @@ export type TempBanRecord = {
 /**
  * Block an IP (called by job queue)
  * ONLY does firewall operations - nothing else
+ * CRITICAL: This blocks the SPECIFIC IP address, not all traffic
  */
 export async function blockIPWorker(ip: string, reason: string, opts?: { ttlSeconds?: number }): Promise<TempBanRecord> {
+  // CRITICAL: Validate IP before blocking
+  if (!ip || ip.trim() === '') {
+    throw new Error('Cannot block: IP address is empty');
+  }
+  
+  // Safety check: Never block localhost or broadcast addresses
+  if (ip.startsWith('127.') || ip === '0.0.0.0' || ip === '255.255.255.255' || ip === '::1') {
+    throw new Error(`Cannot block reserved IP address: ${ip}`);
+  }
+  
+  console.log(`[BLOCKING-WORKER] 🔒 Blocking SPECIFIC IP: ${ip} (reason: ${reason})`);
+  
   const policy = await getPolicy();
   const ttlSeconds = Math.max(1, Math.floor((opts?.ttlSeconds ?? (policy.banMinutes * 60))));
   const now = Date.now();
@@ -37,9 +50,16 @@ export async function blockIPWorker(ip: string, reason: string, opts?: { ttlSeco
   const methods: string[] = [];
 
   // ONLY firewall operations - no nginx reload, no notifications, no DB writes
+  // This adds ONLY the specific IP to the blocklist (incremental, not full reload)
   if (policy.useFirewall) {
     const res = await firewall.blockIP(ip, { ttlSeconds });
-    if ((res as any).applied) methods.push((res as any).method || 'firewall');
+    if ((res as any).applied) {
+      methods.push((res as any).method || 'firewall');
+      console.log(`[BLOCKING-WORKER] ✓ Successfully blocked IP: ${ip} via ${(res as any).method}`);
+    } else {
+      console.error(`[BLOCKING-WORKER] ✗ Failed to block IP: ${ip} - ${(res as any).error}`);
+      throw new Error(`Failed to block IP: ${(res as any).error}`);
+    }
   }
 
   if (policy.useNginxDeny) {
