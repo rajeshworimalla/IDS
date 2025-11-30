@@ -738,35 +738,33 @@ export class PacketCaptureService {
           } catch (err) {
             console.warn('[PACKET] Error processing ML response:', err);
           }
-        }).catch((err) => {
-          // ML service unavailable - log but continue (don't crash)
-          const errorCode = (err as any)?.code;
-          const errorMessage = (err as any)?.message || String(err);
-          
-          // Only log errors occasionally to prevent spam
-          if (Math.random() < 0.01) { // Log 1% of errors
-            if (errorCode === 'ECONNREFUSED') {
-              console.warn(`[PACKET] ⚠ ML service not available (connection refused) - using pattern detection only`);
-            } else if (errorCode === 'ETIMEDOUT') {
-              console.warn(`[PACKET] ⚠ ML service timeout - using pattern detection only`);
-            } else if (errorCode !== 'ECONNABORTED') { // Don't log timeout errors
-              // console.warn(`[PACKET] ⚠ ML prediction error: ${errorMessage}`);
+          }).catch((err) => {
+            // ML service unavailable - log but continue (don't crash)
+            // CRITICAL: This catch must NEVER throw or it will stop packet processing
+            try {
+              const errorCode = (err as any)?.code;
+              const errorMessage = (err as any)?.message || String(err);
+              
+              // Only log errors occasionally to prevent spam
+              if (Math.random() < 0.01) { // Log 1% of errors
+                if (errorCode === 'ECONNREFUSED') {
+                  console.warn(`[PACKET] ⚠ ML service not available (connection refused) - using pattern detection only`);
+                } else if (errorCode === 'ETIMEDOUT' || errorCode === 'ECONNABORTED') {
+                  // Don't log timeout errors - they're expected during high traffic
+                } else {
+                  // Silently ignore other ML errors to prevent log spam
+                }
+              }
+            } catch (logErr) {
+              // Even logging errors must not crash
+              // Silently ignore
             }
-          }
-          
-          // For critical packets, still emit alert even if ML fails
-          if (packetData.status === 'critical') {
-            // Already logged above, no need to log again
-          }
+          });
+        }).catch((outerErr) => {
+          // CRITICAL: Outer catch to prevent ANY error from stopping packet processing
+          // This should never happen, but if it does, we must continue
+          // Silently ignore - packet processing must continue
         });
-        } catch (mlErr) {
-          // Catch any errors in the axios call setup (shouldn't happen, but be safe)
-          // Don't log every error to prevent spam
-          if (Math.random() < 0.01) {
-            console.warn('[PACKET] Error setting up ML prediction:', (mlErr as Error)?.message);
-          }
-          // Continue processing - critical alerts will still be emitted
-        }
       }
 
       // PERFORMANCE: DISABLED all normal packet emissions to eliminate lag
@@ -813,44 +811,72 @@ export class PacketCaptureService {
         };
         
         // Emit alert immediately (before auto-ban)
-        emitCriticalAlert(false);
+        // CRITICAL: Wrap in try-catch to prevent crashes
+        try {
+          emitCriticalAlert(false);
+        } catch (alertErr) {
+          console.warn('[PACKET] Error emitting critical alert:', alertErr);
+          // Continue - don't let alert errors stop processing
+        }
         
         // Then try to auto-ban (non-blocking)
-        import('./policy').then(({ autoBan }) => {
+        // CRITICAL: Use Promise.resolve to ensure errors don't propagate
+        Promise.resolve().then(() => {
+          return import('./policy');
+        }).then(({ autoBan }) => {
           // Never auto-ban local IP addresses
           if (!this.isLocalIP(packetData.start_ip)) {
-            autoBan(packetData.start_ip, `ids:critical:${criticalAttackType}`).then((banResult) => {
-              console.log(`[PACKET] ✓ Auto-banned critical IP: ${packetData.start_ip}`);
-              // Emit another alert with autoBlocked=true
-              emitCriticalAlert(true);
-              
-              // Also emit explicit ip-blocked event for Blocker page
+            // CRITICAL: Wrap auto-ban in try-catch and use Promise.resolve
+            Promise.resolve().then(() => {
+              return autoBan(packetData.start_ip, `ids:critical:${criticalAttackType}`);
+            }).then((banResult) => {
               try {
-                const io = getIO();
-                if (io && banResult) {
-                  io.to(`user_${this.userId}`).emit('ip-blocked', {
-                    ip: packetData.start_ip,
-                    reason: `ids:critical:${criticalAttackType}`,
-                    method: banResult.methods?.join(', ') || 'firewall',
-                    timestamp: new Date().toISOString()
-                  });
-                  console.log(`[PACKET] ✓ Emitted ip-blocked event for ${packetData.start_ip}`);
+                console.log(`[PACKET] ✓ Auto-banned critical IP: ${packetData.start_ip}`);
+                // Emit another alert with autoBlocked=true
+                emitCriticalAlert(true);
+                
+                // Also emit explicit ip-blocked event for Blocker page
+                try {
+                  const io = getIO();
+                  if (io && banResult) {
+                    io.to(`user_${this.userId}`).emit('ip-blocked', {
+                      ip: packetData.start_ip,
+                      reason: `ids:critical:${criticalAttackType}`,
+                      method: banResult.methods?.join(', ') || 'firewall',
+                      timestamp: new Date().toISOString()
+                    });
+                    console.log(`[PACKET] ✓ Emitted ip-blocked event for ${packetData.start_ip}`);
+                  }
+                } catch (emitErr) {
+                  console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
+                  // Continue - don't let emit errors stop processing
                 }
-              } catch (emitErr) {
-                console.warn('[PACKET] Error emitting ip-blocked event:', emitErr);
+              } catch (logErr) {
+                // Even logging errors must not crash
+                // Silently continue
               }
             }).catch((err) => {
-              console.warn('[PACKET] Error auto-banning critical IP:', err);
-              // Alert already emitted, so we're good
+              // CRITICAL: Auto-ban errors must not stop packet processing
+              // Silently ignore - alert already emitted
+              if (Math.random() < 0.1) { // Log 10% of auto-ban errors
+                console.warn('[PACKET] Error auto-banning critical IP (non-fatal):', (err as Error)?.message);
+              }
             });
           } else {
             console.log(`[PACKET] ⚠ Skipping auto-ban for local IP: ${packetData.start_ip}`);
             // Still emit alert for local IPs (for visibility, but don't block)
-            emitCriticalAlert(false);
+            try {
+              emitCriticalAlert(false);
+            } catch (alertErr) {
+              // Silently ignore alert errors
+            }
           }
         }).catch((err) => {
-          console.warn('[PACKET] Error importing policy module:', err);
-          // Alert already emitted, so we're good
+          // CRITICAL: Policy import errors must not stop packet processing
+          // Silently ignore - alert already emitted
+          if (Math.random() < 0.1) { // Log 10% of import errors
+            console.warn('[PACKET] Error importing policy module (non-fatal):', (err as Error)?.message);
+          }
         });
       }
     } catch (err) {
