@@ -14,7 +14,6 @@ import {
   markBlockedForAttackType,
   markAlertEmitted
 } from './throttleManager';
-import { PACKET_CAPTURE_CONFIG } from './packetCapture.config';
 
 // Track packet frequencies for status determination with automatic cleanup
 const packetFrequencies: { [key: string]: { count: number; timestamp: number } } = {};
@@ -23,15 +22,21 @@ const packetFrequencies: { [key: string]: { count: number; timestamp: number } }
 // Industry standard: Limit UI updates but capture all packets to DB
 const socketEmissionQueue: any[] = [];
 let lastEmissionTime = 0;
+const EMISSION_INTERVAL = 10000; // Emit max once per 10 seconds - DISABLED for performance (only intrusions update)
+const MAX_SOCKET_QUEUE_SIZE = 1; // Keep only most recent packet for UI updates - REDUCED for performance
+const DISABLE_NORMAL_PACKET_EMISSIONS = true; // Disable normal packet emissions to reduce lag
 
 // Batch DB writes to reduce database load during attacks
 const dbWriteQueue: any[] = [];
 let lastDbWriteTime = 0;
+const DB_WRITE_INTERVAL = 500; // Write to DB every 500ms (batched) - INCREASED frequency for better performance
+const MAX_DB_BATCH_SIZE = 100; // Max packets per batch - INCREASED to handle high traffic
+const MAX_DB_QUEUE_SIZE = 1000; // Increased queue size to prevent dropping critical packets
 
-// Process socket emission queue - optimized for performance
+// Process socket emission queue - optimized for performance (REDUCED frequency)
 setInterval(() => {
   const now = Date.now();
-  if (socketEmissionQueue.length > 0 && (now - lastEmissionTime) >= PACKET_CAPTURE_CONFIG.SOCKET_EMISSION_INTERVAL_MS) {
+  if (socketEmissionQueue.length > 0 && (now - lastEmissionTime) >= EMISSION_INTERVAL) {
     try {
       const io = getIO();
       if (io && socketEmissionQueue.length > 0) {
@@ -49,21 +54,18 @@ setInterval(() => {
       socketEmissionQueue.length = 0;
     }
   }
-}, 500); // Check every 500ms
+}, 500); // Check every 500ms (REDUCED frequency for performance)
 
 // Batch DB writes to reduce database load during attacks
-// Optimized for performance with adaptive batch sizing
+// FIX: More frequent writes to ensure data persistence with crash prevention
 setInterval(() => {
   try {
     const now = Date.now();
-    const { DB_WRITE_INTERVAL_MS, DB_BATCH_SIZE, DB_BATCH_SIZE_HIGH_LOAD, DB_QUEUE_SIZE_THRESHOLD, MAX_DB_QUEUE_SIZE, DB_QUEUE_OVERLOAD_THRESHOLD, LOGGING } = PACKET_CAPTURE_CONFIG;
-    
-    if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL_MS) {
-      // Adaptive batch sizing: smaller batches during high load
+    if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL) {
+      // Write in smaller batches more frequently
+      // REDUCED batch size during high load to prevent crashes
       const currentQueueSize = dbWriteQueue.length;
-      const batchSize = currentQueueSize > DB_QUEUE_SIZE_THRESHOLD 
-        ? DB_BATCH_SIZE_HIGH_LOAD 
-        : DB_BATCH_SIZE;
+      const batchSize = currentQueueSize > 200 ? 25 : MAX_DB_BATCH_SIZE; // Smaller batches when queue is large
       const batch = dbWriteQueue.splice(0, batchSize);
       
       if (batch.length > 0) {
@@ -71,8 +73,11 @@ setInterval(() => {
         PacketModel.insertMany(batch, { ordered: false })
           .then(() => {
             // Success - data is persisted
-            if (Math.random() < LOGGING.DB_BATCH_LOG_PROBABILITY) {
-              console.log(`[PACKET] ✓ Saved ${batch.length} packets to DB (${dbWriteQueue.length} remaining in queue)`);
+            if (batch.length > 0) {
+              // Log occasionally to show progress
+              if (Math.random() < 0.05) { // Log 5% of batches (reduced from 10%)
+                console.log(`[PACKET] ✓ Saved ${batch.length} packets to DB (${dbWriteQueue.length} remaining in queue)`);
+              }
             }
           })
           .catch(err => {
@@ -90,11 +95,8 @@ setInterval(() => {
               }
             });
             // Drop non-critical packets if DB is overloaded
-            if (dbWriteQueue.length > DB_QUEUE_OVERLOAD_THRESHOLD) {
-              const droppedCount = batch.length - batch.filter(p => p.status === 'critical').length;
-              if (droppedCount > 0) {
-                console.warn(`[PACKET] ⚠ DB overloaded, dropping ${droppedCount} non-critical packets`);
-              }
+            if (dbWriteQueue.length > 300) {
+              console.warn(`[PACKET] ⚠ DB overloaded, dropping ${batch.length - batch.filter(p => p.status === 'critical').length} non-critical packets`);
             }
           });
         lastDbWriteTime = now;
@@ -106,22 +108,22 @@ setInterval(() => {
     if (!errorMsg.includes('timeout') && !errorMsg.includes('ECONNREFUSED')) {
       console.warn('[PACKET] Error in batch DB write interval:', errorMsg);
     }
+    // Don't crash - just log and continue
   }
-}, 500); // Check every 500ms
+}, 500); // Check every 500ms for faster writes
 
-// Cleanup old frequency data to prevent memory leaks
+// Cleanup old frequency data every 5 minutes to prevent memory leaks
 setInterval(() => {
   const now = Date.now();
-  const { FREQUENCY_CLEANUP_AGE_MINUTES } = PACKET_CAPTURE_CONFIG;
-  const cutoffMinute = Math.floor(now / 60000) - FREQUENCY_CLEANUP_AGE_MINUTES;
+  const tenMinutesAgo = Math.floor(now / 60000) - 10;
 
   Object.keys(packetFrequencies).forEach(key => {
     const keyMinute = parseInt(key.split('-').pop() || '0');
-    if (keyMinute < cutoffMinute) {
+    if (keyMinute < tenMinutesAgo) {
       delete packetFrequencies[key];
     }
   });
-}, PACKET_CAPTURE_CONFIG.FREQUENCY_CLEANUP_INTERVAL_MS);
+}, 300000); // Run every 5 minutes
 
 export class PacketCaptureService {
   private cap: Cap;
@@ -142,7 +144,7 @@ export class PacketCaptureService {
   constructor(userId: string) {
     this.cap = new Cap();
     this.linkType = 'ETHERNET';
-    this.buffer = Buffer.alloc(PACKET_CAPTURE_CONFIG.BUFFER_SIZE);
+    this.buffer = Buffer.alloc(65535);
     this.predictionServiceUrl = 'http://127.0.0.1:5002/predict';
     this.userId = userId;
 
@@ -185,22 +187,10 @@ export class PacketCaptureService {
     if (!ip) return false;
     // Check exact match
     if (this.localIPs.has(ip)) return true;
-    // Check localhost variants (127.x.x.x, ::1, localhost, IPv4-mapped IPv6)
-    if (ip.startsWith('127.') || ip === '::1' || ip === 'localhost' || ip.startsWith('::ffff:127.')) return true;
+    // Check localhost variants
+    if (ip.startsWith('127.') || ip === '::1' || ip === 'localhost') return true;
     // Check if it's in the local IPs set
-    if (Array.from(this.localIPs).some(localIP => ip === localIP)) return true;
-    // Check for link-local addresses (169.254.x.x) - these are typically self-assigned
-    if (ip.startsWith('169.254.')) return true;
-    // For private IP ranges (10.x, 192.168.x, 172.16-31.x), check if it matches any of our network interfaces
-    if (ip.startsWith('10.') || ip.startsWith('192.168.') || 
-        (ip.startsWith('172.') && parseInt(ip.split('.')[1] || '0') >= 16 && parseInt(ip.split('.')[1] || '0') <= 31)) {
-      // Private IP range - check if this IP matches any of our local network interface IPs
-      return Array.from(this.localIPs).some(localIP => {
-        // Direct match or if this IP is on the same network as our local IPs
-        return ip === localIP || (localIP.includes('.') && ip.split('.').slice(0, 3).join('.') === localIP.split('.').slice(0, 3).join('.'));
-      });
-    }
-    return false;
+    return Array.from(this.localIPs).some(localIP => ip === localIP);
   }
 
   private initializeCapture() {
@@ -508,14 +498,7 @@ export class PacketCaptureService {
         return;
       }
 
-      // CRITICAL: Skip all processing if source IP is the system itself (localhost/self)
-      // Never detect attacks from our own IP addresses
-      if (this.isLocalIP(sourceIP)) {
-        // Silently skip - this is our own traffic, not an attack
-        return;
-      }
-      
-      // Skip localhost traffic to reduce noise (additional check for destination)
+      // Skip localhost traffic to reduce noise
       if (sourceIP.startsWith('127.') || destIP.startsWith('127.')) {
         return;
       }
@@ -524,14 +507,14 @@ export class PacketCaptureService {
       this.lastPacketTime = Date.now();
       
       // Log first few packets to verify capture is working (debugging)
-      if (PACKET_CAPTURE_CONFIG.LOGGING.FIRST_PACKET_LOG && !this.firstPacketLogged) {
+      if (!this.firstPacketLogged) {
         console.log(`📦 First packet captured! Source: ${sourceIP} → Dest: ${destIP} Protocol: ${protocol}`);
         console.log(`[PACKET] ✅ Packet capture is ACTIVE and processing packets`);
         this.firstPacketLogged = true;
       }
       
-      // Log periodically to confirm capture is still working
-      if (Math.random() < PACKET_CAPTURE_CONFIG.LOGGING.PERIODIC_LOG_PROBABILITY) {
+      // Log periodically to confirm capture is still working (every 500 packets - more frequent)
+      if (Math.random() < 0.002) { // ~0.2% chance = ~once per 500 packets
         console.log(`[PACKET] ✓ Still capturing packets (last: ${sourceIP} → ${destIP}, protocol: ${protocol})`);
       }
 
@@ -562,7 +545,7 @@ export class PacketCaptureService {
       });
       
       // Log when frequency is building up (potential attack) - AFTER packetData is created
-      if (packetData.frequency > 10 && Math.random() < PACKET_CAPTURE_CONFIG.LOGGING.HIGH_FREQUENCY_LOG_PROBABILITY) {
+      if (packetData.frequency > 10 && Math.random() < 0.1) { // Log 10% of high-frequency packets
         console.log(`[PACKET] 📊 High frequency detected: ${sourceIP} → ${destIP} (${packetData.frequency} packets/min, protocol: ${protocol})`);
       }
       
@@ -572,7 +555,7 @@ export class PacketCaptureService {
         const { redis } = await import('./redis');
         const tempBanKey = `ids:tempban:${sourceIP}`;
         const blocked = await redis.get(tempBanKey).catch(() => null);
-        if (blocked && Math.random() < PACKET_CAPTURE_CONFIG.LOGGING.BLOCKED_IP_LOG_PROBABILITY) {
+        if (blocked && Math.random() < 0.1) { // Log 10% of packets from blocked IPs
           console.log(`[PACKET] 📍 Packet from BLOCKED IP ${sourceIP} - still being captured and analyzed`);
         }
       } catch (redisErr) {
@@ -588,7 +571,8 @@ export class PacketCaptureService {
         dbWriteQueue.push(packetData);
         
         // Limit queue size to prevent memory issues and crashes during attacks
-        if (dbWriteQueue.length > PACKET_CAPTURE_CONFIG.MAX_DB_QUEUE_SIZE) {
+        // REDUCED from 1000 to 500 to prevent memory exhaustion
+        if (dbWriteQueue.length > MAX_DB_QUEUE_SIZE) {
           // Remove oldest normal packets first (never remove critical)
           const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
           if (normalIndex !== -1) {
@@ -647,22 +631,20 @@ export class PacketCaptureService {
       
       // PERFORMANCE: Only run ML on suspicious/critical packets OR if rate limit allows
       // CRITICAL: Always run ML for blocked IPs (no rate limiting)
-      const { ML_RATE_LIMIT_PER_SECOND } = PACKET_CAPTURE_CONFIG;
-      const shouldRunML = isBlockedIP || packetData.status !== 'normal' || currentCount < 2;
+      const shouldRunML = isBlockedIP || packetData.status !== 'normal' || currentCount < 2; // Reduced from 20 to 2
       
       // CRITICAL: No rate limit for blocked IPs - they need immediate detection
-      if (shouldRunML && (isBlockedIP || currentCount < ML_RATE_LIMIT_PER_SECOND)) {
+      if (shouldRunML && (isBlockedIP || currentCount < 5)) { // Reduced from 20 to 5 per second
         if (!isBlockedIP) {
           this.mlRateLimiter.set(rateLimitKey, currentCount + 1);
         }
         
         // Clean old rate limit entries periodically
-        const { ML_RATE_LIMIT_MAX_ENTRIES, ML_RATE_LIMIT_CLEANUP_AGE_SEC } = PACKET_CAPTURE_CONFIG;
-        if (this.mlRateLimiter.size > ML_RATE_LIMIT_MAX_ENTRIES) {
+        if (this.mlRateLimiter.size > 1000) {
           const now = Math.floor(Date.now() / 1000);
           for (const [key] of this.mlRateLimiter) {
             const keyTime = parseInt(key.split('-').pop() || '0');
-            if (now - keyTime > ML_RATE_LIMIT_CLEANUP_AGE_SEC) {
+            if (now - keyTime > 60) {
               this.mlRateLimiter.delete(key);
             }
           }
@@ -686,22 +668,22 @@ export class PacketCaptureService {
             attackType !== 'normal';
           
           // Calculate confidence based on status and attack type
-          const { CONFIDENCE } = PACKET_CAPTURE_CONFIG;
-          let confidence: number = CONFIDENCE.DEFAULT;
+          // Critical status = high confidence, specific attack types = higher confidence
+          let confidence = 0.5; // Default medium confidence
           if (data.status === 'critical') {
-            confidence = CONFIDENCE.CRITICAL_BASE;
+            confidence = 0.85; // High confidence for critical
           } else if (data.status === 'medium') {
-            confidence = CONFIDENCE.MEDIUM_BASE;
+            confidence = 0.65; // Medium-high confidence
           }
           
           // Boost confidence for specific attack types
           if (attackType === 'ddos' || attackType === 'dos' || attackType === 'ping_flood') {
-            confidence = Math.min(CONFIDENCE.MAX, confidence + CONFIDENCE.DDoS_BOOST);
+            confidence = Math.min(0.95, confidence + 0.1);
           } else if (attackType === 'port_scan' || attackType === 'ping_sweep') {
-            confidence = Math.min(CONFIDENCE.PORT_SCAN_MAX, confidence + CONFIDENCE.PORT_SCAN_BOOST);
+            confidence = Math.min(0.90, confidence + 0.05);
           }
           
-          const finalConfidence: number = confidence;
+          const finalConfidence = confidence;
           
           // Save packet with rule-based results (formatted as ML)
           const packetWithResults = {
@@ -716,22 +698,10 @@ export class PacketCaptureService {
           });
           
           // Auto-block malicious IPs (queued, non-blocking)
-          // CRITICAL: Always block the SOURCE IP (attacker), never the destination IP
-          if (isMalicious && finalConfidence > PACKET_CAPTURE_CONFIG.CONFIDENCE.AUTO_BLOCK_THRESHOLD && !isLocalIPFn(data.start_ip)) {
-            // Verify we're blocking the attacker's IP, not the victim's IP
-            const attackerIP = data.start_ip; // Source IP = attacker
-            const victimIP = data.end_ip; // Destination IP = victim (our server)
-            
-            // Safety check: Never block if source and destination are the same
-            if (attackerIP === victimIP) {
-              console.warn(`[PACKET] ⚠ WARNING: Source and destination IP are the same: ${attackerIP} - skipping block`);
-              return;
-            }
-            
+          if (isMalicious && finalConfidence > 0.6 && !isLocalIPFn(data.start_ip)) {
             try {
               const { autoBan } = await import('./policy');
-              console.log(`[PACKET] 🔒 Blocking ATTACKER IP: ${attackerIP} (attack: ${attackType}, victim: ${victimIP})`);
-              const banResult = await autoBan(attackerIP, `IDS:${attackType} (${Math.round(finalConfidence * 100)}%)`).catch(() => null);
+              const banResult = await autoBan(data.start_ip, `IDS:${attackType} (${Math.round(finalConfidence * 100)}%)`).catch(() => null);
               
               if (banResult) {
                 console.log(`[PACKET] ✓ Queued auto-block for IP: ${data.start_ip}`);
@@ -762,7 +732,7 @@ export class PacketCaptureService {
           }
           
           // Emit alert for malicious detection (WORKER THREAD 5)
-          if (isMalicious && finalConfidence > PACKET_CAPTURE_CONFIG.CONFIDENCE.ALERT_THRESHOLD) {
+          if (isMalicious && finalConfidence > 0.3) {
             const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
             sendIntrusionAlertWorker(userId, {
               type: 'intrusion',
@@ -778,7 +748,7 @@ export class PacketCaptureService {
           }
         }).catch((err) => {
           // Job queue handles retries - just log occasionally
-          if (Math.random() < PACKET_CAPTURE_CONFIG.LOGGING.JOB_FAILURE_LOG_PROBABILITY) {
+          if (Math.random() < 0.01) {
             console.warn('[PACKET] Rule-based detection job failed:', (err as Error)?.message);
           }
         });
@@ -799,29 +769,26 @@ export class PacketCaptureService {
         const sourceIP = packetData.start_ip;
         const now = Date.now();
         
-        // CRITICAL: Never detect attacks from our own IP addresses
-        // Skip detection entirely if source IP is localhost/self
-        if (this.isLocalIP(sourceIP)) {
-          // Silently skip - this is our own traffic, not an attack
-          return;
-        }
-        
         // Detect attack type FIRST to allow different attack types to be detected
         const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
         
-        // THROTTLE: Check if alert should be throttled (but still emit notification)
+        // THROTTLE: Only process critical alerts once per IP per 2 seconds (reduced from 5)
         // BUT: Allow different attack types to be detected (track by IP+attackType)
         const throttleKey = `${sourceIP}:${criticalAttackType}`;
         const ALERT_THROTTLE_MS = 2000; // 2 seconds between alerts for same IP+attackType
         
-        // Check if throttled (but we'll still emit the notification)
-        const isThrottled = isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS);
+        // Use global throttle manager (persists across capture restarts)
+        if (isAlertThrottled(sourceIP, criticalAttackType, ALERT_THROTTLE_MS)) {
+          // Skip - already alerted recently for this IP+attackType combination
+          // But allow different attack types from same IP
+          console.log(`[PACKET] ⏭ Skipping throttled alert for ${throttleKey}`);
+          return; // Don't process this critical packet (already handled)
+        }
         
         // Log critical packet detection with throttle info
-        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType}, throttled: ${isThrottled})`);
+        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType}, throttleKey: ${throttleKey})`);
         
         // WORKER THREAD 5: Notification worker handles alert emission (async)
-        // CRITICAL: Always emit notification, even if throttled (user needs to see all attacks)
         const emitCriticalAlert = async (autoBlocked: boolean = false) => {
           const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
           const alertData = {
@@ -833,24 +800,15 @@ export class PacketCaptureService {
             protocol: packetData.protocol,
             description: `Critical traffic detected: ${criticalAttackType} from ${sourceIP} (${packetData.frequency} packets/min)`,
             timestamp: new Date().toISOString(),
-            autoBlocked: autoBlocked,
-            isRepeat: isThrottled // Flag to indicate this is a repeat alert
+            autoBlocked: autoBlocked
           };
-          console.log(`[PACKET] 📢 Emitting critical alert for ${sourceIP}:`, criticalAttackType, isThrottled ? '(repeat)' : '(new)');
+          console.log(`[PACKET] 📢 Queuing critical alert for ${sourceIP}:`, criticalAttackType);
           await sendIntrusionAlertWorker(this.userId, alertData).catch(() => {});
           markAlertEmitted(sourceIP, criticalAttackType);
         };
         
         // Emit alert immediately (before auto-ban) - async, non-blocking
-        // ALWAYS emit notification, even if throttled (user needs to see all attacks)
-        // CRITICAL: Emit notification BEFORE checking throttle, so it always gets sent
-        await emitCriticalAlert(false).catch(() => {});
-        
-        // If throttled, skip blocking but notification was already sent
-        if (isThrottled) {
-          console.log(`[PACKET] ⏭ Alert throttled for ${throttleKey} - notification sent but skipping duplicate block`);
-          return; // Skip blocking if throttled, but notification was already sent
-        }
+        emitCriticalAlert(false).catch(() => {});
         
         // Then try to auto-ban (non-blocking)
         // CRITICAL: Check if already blocked or blocking in progress to prevent duplicate operations
@@ -884,32 +842,12 @@ export class PacketCaptureService {
           
           // Import policy and block
           return import('./policy').then(({ autoBan }) => {
-            // CRITICAL: Never auto-ban local IP addresses or destination IPs
-            // Always block the SOURCE IP (attacker), never the destination IP (victim)
+            // Never auto-ban local IP addresses
             if (this.isLocalIP(sourceIP)) {
-              console.log(`[PACKET] 🛡️ Skipping block for local IP: ${sourceIP}`);
               clearBlockingInProgress(sourceIP);
               return null;
             }
             
-            // CRITICAL: Verify we're blocking the SOURCE IP (attacker), not destination
-            // For DoS/DDoS: sourceIP = attacker, destIP = victim (our server)
-            // We MUST block sourceIP, never destIP
-            const destIP = packetData.end_ip;
-            if (sourceIP === destIP) {
-              console.warn(`[PACKET] ⚠ WARNING: Source and destination IP are the same: ${sourceIP} - skipping block`);
-              clearBlockingInProgress(sourceIP);
-              return null;
-            }
-            
-            // Additional safety: Never block if sourceIP looks like our own server
-            if (this.isLocalIP(destIP) && sourceIP === destIP) {
-              console.warn(`[PACKET] ⚠ WARNING: Attempted to block local destination IP: ${sourceIP} - skipping`);
-              clearBlockingInProgress(sourceIP);
-              return null;
-            }
-            
-            console.log(`[PACKET] 🔒 Blocking ATTACKER IP: ${sourceIP} (attack: ${criticalAttackType}, victim: ${destIP})`);
             return autoBan(sourceIP, `ids:critical:${criticalAttackType}`);
           });
         }).then(async (banResult) => {
@@ -918,9 +856,7 @@ export class PacketCaptureService {
           }
           
           try {
-            console.log(`[PACKET] ✓ Auto-banned ATTACKER IP: ${sourceIP} for attack type: ${criticalAttackType}`);
-            console.log(`[PACKET] 📍 Attack details: Attacker=${sourceIP}, Victim=${packetData.end_ip}, Type=${criticalAttackType}`);
-            console.log(`[PACKET] ✅ Only blocking SOURCE IP (attacker), NOT destination IP (victim)`);
+            console.log(`[PACKET] ✓ Auto-banned critical IP: ${sourceIP} for attack type: ${criticalAttackType}`);
             
             // Mark this IP as blocked for this attack type (prevent re-blocking for same attack type)
             markBlockedForAttackType(sourceIP, criticalAttackType);
@@ -1062,7 +998,7 @@ export class PacketCaptureService {
   }
 
   private determineStatus(packet: { protocol: string; frequency: number; start_ip: string; end_ip: string; start_bytes: number; end_bytes: number }): 'critical' | 'medium' | 'normal' {
-    const { THRESHOLDS, PACKET_SIZE } = PACKET_CAPTURE_CONFIG;
+    // Very conservative thresholds based on realistic network behavior
 
     const isPrivateIP = (ip: string) => {
       return ip.startsWith('192.168.') || ip.startsWith('10.') ||
@@ -1084,79 +1020,79 @@ export class PacketCaptureService {
 
     // Analyze packet size for anomaly detection
     const totalBytes = packet.start_bytes + packet.end_bytes;
-    const isLargePacket = totalBytes > PACKET_SIZE.LARGE_THRESHOLD;
-    const isSmallPacket = totalBytes < PACKET_SIZE.SMALL_THRESHOLD;
+    const isLargePacket = totalBytes > 1500; // Larger than typical MTU
+    const isSmallPacket = totalBytes < 64;   // Smaller than minimum Ethernet frame
 
-    // Internal network traffic
+    // Internal network traffic - LOWERED thresholds for better attack detection
     if (isPrivateIP(packet.start_ip) && isPrivateIP(packet.end_ip)) {
-      const t = THRESHOLDS.INTERNAL;
       // Critical: High frequency that indicates attack patterns
-      if (packet.protocol === 'TCP' && packet.frequency > t.TCP_CRITICAL) return 'critical';
-      if (packet.protocol === 'UDP' && packet.frequency > t.UDP_CRITICAL) return 'critical';
-      if (packet.protocol === 'ICMP' && packet.frequency > t.ICMP_CRITICAL) return 'critical';
+      // SYN flood detection: Lower threshold for TCP (many connections = attack)
+      if (packet.protocol === 'TCP' && packet.frequency > 30) return 'critical'; // Lowered from 50 for SYN flood
+      if (packet.protocol === 'UDP' && packet.frequency > 100) return 'critical';
+      if (packet.protocol === 'ICMP' && packet.frequency > 20) return 'critical'; // Lowered from 30
 
       // Medium: Moderate frequency with suspicious characteristics
-      if (packet.protocol === 'TCP' && packet.frequency > t.TCP_MEDIUM && (isSmallPacket || isLargePacket)) return 'medium';
-      if (packet.protocol === 'UDP' && packet.frequency > t.UDP_MEDIUM && (isSmallPacket || isLargePacket)) return 'medium';
-      if (packet.protocol === 'ICMP' && packet.frequency > t.ICMP_MEDIUM) return 'medium';
+      if (packet.protocol === 'TCP' && packet.frequency > 15 && (isSmallPacket || isLargePacket)) return 'medium'; // Lowered from 20
+      if (packet.protocol === 'UDP' && packet.frequency > 40 && (isSmallPacket || isLargePacket)) return 'medium';
+      if (packet.protocol === 'ICMP' && packet.frequency > 10) return 'medium';
 
       return 'normal';
     }
 
-    // External traffic - more sensitive for attack detection
+    // External traffic - MUCH more sensitive for attack detection
     if (isBroadcast(packet.start_ip) || isBroadcast(packet.end_ip)) {
-      if (packet.frequency > THRESHOLDS.BROADCAST_MEDIUM) return 'medium';
+      // Broadcast traffic - flag high frequency (lowered from 100)
+      if (packet.frequency > 20) return 'medium';
       return 'normal';
     }
 
-    // Critical: High frequency external traffic (likely DDoS or scan)
-    const t = THRESHOLDS.EXTERNAL;
-    if (packet.protocol === 'TCP' && packet.frequency > t.TCP_CRITICAL) return 'critical';
-    if (packet.protocol === 'UDP' && packet.frequency > t.UDP_CRITICAL) return 'critical';
-    if (packet.protocol === 'ICMP' && packet.frequency > t.ICMP_CRITICAL) return 'critical';
+    // Critical: High frequency external traffic (likely DDoS or scan) - LOWERED thresholds
+    if (packet.protocol === 'TCP' && packet.frequency > 20) return 'critical'; // Lowered from 30 for SYN flood
+    if (packet.protocol === 'UDP' && packet.frequency > 50) return 'critical';
+    if (packet.protocol === 'ICMP' && packet.frequency > 15) return 'critical'; // Lowered from 20
 
-    // Medium: Moderate frequency with suspicious patterns
-    if (packet.protocol === 'TCP' && packet.frequency > t.TCP_MEDIUM && isSmallPacket) return 'medium';
-    if (packet.protocol === 'UDP' && packet.frequency > t.UDP_MEDIUM) return 'medium';
-    if (packet.protocol === 'ICMP' && packet.frequency > t.ICMP_MEDIUM) return 'medium';
+    // Medium: Moderate frequency with suspicious patterns - LOWERED thresholds
+    if (packet.protocol === 'TCP' && packet.frequency > 10 && isSmallPacket) return 'medium';
+    if (packet.protocol === 'UDP' && packet.frequency > 20) return 'medium';
+    if (packet.protocol === 'ICMP' && packet.frequency > 5) return 'medium';
 
     // Port scan detection - many small TCP packets
-    if (packet.protocol === 'TCP' && packet.frequency > THRESHOLDS.PORT_SCAN_FREQUENCY && totalBytes < THRESHOLDS.PORT_SCAN_MAX_SIZE) {
-      return 'medium';
-    }
+    if (packet.protocol === 'TCP' && packet.frequency > 200 && totalBytes < 100) return 'medium';
 
     return 'normal';
   }
 
   private detectAttackTypeFromPattern(packetData: any): string {
-    // Pattern-based attack detection
+    // Pattern-based attack detection as fallback
     const protocol = packetData.protocol?.toUpperCase() || '';
     const frequency = packetData.frequency || 0;
     const packetSize = packetData.start_bytes || 0;
     const status = packetData.status || 'normal';
-    const { ATTACK_DETECTION, PACKET_SIZE } = PACKET_CAPTURE_CONFIG;
     
     // PRIORITY 1: Distinguish SYN flood (DoS) from port scan
+    // SYN floods = VERY high frequency small TCP packets (hundreds per minute)
+    // Port scans = moderate frequency small TCP packets (tens per minute)
     if (protocol === 'TCP') {
-      // SYN Flood / DoS: Very high frequency small packets
-      if (frequency > ATTACK_DETECTION.DOS_FREQUENCY_THRESHOLD && packetSize < PACKET_SIZE.SYN_FLOOD_MAX_SIZE) {
-        return frequency > ATTACK_DETECTION.DDOS_FREQUENCY_THRESHOLD ? 'ddos' : 'dos';
+      // SYN Flood / DoS: Very high frequency small packets (flooding, not scanning)
+      // Threshold: > 100 packets/min with small packets = DoS, not port scan
+      if (frequency > 100 && packetSize < 150) {
+        // This is a flood attack, not a scan
+        return frequency > 300 ? 'ddos' : 'dos';
       }
       
-      // Port scan: Moderate frequency + small packets
-      if (frequency >= ATTACK_DETECTION.PORT_SCAN_FREQUENCY_MIN && 
-          frequency <= ATTACK_DETECTION.PORT_SCAN_FREQUENCY_MAX && 
-          packetSize < PACKET_SIZE.SYN_FLOOD_MAX_SIZE) {
+      // Port scan: Moderate frequency + small packets (scanning behavior)
+      // Lower threshold to catch stealth scans
+      if (frequency >= 10 && frequency <= 100 && packetSize < 150) {
         return 'port_scan';
       }
       
-      // High frequency large packets = DoS/DDoS
-      if (frequency > 50 && packetSize >= PACKET_SIZE.SYN_FLOOD_MAX_SIZE) {
+      // High frequency large packets = DoS/DDoS (not port scan)
+      if (frequency > 50 && packetSize >= 150) {
         return frequency > 200 ? 'ddos' : 'dos';
       }
       
-      // Very high frequency regardless of size = DDoS
-      if (frequency > ATTACK_DETECTION.DDOS_FREQUENCY_THRESHOLD) {
+      // Very high frequency regardless of size = DoS
+      if (frequency > 200) {
         return 'ddos';
       }
     }
@@ -1164,31 +1100,32 @@ export class PacketCaptureService {
     // PRIORITY 2: ICMP attacks
     if (protocol === 'ICMP') {
       if (status === 'critical') {
-        if (frequency > ATTACK_DETECTION.PING_FLOOD_THRESHOLD) {
-          return 'ping_flood';
-        } else if (frequency > ATTACK_DETECTION.PING_SWEEP_THRESHOLD) {
+        if (frequency > 30) {
+          return 'ping_flood'; // More specific than ping_sweep
+        } else if (frequency > 20) {
           return 'ping_sweep';
         }
-        return 'icmp_flood';
+        return 'icmp_flood'; // Default for critical ICMP
       }
-      if (frequency > ATTACK_DETECTION.PING_SWEEP_THRESHOLD) {
-        return frequency > ATTACK_DETECTION.PING_FLOOD_THRESHOLD ? 'ping_flood' : 'ping_sweep';
+      // For non-critical
+      if (frequency > 20) {
+        return frequency > 30 ? 'ping_flood' : 'ping_sweep';
       }
     }
     
     // PRIORITY 3: UDP attacks
     if (protocol === 'UDP') {
-      if (frequency > ATTACK_DETECTION.DOS_FREQUENCY_THRESHOLD) {
+      if (frequency > 100) {
         return 'dos';
       }
-      // UDP port scan
-      if (frequency > ATTACK_DETECTION.PING_SWEEP_THRESHOLD && packetSize < 100) {
+      // UDP port scan (less common but possible)
+      if (frequency > 20 && packetSize < 100) {
         return 'port_scan';
       }
     }
     
-    // PRIORITY 4: Generic probe detection
-    if (protocol === 'TCP' && frequency > ATTACK_DETECTION.PING_SWEEP_THRESHOLD && status === 'critical') {
+    // PRIORITY 4: Generic probe detection (for TCP that didn't match above)
+    if (protocol === 'TCP' && frequency > 20 && status === 'critical') {
       return 'probe';
     }
     

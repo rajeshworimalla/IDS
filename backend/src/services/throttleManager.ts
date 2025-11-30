@@ -26,23 +26,25 @@ const emittedAlerts: Map<string, Set<string>> = new Map();
 
 /**
  * Check if an alert should be throttled for a given IP and attack type
- * @returns true if throttled (should skip blocking), false if allowed
- * NOTE: This throttles BLOCKING operations, not notifications
- * Notifications are always emitted so users see all attacks
+ * @returns true if throttled (should skip), false if allowed
+ * NOTE: Always returns false for the FIRST alert of an attack type (ensures at least one alert is emitted)
  */
 export function isAlertThrottled(ip: string, attackType: string, throttleMs: number = 2000): boolean {
+  // CRITICAL: Always emit the FIRST alert for an attack type, even if throttled
+  // This ensures users always see popup notifications
+  if (!hasEmittedAlertForAttackType(ip, attackType)) {
+    return false; // Not throttled - this is the first alert for this attack type
+  }
+  
   const throttleKey = `${ip}:${attackType}`;
   const lastAlertTime = alertThrottle.get(throttleKey) || 0;
   const timeSinceLastAlert = Date.now() - lastAlertTime;
   
-  // If within throttle window, throttle blocking (but notifications still sent)
-  // CRITICAL: Only throttle if we've actually sent an alert before (lastAlertTime > 0)
-  // If lastAlertTime is 0, this is a new alert and should not be throttled
-  if (timeSinceLastAlert < throttleMs && lastAlertTime > 0) {
-    return true; // Throttled (skip blocking, but notification will still be sent)
+  if (timeSinceLastAlert < throttleMs) {
+    return true; // Throttled
   }
   
-  // Update throttle timestamp (even if throttled, update it for next check)
+  // Update throttle
   alertThrottle.set(throttleKey, Date.now());
   
   // Clean old entries (older than 1 minute)
@@ -106,14 +108,6 @@ export function clearThrottleForIP(ip: string): void {
   // Clear emitted alerts so new alerts can be shown for this IP
   emittedAlerts.delete(ip);
   console.log(`[THROTTLE] 🧹 Cleared emitted alerts for ${ip} (new alerts will be shown)`);
-  
-  // CRITICAL: Ensure throttle is completely cleared so next attack shows notification
-  // Double-check that all throttle entries are deleted
-  const remainingKeys = Array.from(alertThrottle.keys()).filter(key => key.startsWith(`${ip}:`));
-  if (remainingKeys.length > 0) {
-    remainingKeys.forEach(key => alertThrottle.delete(key));
-    console.log(`[THROTTLE] 🧹 Cleared ${remainingKeys.length} additional throttle entries for ${ip}`);
-  }
   
   // Clean up expired grace periods
   const now = Date.now();

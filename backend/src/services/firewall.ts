@@ -132,17 +132,6 @@ async function flushConntrack(ip: string, v6 = false) {
 
 async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
   if (!bins.ipset) throw new Error('ipset not available');
-  
-  // CRITICAL: Validate IP before adding to blocklist
-  if (!ip || ip.trim() === '') {
-    throw new Error('Cannot add empty IP to blocklist');
-  }
-  
-  // Safety: Never block reserved/localhost addresses
-  if (ip.startsWith('127.') || ip === '0.0.0.0' || ip === '255.255.255.255' || ip === '::1') {
-    throw new Error(`Cannot block reserved IP address: ${ip}`);
-  }
-  
   const setName = v6 ? 'ids6_blocklist' : 'ids_blocklist';
   const args = ['-exist', 'add', setName, ip];
   if (ttlSeconds && ttlSeconds > 0) {
@@ -151,10 +140,7 @@ async function ipsetAdd(ip: string, v6 = false, ttlSeconds?: number) {
   
   // PERFORMANCE: Just add the IP - skip verification to reduce latency
   // ipset add is atomic and reliable, verification adds 1-2 seconds of delay
-  // This adds ONLY the specific IP to the blocklist (incremental update)
-  console.log(`[FIREWALL] Adding SPECIFIC IP to blocklist: ${ip} (set: ${setName})`);
   await run(bins.ipset, args);
-  console.log(`[FIREWALL] ✓ IP ${ip} added to blocklist ${setName}`);
 }
 
 async function ipsetDel(ip: string, v6 = false) {
