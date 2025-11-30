@@ -411,6 +411,11 @@ export class PacketCaptureService {
             }
             
             const predictions = response.data;
+            console.log(`[PACKET] ML prediction for ${packetData.start_ip}:`, {
+              binary: predictions?.binary_prediction,
+              attack_type: predictions?.attack_type,
+              confidence: predictions?.confidence?.binary || predictions?.confidence
+            });
             savePromise.then(async (savedPacket: any) => {
               try {
                 if (!savedPacket) return;
@@ -509,9 +514,21 @@ export class PacketCaptureService {
             console.warn('[PACKET] Error processing ML response:', err);
           }
         }).catch((err) => {
-          // ML service unavailable, continue silently but log
-          if (err && (err as any).code !== 'ECONNREFUSED') {
-            console.warn('[PACKET] ML prediction error:', (err as any)?.message || err);
+          // ML service unavailable - log but continue
+          const errorCode = (err as any)?.code;
+          const errorMessage = (err as any)?.message || String(err);
+          
+          if (errorCode === 'ECONNREFUSED') {
+            console.warn(`[PACKET] ⚠ ML service not available (connection refused) - using pattern detection only`);
+          } else if (errorCode === 'ETIMEDOUT') {
+            console.warn(`[PACKET] ⚠ ML service timeout - using pattern detection only`);
+          } else {
+            console.warn(`[PACKET] ⚠ ML prediction error: ${errorMessage}`);
+          }
+          
+          // For critical packets, still emit alert even if ML fails
+          if (packetData.status === 'critical') {
+            console.log(`[PACKET] 🚨 Critical packet detected but ML unavailable - alert already emitted`);
           }
         });
       }
@@ -534,38 +551,63 @@ export class PacketCaptureService {
       });
 
       // Auto-ban on critical events with notification (non-blocking)
+      // CRITICAL: Always emit alerts for critical packets, even if ML doesn't respond
       if (packetData.status === 'critical') {
+        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${packetData.start_ip} (freq: ${packetData.frequency})`);
+        
+        // Detect attack type from pattern for critical packets
+        const criticalAttackType = this.detectAttackTypeFromPattern(packetData);
+        
+        // Emit alert IMMEDIATELY (don't wait for auto-ban)
+        const emitCriticalAlert = (autoBlocked: boolean = false) => {
+          try {
+            const io = getIO();
+            if (io) {
+              const alertData = {
+                type: 'intrusion',
+                severity: 'critical',
+                ip: packetData.start_ip,
+                attackType: criticalAttackType,
+                confidence: 0.85, // High confidence for critical status
+                protocol: packetData.protocol,
+                description: `Critical traffic detected: ${criticalAttackType} from ${packetData.start_ip} (${packetData.frequency} packets/min)`,
+                timestamp: new Date().toISOString(),
+                autoBlocked: autoBlocked
+              };
+              console.log(`[PACKET] 📢 Emitting critical alert:`, alertData);
+              io.to(`user_${this.userId}`).emit('intrusion-detected', alertData);
+              console.log(`[PACKET] ✓ Critical alert emitted to user_${this.userId}`);
+            } else {
+              console.warn('[PACKET] ⚠ Socket.IO not available for critical alert');
+            }
+          } catch (emitErr) {
+            console.error('[PACKET] ❌ Error emitting critical alert:', emitErr);
+          }
+        };
+        
+        // Emit alert immediately (before auto-ban)
+        emitCriticalAlert(false);
+        
+        // Then try to auto-ban (non-blocking)
         import('./policy').then(({ autoBan }) => {
           // Never auto-ban local IP addresses
           if (!this.isLocalIP(packetData.start_ip)) {
-            autoBan(packetData.start_ip, 'ids:critical').then(() => {
-              try {
-                // Emit critical alert notification
-                const io = getIO();
-                if (io) {
-                  io.to(`user_${this.userId}`).emit('intrusion-detected', {
-                    type: 'intrusion',
-                    severity: 'critical',
-                    ip: packetData.start_ip,
-                    attackType: 'critical_traffic',
-                    confidence: 0.9,
-                    protocol: packetData.protocol,
-                    description: `Critical traffic detected from ${packetData.start_ip}. IP automatically blocked.`,
-                    timestamp: new Date().toISOString(),
-                    autoBlocked: true
-                  });
-                }
-              } catch (emitErr) {
-                console.warn('[PACKET] Error emitting critical alert:', emitErr);
-              }
+            autoBan(packetData.start_ip, `ids:critical:${criticalAttackType}`).then(() => {
+              console.log(`[PACKET] ✓ Auto-banned critical IP: ${packetData.start_ip}`);
+              // Emit another alert with autoBlocked=true
+              emitCriticalAlert(true);
             }).catch((err) => {
               console.warn('[PACKET] Error auto-banning critical IP:', err);
+              // Alert already emitted, so we're good
             });
           } else {
-            console.log(`[PACKET] Skipping auto-ban for local IP: ${packetData.start_ip}`);
+            console.log(`[PACKET] ⚠ Skipping auto-ban for local IP: ${packetData.start_ip}`);
+            // Still emit alert for local IPs (for visibility, but don't block)
+            emitCriticalAlert(false);
           }
         }).catch((err) => {
-          console.warn('[PACKET] Error importing policy:', err);
+          console.warn('[PACKET] Error importing policy module:', err);
+          // Alert already emitted, so we're good
         });
       }
     } catch (err) {
