@@ -419,14 +419,32 @@ export class PacketCaptureService {
                 let attackType = predictions?.attack_type || 'unknown';
                 const confidence = predictions?.confidence?.binary || predictions?.confidence || 0;
                 
+                // If status is critical, it's definitely an attack - use pattern detection
                 // Enhanced attack type detection based on packet patterns (fallback if ML doesn't classify)
-                if (attackType === 'unknown' || attackType === 'normal') {
-                  attackType = this.detectAttackTypeFromPattern(packetData);
+                if (packetData.status === 'critical' || attackType === 'unknown' || attackType === 'normal') {
+                  const patternType = this.detectAttackTypeFromPattern(packetData);
+                  // Override with pattern detection if ML didn't classify or status is critical
+                  if (packetData.status === 'critical' || attackType === 'normal' || attackType === 'unknown') {
+                    attackType = patternType;
+                    // If pattern detection found an attack, mark as malicious
+                    if (patternType !== 'suspicious_traffic' && !isMalicious) {
+                      // Update isMalicious based on pattern detection for critical packets
+                      // We'll use a lower confidence for pattern-detected attacks
+                    }
+                  }
                 }
                 
-                savedPacket.is_malicious = isMalicious;
+                // If status is critical or pattern detection found an attack, mark as malicious
+                const shouldBeMalicious = isMalicious || 
+                  (packetData.status === 'critical' && attackType !== 'suspicious_traffic' && attackType !== 'normal');
+                
+                savedPacket.is_malicious = shouldBeMalicious;
                 savedPacket.attack_type = attackType;
-                savedPacket.confidence = confidence;
+                // Use higher confidence for critical packets detected by pattern
+                const finalConfidence = (packetData.status === 'critical' && !isMalicious) 
+                  ? Math.max(confidence, 0.7) // Minimum 70% for critical pattern-detected attacks
+                  : confidence;
+                savedPacket.confidence = finalConfidence;
                 await savedPacket.save().catch(() => {}); // Non-blocking update
                 
                 // Auto-block malicious IPs with high confidence (lowered threshold for faster response)
@@ -467,10 +485,10 @@ export class PacketCaptureService {
                     if (io) {
                       io.to(`user_${this.userId}`).emit('intrusion-detected', {
                         type: 'intrusion',
-                        severity: confidence > 0.8 ? 'critical' : 'high',
+                        severity: packetData.status === 'critical' ? 'critical' : (finalConfidence > 0.8 ? 'critical' : 'high'),
                         ip: packetData.start_ip,
                         attackType: attackType,
-                        confidence: confidence,
+                        confidence: finalConfidence,
                         protocol: packetData.protocol,
                         description: `Suspicious activity detected: ${attackType} from ${packetData.start_ip}`,
                         timestamp: new Date().toISOString(),
@@ -726,7 +744,45 @@ export class PacketCaptureService {
     const protocol = packetData.protocol?.toUpperCase() || '';
     const frequency = packetData.frequency || 0;
     const packetSize = packetData.start_bytes || 0;
+    const status = packetData.status || 'normal';
     
+    // If status is critical, we know it's an attack - classify it
+    if (status === 'critical') {
+      // High frequency ICMP = Ping flood (ICMP flood attack)
+      if (protocol === 'ICMP') {
+        if (frequency > 30) {
+          return 'ping_flood'; // More specific than ping_sweep
+        } else if (frequency > 20) {
+          return 'ping_sweep';
+        }
+        return 'icmp_flood'; // Default for critical ICMP
+      }
+      
+      // High frequency TCP = DoS/DDoS
+      if (protocol === 'TCP' && frequency > 50) {
+        return frequency > 200 ? 'ddos' : 'dos';
+      }
+      
+      // High frequency UDP = DoS
+      if (protocol === 'UDP' && frequency > 100) {
+        return 'dos';
+      }
+      
+      // Many small packets = Port scan
+      if (frequency > 30 && packetSize < 100) {
+        return 'port_scan';
+      }
+      
+      // Many packets to multiple ports = Probe
+      if (frequency > 20 && protocol === 'TCP') {
+        return 'probe';
+      }
+      
+      // Default for critical status
+      return 'critical_traffic';
+    }
+    
+    // For non-critical, use lower thresholds
     // High frequency TCP = DoS/DDoS
     if (protocol === 'TCP' && frequency > 50) {
       return frequency > 200 ? 'ddos' : 'dos';
@@ -739,7 +795,7 @@ export class PacketCaptureService {
     
     // High frequency ICMP = Ping flood/sweep
     if (protocol === 'ICMP' && frequency > 20) {
-      return 'ping_sweep';
+      return frequency > 30 ? 'ping_flood' : 'ping_sweep';
     }
     
     // Many small packets = Port scan
