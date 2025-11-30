@@ -88,7 +88,8 @@ export async function listActiveTempBans(): Promise<TempBanRecord[]> {
   return results.sort((a, b) => b.blockedAt - a.blockedAt);
 }
 
-export async function autoBan(ip: string, reason: string): Promise<TempBanRecord> {
+export async function autoBan(ip: string, reason: string): Promise<TempBanRecord | null> {
   // This now uses the job queue internally (non-blocking)
+  // Returns null if IP is already blocked (prevents duplicates)
   return enforceTempBan(ip, reason);
 }
