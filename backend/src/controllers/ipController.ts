@@ -348,6 +348,20 @@ export const unblockIP = async (req: Request, res: Response) => {
       // Continue - not all IPs are in Redis
     }
 
+    // Clear throttle entries for this IP in packet capture service
+    // This allows new alerts to be emitted if the IP attacks again
+    try {
+      const { getPacketCapture } = await import('../socket');
+      const captureService = getPacketCapture(req.user._id.toString());
+      if (captureService) {
+        captureService.clearThrottleForIP(ip);
+        console.log(`[UNBLOCK] Cleared throttle entries for ${ip}`);
+      }
+    } catch (throttleErr) {
+      console.warn(`[UNBLOCK] Could not clear throttle (packet capture may not be active):`, throttleErr);
+      // Continue - not critical
+    }
+
     // Remove from firewall
     const result = await firewall.unblockIP(ip);
     

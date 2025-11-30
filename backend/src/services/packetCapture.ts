@@ -840,16 +840,17 @@ export class PacketCaptureService {
         this.alertThrottle.set(throttleKey, now);
         
         // Clean old throttle entries (older than 1 minute)
+        // NOTE: Keys are in format "IP:attackType", not just "IP"
         if (this.alertThrottle.size > 100) {
-          for (const [ip, alertTime] of this.alertThrottle.entries()) {
+          for (const [throttleKey, alertTime] of this.alertThrottle.entries()) {
             if (now - alertTime > 60000) {
-              this.alertThrottle.delete(ip);
+              this.alertThrottle.delete(throttleKey);
             }
           }
         }
         
-        // Log critical packet detection
-        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType})`);
+        // Log critical packet detection with throttle info
+        console.log(`[PACKET] 🚨 CRITICAL packet detected: ${packetData.protocol} from ${sourceIP} (freq: ${packetData.frequency}, attack: ${criticalAttackType}, throttleKey: ${throttleKey})`);
         
         // Emit alert IMMEDIATELY (don't wait for auto-ban)
         // CRITICAL: Only emit once per IP per throttle period
@@ -1154,25 +1155,28 @@ export class PacketCaptureService {
     const packetSize = packetData.start_bytes || 0;
     const status = packetData.status || 'normal';
     
-    // PRIORITY 1: Port scan detection (check FIRST before DoS)
-    // Port scans = many small TCP packets (typically < 100 bytes)
-    // This is the most common attack type and should be detected first
+    // PRIORITY 1: Distinguish SYN flood (DoS) from port scan
+    // SYN floods = VERY high frequency small TCP packets (hundreds per minute)
+    // Port scans = moderate frequency small TCP packets (tens per minute)
     if (protocol === 'TCP') {
-      // Port scan: moderate-high frequency + small packets
-      if (frequency >= 10 && packetSize < 150) {
-        // Very high frequency small packets = aggressive port scan
-        if (frequency > 50 && packetSize < 100) {
-          return 'port_scan';
-        }
-        // Moderate frequency small packets = stealth port scan
-        if (frequency >= 10 && packetSize < 150) {
-          return 'port_scan';
-        }
+      // SYN Flood / DoS: Very high frequency small packets (flooding, not scanning)
+      // Threshold: > 100 packets/min with small packets = DoS, not port scan
+      if (frequency > 100 && packetSize < 150) {
+        // This is a flood attack, not a scan
+        return frequency > 300 ? 'ddos' : 'dos';
       }
+      
+      // Port scan: Moderate frequency + small packets (scanning behavior)
+      // Lower threshold to catch stealth scans
+      if (frequency >= 10 && frequency <= 100 && packetSize < 150) {
+        return 'port_scan';
+      }
+      
       // High frequency large packets = DoS/DDoS (not port scan)
       if (frequency > 50 && packetSize >= 150) {
         return frequency > 200 ? 'ddos' : 'dos';
       }
+      
       // Very high frequency regardless of size = DoS
       if (frequency > 200) {
         return 'ddos';
@@ -1276,6 +1280,28 @@ export class PacketCaptureService {
     };
 
     return commonPorts[port] || '';
+  }
+
+  /**
+   * Clear throttle entries for a specific IP address
+   * This is called when an IP is manually unblocked to allow new alerts
+   */
+  public clearThrottleForIP(ip: string): void {
+    // Remove all throttle entries for this IP (regardless of attack type)
+    const keysToDelete: string[] = [];
+    for (const throttleKey of this.alertThrottle.keys()) {
+      if (throttleKey.startsWith(`${ip}:`)) {
+        keysToDelete.push(throttleKey);
+      }
+    }
+    keysToDelete.forEach(key => this.alertThrottle.delete(key));
+    
+    // Also remove from blocking in progress
+    this.blockingInProgress.delete(ip);
+    
+    if (keysToDelete.length > 0) {
+      console.log(`[PACKET] 🧹 Cleared ${keysToDelete.length} throttle entries for ${ip}`);
+    }
   }
 
   private generateTestTraffic() {
