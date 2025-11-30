@@ -171,6 +171,9 @@ export class PacketCaptureService {
     
     // Initialize packet analysis worker thread
     this.initializeAnalysisWorker();
+    
+    // Initialize notification queue worker thread (dedicated thread for notifications)
+    this.initializeNotificationQueueWorker();
   }
   
   /**
@@ -185,6 +188,32 @@ export class PacketCaptureService {
     } catch (err: unknown) {
       console.warn('[PACKET] Failed to initialize analysis worker, using inline analysis:', (err as Error)?.message);
       this.analysisWorker = null;
+    }
+  }
+  
+  /**
+   * Initialize notification queue worker thread (dedicated thread for notifications)
+   */
+  private async initializeNotificationQueueWorker() {
+    try {
+      const { notificationQueue } = await import('../workers/notificationQueueWorker');
+      notificationQueue.start();
+      console.log('[PACKET] ✅ Initialized notification queue worker thread');
+    } catch (err: unknown) {
+      console.warn('[PACKET] Failed to initialize notification queue worker:', (err as Error)?.message);
+    }
+  }
+  
+  /**
+   * Stop notification queue worker thread
+   */
+  private async stopNotificationQueueWorker() {
+    try {
+      const { notificationQueue } = await import('../workers/notificationQueueWorker');
+      notificationQueue.stop();
+      console.log('[PACKET] ✅ Stopped notification queue worker thread');
+    } catch (err: unknown) {
+      console.warn('[PACKET] Failed to stop notification queue worker:', (err as Error)?.message);
     }
   }
 
@@ -462,6 +491,9 @@ export class PacketCaptureService {
         this.analysisWorker.stop();
         this.analysisWorker = null;
       }
+      
+      // Stop notification queue worker thread
+      this.stopNotificationQueueWorker().catch(() => {});
       
       // Close the capture device with a small delay to prevent UV_HANDLE_CLOSING error
       setTimeout(() => {
