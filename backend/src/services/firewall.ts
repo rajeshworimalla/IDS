@@ -240,10 +240,12 @@ export const firewall = {
           
           // Re-ensure OUTPUT rule is at top after adding IP (critical for domain blocking)
           try {
-            // Remove and re-insert OUTPUT rule at position 1 to ensure it's checked first
-            await tryRun(bins.iptables, ['-D', 'OUTPUT', '-m', 'set', '--match-set', 'ids_blocklist', 'dst', '-j', 'DROP']);
-            await run(bins.iptables, ['-I', 'OUTPUT', '1', '-m', 'set', '--match-set', 'ids_blocklist', 'dst', '-j', 'DROP']);
-            console.log(`[FIREWALL] ✓ Re-ensured OUTPUT rule at position 1 for domain blocking`);
+            if (bins.iptables) {
+              // Remove and re-insert OUTPUT rule at position 1 to ensure it's checked first
+              await tryRun(bins.iptables, ['-D', 'OUTPUT', '-m', 'set', '--match-set', 'ids_blocklist', 'dst', '-j', 'DROP']);
+              await run(bins.iptables, ['-I', 'OUTPUT', '1', '-m', 'set', '--match-set', 'ids_blocklist', 'dst', '-j', 'DROP']);
+              console.log(`[FIREWALL] ✓ Re-ensured OUTPUT rule at position 1 for domain blocking`);
+            }
           } catch (ruleErr) {
             console.warn(`[FIREWALL] Could not re-ensure OUTPUT rule:`, ruleErr);
           }
