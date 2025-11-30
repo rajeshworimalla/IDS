@@ -894,10 +894,19 @@ export class PacketCaptureService {
           const tempBanKey = `ids:tempban:${sourceIP}`;
           return redis.get(tempBanKey).catch(() => null);
         }).then((alreadyBlocked) => {
-          // Skip if already blocked or blocking in progress (use global throttle manager)
-          if (alreadyBlocked || isBlockingInProgress(sourceIP)) {
+          // CRITICAL: Check if already blocked for THIS SPECIFIC attack type
+          // Once blocked for an attack type, don't block again for the same attack type
+          if (isAlreadyBlockedForAttackType(sourceIP, criticalAttackType)) {
+            console.log(`[PACKET] ⏭ IP ${sourceIP} already blocked for attack type '${criticalAttackType}' - skipping duplicate block`);
+            return null; // Skip blocking - already blocked for this attack type
+          }
+          
+          // Skip if already blocked in Redis, blocking in progress, or in grace period
+          if (alreadyBlocked || isBlockingInProgress(sourceIP) || isInGracePeriod(sourceIP)) {
             if (alreadyBlocked) {
-              console.log(`[PACKET] ⚠ IP ${sourceIP} already blocked - skipping duplicate block`);
+              console.log(`[PACKET] ⚠ IP ${sourceIP} already blocked in Redis - skipping duplicate block`);
+            } else if (isInGracePeriod(sourceIP)) {
+              console.log(`[PACKET] 🛡️ IP ${sourceIP} in grace period (recently manually unblocked) - skipping auto-block`);
             } else {
               console.log(`[PACKET] ⚠ IP ${sourceIP} blocking in progress - skipping duplicate block`);
             }
@@ -923,7 +932,11 @@ export class PacketCaptureService {
           }
           
           try {
-            console.log(`[PACKET] ✓ Auto-banned critical IP: ${sourceIP}`);
+            console.log(`[PACKET] ✓ Auto-banned critical IP: ${sourceIP} for attack type: ${criticalAttackType}`);
+            
+            // Mark this IP as blocked for this attack type (prevent re-blocking for same attack type)
+            markBlockedForAttackType(sourceIP, criticalAttackType);
+            
             // Emit another alert with autoBlocked=true (only once)
             emitCriticalAlert(true);
             
