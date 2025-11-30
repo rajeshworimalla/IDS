@@ -192,8 +192,9 @@ fi
 echo -e "${GREEN}   ✓ Build successful${NC}"
 
 echo "   Starting backend..."
-# Try without sudo first (if capabilities are set), fallback to sudo
-npm start > "$LOG_FILE" 2>&1 &
+# CRITICAL: Backend MUST run with sudo for firewall rules to work
+# Even with capabilities, sudo ensures all firewall operations succeed
+sudo npm start > "$LOG_FILE" 2>&1 &
 BACKEND_PID=$!
 sleep 5
 
