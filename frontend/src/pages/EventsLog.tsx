@@ -146,7 +146,7 @@ const EventsLog: FC = () => {
           pendingPackets.push(packet);
         }
         
-        // Debounce updates: only update UI every 2 seconds during high traffic
+        // Debounce updates: only update UI every 5 seconds during high traffic to reduce lag
         if (packetUpdateTimeout) {
           clearTimeout(packetUpdateTimeout);
         }
@@ -156,8 +156,8 @@ const EventsLog: FC = () => {
             setPackets(prev => {
               try {
                 const updated = [...pendingPackets, ...prev];
-                // Limit displayed packets to last 200 for performance (reduced from 300)
-                const limited = updated.slice(0, 200);
+                // Limit displayed packets to last 100 for performance (further reduced to reduce lag)
+                const limited = updated.slice(0, 100);
                 // Clear pending packets
                 pendingPackets.length = 0;
                 return limited;
@@ -168,7 +168,7 @@ const EventsLog: FC = () => {
             });
           }
           packetUpdateTimeout = null;
-        }, 2000); // Update every 2 seconds instead of immediately
+        }, 5000); // Update every 5 seconds to reduce lag significantly
       } catch (err) {
         console.warn('[EventsLog] Error processing new packet:', err);
         // Don't crash, just log

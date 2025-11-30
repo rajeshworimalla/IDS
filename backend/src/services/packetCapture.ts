@@ -11,14 +11,14 @@ const packetFrequencies: { [key: string]: { count: number; timestamp: number } }
 // Industry standard: Limit UI updates but capture all packets to DB
 const socketEmissionQueue: any[] = [];
 let lastEmissionTime = 0;
-const EMISSION_INTERVAL = 1000; // Emit max once per 1000ms (1 packet/second to UI) - INCREASED for performance
+const EMISSION_INTERVAL = 2000; // Emit max once per 2000ms (0.5 packets/second to UI) - INCREASED to reduce lag
 const MAX_QUEUE_SIZE = 1; // Keep only most recent packet for UI updates - REDUCED for performance
 
 // Batch DB writes to reduce database load during attacks
 const dbWriteQueue: any[] = [];
 let lastDbWriteTime = 0;
-const DB_WRITE_INTERVAL = 2000; // Write to DB every 2 seconds (batched)
-const MAX_DB_BATCH_SIZE = 100; // Max packets per batch
+const DB_WRITE_INTERVAL = 1000; // Write to DB every 1 second (batched) - REDUCED for better persistence
+const MAX_DB_BATCH_SIZE = 50; // Max packets per batch - REDUCED to prevent DB overload
 
 // Process socket emission queue - optimized for performance (REDUCED frequency)
 setInterval(() => {
@@ -44,29 +44,34 @@ setInterval(() => {
 }, 500); // Check every 500ms (REDUCED frequency for performance)
 
 // Batch DB writes to reduce database load during attacks
+// FIX: More frequent writes to ensure data persistence
 setInterval(() => {
   const now = Date.now();
   if (dbWriteQueue.length > 0 && (now - lastDbWriteTime) >= DB_WRITE_INTERVAL) {
     try {
+      // Write in smaller batches more frequently
       const batch = dbWriteQueue.splice(0, MAX_DB_BATCH_SIZE);
       if (batch.length > 0) {
         // Use insertMany for better performance with timeout protection
         PacketModel.insertMany(batch, { ordered: false })
           .then(() => {
-            // Success - clear any error state
+            // Success - data is persisted
+            if (batch.length > 0) {
+              // Log occasionally to show progress
+              if (Math.random() < 0.1) { // Log 10% of batches
+                console.log(`[PACKET] ✓ Saved ${batch.length} packets to DB (${dbWriteQueue.length} remaining in queue)`);
+              }
+            }
           })
           .catch(err => {
-            // If batch write fails, try individual writes for critical packets only
-            console.warn('[PACKET] Batch DB write error, trying critical packets individually:', (err as Error)?.message);
-            const criticalBatch = batch.filter(p => p.status === 'critical');
-            if (criticalBatch.length > 0) {
-              // Try saving critical packets individually (non-blocking)
-              criticalBatch.forEach(packet => {
-                PacketModel.create(packet).catch(() => {
-                  // Ignore individual failures - already logged batch error
-                });
+            // If batch write fails, try individual writes (non-blocking)
+            console.warn('[PACKET] Batch DB write error, trying individual writes:', (err as Error)?.message);
+            // Try saving all packets individually as fallback
+            batch.forEach(packet => {
+              PacketModel.create(packet).catch(() => {
+                // Ignore individual failures - already logged batch error
               });
-            }
+            });
           });
         lastDbWriteTime = now;
       }
@@ -75,7 +80,7 @@ setInterval(() => {
       // Don't crash - just log and continue
     }
   }
-}, 1000); // Check every 1 second
+}, 500); // Check every 500ms for faster writes
 
 // Cleanup old frequency data every 5 minutes to prevent memory leaks
 setInterval(() => {
@@ -426,16 +431,16 @@ export class PacketCaptureService {
         end_bytes: packetData.end_bytes
       });
 
-      // PERFORMANCE OPTIMIZATION: Only save interesting packets during high traffic
-      // During attacks, skip saving normal packets to reduce DB load
-      // BUT: Always save critical packets immediately
-      const shouldSaveToDB = packetData.status !== 'normal' || dbWriteQueue.length < 50;
+      // FIX: Always save packets to DB, but use batching for performance
+      // This ensures data persists and doesn't disappear on refresh
+      const shouldSaveToDB = true; // Always save - data persistence is critical
       
       // Queue for batched DB write (non-blocking)
       if (shouldSaveToDB) {
         dbWriteQueue.push(packetData);
+        
         // Limit queue size to prevent memory issues
-        if (dbWriteQueue.length > 500) {
+        if (dbWriteQueue.length > 1000) {
           // Remove oldest normal packets first (never remove critical)
           const normalIndex = dbWriteQueue.findIndex(p => p.status === 'normal');
           if (normalIndex !== -1) {
@@ -451,33 +456,17 @@ export class PacketCaptureService {
           }
         }
         
-        // CRITICAL: If queue is getting large, force immediate write for critical packets
-        // BUT: Only do this if queue is really large to avoid overwhelming DB
-        if (packetData.status === 'critical' && dbWriteQueue.length > 300) {
-          try {
-            const criticalPackets = dbWriteQueue.filter(p => p.status === 'critical');
-            if (criticalPackets.length > 0 && criticalPackets.length <= 50) { // Limit to 50 at a time
-              PacketModel.insertMany(criticalPackets, { ordered: false })
-                .then(() => {
-                  // Remove written packets from queue
-                  criticalPackets.forEach(cp => {
-                    const index = dbWriteQueue.findIndex(p => p === cp);
-                    if (index !== -1) dbWriteQueue.splice(index, 1);
-                  });
-                })
-                .catch(err => {
-                  console.warn('[PACKET] Error writing critical packets immediately:', (err as Error)?.message);
-                  // Don't remove from queue if write failed - let batch writer handle it
-                });
-            }
-          } catch (err) {
-            console.warn('[PACKET] Error in critical packet immediate write:', (err as Error)?.message);
-            // Don't crash - continue processing
-          }
+        // CRITICAL: Save critical packets immediately to ensure they're never lost
+        if (packetData.status === 'critical') {
+          // Save critical packets immediately (non-blocking)
+          PacketModel.create(packetData).catch(err => {
+            // If immediate save fails, it's still in queue for batch write
+            console.warn('[PACKET] Immediate critical save failed, will retry in batch:', (err as Error)?.message);
+          });
         }
       }
       
-      // Create a mock promise for compatibility with existing code
+      // Create a promise that resolves with packet data for compatibility
       const savePromise = Promise.resolve({ _id: `temp_${Date.now()}_${Math.random()}`, ...packetData });
 
       // Enhanced ML prediction with auto-blocking and notifications
