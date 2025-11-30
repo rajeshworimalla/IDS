@@ -3,6 +3,7 @@ import { PacketCaptureService } from './services/packetCapture';
 import { authenticate } from './middleware/auth';
 import jwt from 'jsonwebtoken';
 import { config } from './config/env';
+import { registerActiveUser, unregisterActiveUser } from './workers/scheduler';
 
 let io: Server | null = null;
 const userCaptures: { [userId: string]: PacketCaptureService } = {};
@@ -97,7 +98,6 @@ export function initializeSocket(server: any) {
       socket.join(`user_${userId}`);
       
       // Register user as active for dashboard updates
-      const { registerActiveUser } = await import('./workers/scheduler');
       registerActiveUser(userId);
 
       socket.on('start-scanning', (data) => {
@@ -198,7 +198,6 @@ export function initializeSocket(server: any) {
         }
         
         // Unregister user from dashboard updates
-        const { unregisterActiveUser } = await import('./workers/scheduler');
         unregisterActiveUser(userId);
       });
 
