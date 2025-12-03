@@ -142,6 +142,18 @@ async function processQueue(): Promise<void> {
           if (item.type === 'intrusion') {
             io.to(`user_${item.userId}`).emit('intrusion-detected', item.data);
             console.log(`[NOTIFICATION-QUEUE] ✅ Sent intrusion alert for ${item.data.ip}:${item.data.attackType}`);
+            
+            // CRITICAL: Mark as emitted ONLY after successfully sending
+            // This ensures notifications aren't marked as "emitted" if they were throttled
+            try {
+              const { markAlertEmitted } = await import('../services/throttleManager');
+              const ip = item.data.ip || 'unknown';
+              const attackType = item.data.attackType || 'unknown';
+              markAlertEmitted(ip, attackType);
+            } catch (err: unknown) {
+              // If marking fails, log but don't crash
+              console.warn('[NOTIFICATION-QUEUE] Failed to mark alert as emitted:', (err as Error)?.message);
+            }
           } else if (item.type === 'ip-blocked') {
             io.to(`user_${item.userId}`).emit('ip-blocked', item.data);
             console.log(`[NOTIFICATION-QUEUE] ✅ Sent IP blocked notification for ${item.data.ip}`);

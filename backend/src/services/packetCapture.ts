@@ -21,7 +21,6 @@ import {
   isInGracePeriod,
   isAlreadyBlockedForAttackType,
   markBlockedForAttackType,
-  markAlertEmitted,
   hasEmittedAlertForAttackType,
   isInDetectionCooldown
 } from './throttleManager';
@@ -803,11 +802,9 @@ export class PacketCaptureService {
           }
           
           // CRITICAL: Emit ONE notification per attack type per IP (WORKER THREAD 5)
-          // Check if we've already notified for this attack type
-          if (isMalicious && finalConfidence > 0.3 && !hasEmittedAlertForAttackType(data.start_ip, attackType)) {
-            // Mark as emitted BEFORE sending (prevents duplicates)
-            markAlertEmitted(data.start_ip, attackType);
-            
+          // Let the notification queue worker handle throttling - don't check here
+          // This ensures notifications aren't marked as "emitted" until they're actually sent
+          if (isMalicious && finalConfidence > 0.3) {
             const { sendIntrusionAlertWorker } = await import('../workers/notificationWorker');
             sendIntrusionAlertWorker(userId, {
               type: 'intrusion',
@@ -942,8 +939,8 @@ export class PacketCaptureService {
             await sendIntrusionAlertWorker(this.userId, alertData).catch((err: unknown) => {
               console.error(`[PACKET] ❌ Failed to send notification for ${sourceIP}:`, (err as Error)?.message);
             });
-            markAlertEmitted(sourceIP, criticalAttackType); // Mark as notified for this attack type
-            console.log(`[PACKET] ✅ Notification marked as emitted for ${sourceIP}:${criticalAttackType}`);
+            // Don't mark as emitted here - let the notification queue worker mark it after successfully sending
+            // This prevents marking as "emitted" if the notification gets throttled by the queue
           };
           
           // Emit alert immediately (before auto-ban) - async, non-blocking
