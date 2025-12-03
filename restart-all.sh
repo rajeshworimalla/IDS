@@ -51,9 +51,9 @@ if pgrep -f "prediction_service.py" >/dev/null 2>&1; then
 fi
 
 # Kill demo site
-if pgrep -f "demo-site" >/dev/null 2>&1; then
+if pgrep -f "python.*http.server.*8080" >/dev/null 2>&1; then
     echo "   Stopping demo site..."
-    pkill -f "demo-site" || true
+    pkill -f "python.*http.server.*8080" || true
     sleep 1
     echo -e "${GREEN}   ✓ Demo site stopped${NC}"
 fi
@@ -63,6 +63,7 @@ echo "   Freeing ports..."
 sudo lsof -ti :5001 | xargs sudo kill -9 2>/dev/null || true
 sudo lsof -ti :5173 | xargs sudo kill -9 2>/dev/null || true
 sudo lsof -ti :3000 | xargs sudo kill -9 2>/dev/null || true
+sudo lsof -ti :8080 | xargs sudo kill -9 2>/dev/null || true
 sleep 1
 echo -e "${GREEN}   ✓ Ports freed${NC}"
 echo ""
@@ -236,7 +237,7 @@ fi
 echo ""
 
 # Step 7: Start frontend
-echo -e "${YELLOW}[7/7]${NC} Starting frontend..."
+echo -e "${YELLOW}[7/8]${NC} Starting frontend..."
 cd "$FRONTEND_DIR" || exit 1
 
 if [ ! -d "node_modules" ]; then
@@ -264,10 +265,41 @@ else
 fi
 echo ""
 
+# Step 8: Start demo site
+echo -e "${YELLOW}[8/8]${NC} Starting demo site..."
+DEMO_SITE_DIR="$SCRIPT_DIR/demo-site"
+cd "$DEMO_SITE_DIR" || exit 1
+
+# Kill any existing demo site server
+pkill -f "python.*http.server.*8080" >/dev/null 2>&1
+sleep 1
+
+# Get VM/WSL IP address
+VM_IP=$(hostname -I | awk '{print $1}')
+DEMO_PORT=8080
+
+echo "   Starting demo site HTTP server on port $DEMO_PORT..."
+python3 -m http.server $DEMO_PORT > /tmp/ids-demo-site.log 2>&1 &
+DEMO_PID=$!
+sleep 2
+
+if ps -p $DEMO_PID > /dev/null 2>&1; then
+    echo -e "${GREEN}   ✓ Demo site started${NC}"
+    echo "   Demo site URL: http://localhost:$DEMO_PORT"
+    if [ -n "$VM_IP" ]; then
+        echo "   Demo site URL (from Windows): http://$VM_IP:$DEMO_PORT"
+    fi
+else
+    echo "   ⚠ Demo site may not have started"
+    echo "   Check logs: cat /tmp/ids-demo-site.log"
+fi
+echo ""
+
 echo "========================================="
 echo -e "${GREEN}✓ All services restarted!${NC}"
 echo "========================================="
 echo "Backend logs: tail -f $LOG_FILE"
 echo "Frontend logs: tail -f /tmp/ids-frontend.log"
+echo "Demo site logs: tail -f /tmp/ids-demo-site.log"
 echo ""
 
